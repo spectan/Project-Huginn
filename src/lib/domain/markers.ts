@@ -65,6 +65,17 @@ export type NoteMarkerInput = {
   text: string;
 };
 
+export function formatTowerCreator(input: { makerName: string; makerNumber: string }): string {
+  const makerName = input.makerName.trim();
+  const makerNumber = input.makerNumber.trim();
+
+  if (makerNumber === "") {
+    return `${makerName} - ???`;
+  }
+
+  return `${makerName} ${makerNumber}`;
+}
+
 export function validateTowerInput(
   input: TowerInput,
   bounds: MapBounds
@@ -90,8 +101,8 @@ export function validateTowerInput(
   }
 
   const makerNumber = input.makerNumber.trim();
-  if (!/^\d{3}$/.test(makerNumber)) {
-    return err("Creator number must be exactly three digits");
+  if (makerNumber !== "" && !/^\d{3}$/.test(makerNumber)) {
+    return err("Creator number must be blank or exactly three digits");
   }
 
   return ok({

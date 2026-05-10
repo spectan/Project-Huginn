@@ -26,6 +26,8 @@ enum AuditAction {
   FAILED_LOGIN
   FAILED_AUTHORIZATION
   USER_APPROVED
+  USER_DELETED
+  USER_PASSWORD_CHANGED
   USER_REJECTED
   PERMISSION_CHANGED
   MAP_VIEW
@@ -123,8 +125,8 @@ model Tower {
   damageHundredths  Int
   makerName         String
   makerNumber       String
-  createdByUserId   String
-  createdBy         User      @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdByUserId   String?
+  createdBy         User?     @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUserId   String?
   updatedBy         User?     @relation("TowerUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   deletedAt         DateTime?
@@ -151,8 +153,8 @@ model Deed {
   east            Int
   south           Int
   founder         String
-  createdByUserId String
-  createdBy       User      @relation("DeedCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdByUserId String?
+  createdBy       User?     @relation("DeedCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUserId String?
   updatedBy       User?     @relation("DeedUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   deletedAt       DateTime?
@@ -176,8 +178,8 @@ model Note {
   title           String    @default("Untitled")
   category        String    @default("General")
   text            String
-  createdByUserId String
-  createdBy       User      @relation("NoteCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  createdByUserId String?
+  createdBy       User?     @relation("NoteCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUserId String?
   updatedBy       User?     @relation("NoteUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
   deletedAt       DateTime?

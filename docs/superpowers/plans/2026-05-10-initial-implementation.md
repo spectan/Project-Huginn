@@ -502,7 +502,7 @@ if (process.env.NODE_ENV !== "production") {
 Create `.env.example` with:
 
 ```dotenv
-DATABASE_URL="postgresql://wurm:wurm@localhost:5432/wurm_map_util?schema=public"
+DATABASE_URL="postgresql://<db-user>:<db-password>@localhost:5432/wurm_map_util?schema=public"
 AUTH_SECRET="replace-with-a-long-random-secret"
 MAP_STORAGE_PATH="/app/map-storage"
 INITIAL_ADMIN_USERNAME="admin"

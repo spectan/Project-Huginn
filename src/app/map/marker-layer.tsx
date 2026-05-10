@@ -5,30 +5,46 @@ import {
   TOWER_PLACEMENT_DISTANCE_TILES,
   TOWER_PROTECTION_DISTANCE_TILES
 } from "@/lib/domain/constants";
-import type { MarkerColors, MarkerVisibility, WorkspaceMarker } from "@/lib/markers/marker-types";
+import { formatTowerCreator } from "@/lib/domain/markers";
+import type {
+  MarkerColors,
+  MarkerOpacities,
+  MarkerVisibility,
+  WorkspaceMarker
+} from "@/lib/markers/marker-types";
 
 type MarkerLayerProps = {
   highlightedMarkerIds: Set<string>;
   markerColors: MarkerColors;
+  markerOpacities: MarkerOpacities;
   markers: WorkspaceMarker[];
   onContextMenu(marker: WorkspaceMarker, event: MouseEvent<HTMLElement>): void;
   onHoverEnd(): void;
   onHoverMove(marker: WorkspaceMarker, event: MouseEvent<HTMLElement>): void;
+  view: MarkerLayerView;
   visibility: MarkerVisibility;
+};
+
+type MarkerLayerView = {
+  x: number;
+  y: number;
+  zoom: number;
 };
 
 export function MarkerLayer({
   highlightedMarkerIds,
   markerColors,
+  markerOpacities,
   markers,
   onContextMenu,
   onHoverEnd,
   onHoverMove,
+  view,
   visibility
 }: MarkerLayerProps) {
   return (
-    <div className="map-marker-layer" aria-label="Map markers">
-      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, markerColors, onContextMenu, onHoverEnd, onHoverMove, visibility))}
+    <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
+      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, view, visibility))}
     </div>
   );
 }
@@ -37,9 +53,11 @@ function renderMarker(
   marker: WorkspaceMarker,
   highlightedMarkerIds: Set<string>,
   markerColors: MarkerColors,
+  markerOpacities: MarkerOpacities,
   onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<HTMLElement>) => void,
   onHoverEnd: () => void,
   onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<HTMLElement>) => void,
+  view: MarkerLayerView,
   visibility: MarkerVisibility
 ) {
   const isHighlighted = highlightedMarkerIds.has(marker.id);
@@ -56,24 +74,24 @@ function renderMarker(
             <span
               className="map-tower-zone map-tower-zone--placement"
               data-testid={`tower-placement-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, markerColors.towers, 0.08)}
+              style={getOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, markerColors.towers, 0.08, markerOpacities.towers, view)}
             />
             <span
               className="map-tower-zone map-tower-zone--protection"
               data-testid={`tower-protection-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, TOWER_PROTECTION_DISTANCE_TILES, markerColors.towers, 0.22)}
+              style={getOverlayStyle(marker.x, marker.y, TOWER_PROTECTION_DISTANCE_TILES, markerColors.towers, 0.22, markerOpacities.towers, view)}
             />
           </>
         ) : null}
         <button
-          aria-label={`Tower by ${marker.makerName} ${marker.makerNumber} at ${marker.x}, ${marker.y}`}
+          aria-label={`Tower by ${formatTowerCreator(marker)} at ${marker.x}, ${marker.y}`}
           className={isHighlighted ? "map-marker map-marker--tower map-search-match" : "map-marker map-marker--tower"}
           data-testid={`tower-center-${marker.id}`}
           onContextMenu={(event) => onContextMenu(marker, event)}
           onMouseEnter={(event) => onHoverMove(marker, event)}
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
-          style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.towers)}
+          style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.towers, markerOpacities.towers, view)}
           type="button"
         />
       </div>
@@ -86,10 +104,12 @@ function renderMarker(
     }
 
     const deedOverlayStyle = {
-      height: `${getDeedHeight(marker)}px`,
-      left: `${marker.x - marker.west}px`,
-      top: `${marker.y - marker.north}px`,
-      width: `${getDeedWidth(marker)}px`
+      ...getScreenRectStyle({
+        height: getDeedHeight(marker),
+        width: getDeedWidth(marker),
+        x: marker.x - marker.west,
+        y: marker.y - marker.north
+      }, view)
     };
 
     return (
@@ -104,13 +124,17 @@ function renderMarker(
               onMouseEnter={(event) => onHoverMove(marker, event)}
               onMouseLeave={onHoverEnd}
               onMouseMove={(event) => onHoverMove(marker, event)}
-              style={{ ...deedOverlayStyle, backgroundColor: colorWithAlpha(markerColors.deeds, 0.4) }}
+              style={{
+                ...deedOverlayStyle,
+                backgroundColor: colorWithAlpha(markerColors.deeds, 0.4),
+                opacity: percentageToOpacity(markerOpacities.deeds)
+              }}
               type="button"
             />
             <span
               className={isHighlighted ? "map-deed-center map-deed-center--visual map-search-match" : "map-deed-center map-deed-center--visual"}
               data-testid={`deed-center-${marker.id}`}
-              style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.deeds)}
+              style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.deeds, markerOpacities.deeds, view)}
             />
           </>
         ) : (
@@ -122,7 +146,7 @@ function renderMarker(
             onMouseEnter={(event) => onHoverMove(marker, event)}
             onMouseLeave={onHoverEnd}
             onMouseMove={(event) => onHoverMove(marker, event)}
-            style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.deeds)}
+            style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.deeds, markerOpacities.deeds, view)}
             type="button"
           />
         )}
@@ -144,41 +168,72 @@ function renderMarker(
       onMouseEnter={(event) => onHoverMove(marker, event)}
       onMouseLeave={onHoverEnd}
       onMouseMove={(event) => onHoverMove(marker, event)}
-      style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.notes)}
+      style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.notes, markerOpacities.notes, view)}
       type="button"
     />
   );
 }
 
-function getCenterTileStyle(x: number, y: number): CSSProperties {
+function getCenterTileStyle(x: number, y: number, view: MarkerLayerView): CSSProperties {
+  return getScreenRectStyle({
+    height: 3,
+    width: 3,
+    x: x - 1,
+    y: y - 1
+  }, view);
+}
+
+function getColoredCenterTileStyle(
+  x: number,
+  y: number,
+  color: string,
+  opacity: number,
+  view: MarkerLayerView
+): CSSProperties {
   return {
-    height: "3px",
-    left: `${x - 1}px`,
-    top: `${y - 1}px`,
-    width: "3px"
+    ...getCenterTileStyle(x, y, view),
+    backgroundColor: color,
+    opacity: percentageToOpacity(opacity)
   };
 }
 
-function getColoredCenterTileStyle(x: number, y: number, color: string): CSSProperties {
+function getOverlayStyle(
+  x: number,
+  y: number,
+  distance: number,
+  color: string,
+  alpha: number,
+  opacity: number,
+  view: MarkerLayerView
+): CSSProperties {
   return {
-    ...getCenterTileStyle(x, y),
-    backgroundColor: color
+    ...getSquareStyle(x, y, distance, view),
+    backgroundColor: colorWithAlpha(color, alpha),
+    opacity: percentageToOpacity(opacity)
   };
 }
 
-function getOverlayStyle(x: number, y: number, distance: number, color: string, alpha: number): CSSProperties {
-  return {
-    ...getSquareStyle(x, y, distance),
-    backgroundColor: colorWithAlpha(color, alpha)
-  };
+function getSquareStyle(x: number, y: number, distance: number, view: MarkerLayerView): CSSProperties {
+  return getScreenRectStyle({
+    height: distance * 2 + 1,
+    width: distance * 2 + 1,
+    x: x - distance,
+    y: y - distance
+  }, view);
 }
 
-function getSquareStyle(x: number, y: number, distance: number): CSSProperties {
+function getScreenRectStyle(
+  rect: { height: number; width: number; x: number; y: number },
+  view: MarkerLayerView
+): CSSProperties {
+  const left = view.x + rect.x * view.zoom;
+  const top = view.y + rect.y * view.zoom;
+
   return {
-    height: `${distance * 2 + 1}px`,
-    left: `${x - distance}px`,
-    top: `${y - distance}px`,
-    width: `${distance * 2 + 1}px`
+    height: formatPixels(rect.height * view.zoom),
+    left: formatPixels(left),
+    top: formatPixels(top),
+    width: formatPixels(rect.width * view.zoom)
   };
 }
 
@@ -196,10 +251,18 @@ function colorWithAlpha(color: string, alpha: number): string {
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
+function percentageToOpacity(value: number): number {
+  return Math.min(100, Math.max(0, value)) / 100;
+}
+
 function getDeedWidth(marker: Extract<WorkspaceMarker, { type: "deed" }>): number {
   return marker.west + marker.east + 1;
 }
 
 function getDeedHeight(marker: Extract<WorkspaceMarker, { type: "deed" }>): number {
   return marker.north + marker.south + 1;
+}
+
+function formatPixels(value: number): string {
+  return `${Number(value.toFixed(4))}px`;
 }

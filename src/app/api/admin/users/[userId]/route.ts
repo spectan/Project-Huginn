@@ -56,7 +56,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
     );
   }
 
-  return NextResponse.json({ user: result.value });
+  return NextResponse.json({ userId: result.value.id });
 }
 
 async function readJson(request: Request): Promise<unknown> {

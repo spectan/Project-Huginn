@@ -3,6 +3,7 @@ import {
   listAdminUsers,
   removeAdminUser,
   updateAdminUser,
+  updateAdminUserPassword,
   type AdminUserDependencies
 } from "./users";
 
@@ -27,6 +28,7 @@ function createDependencies(): AdminUserDependencies {
     createdAt: Date;
     id: string;
     isAdmin: boolean;
+    passwordHash: string;
     username: string;
   }>([
     ["user-1", {
@@ -35,11 +37,13 @@ function createDependencies(): AdminUserDependencies {
       createdAt: new Date("2026-05-10T00:00:00.000Z"),
       id: "user-1",
       isAdmin: false,
+      passwordHash: "old-hash",
       username: "Mako"
     }]
   ]);
 
   return {
+    hashPassword: async (password) => `hashed:${password}`,
     listUsers: async () => Array.from(users.values()),
     recordAudit: async () => undefined,
     removeUser: async ({ userId }) => {
@@ -49,11 +53,19 @@ function createDependencies(): AdminUserDependencies {
         return null;
       }
 
+      users.delete(userId);
+      return user;
+    },
+    updateUserPassword: async ({ passwordHash, userId }) => {
+      const user = users.get(userId);
+
+      if (user === undefined) {
+        return null;
+      }
+
       const updated = {
         ...user,
-        accessLevel: "NONE" as const,
-        approvalStatus: "REJECTED" as const,
-        isAdmin: false
+        passwordHash
       };
       users.set(userId, updated);
       return updated;
@@ -148,7 +160,79 @@ describe("admin user management", () => {
     });
   });
 
-  it("removes an account by rejecting it and clearing privileges", async () => {
+  it("updates account passwords for admins and audits without password metadata", async () => {
+    const audits: unknown[] = [];
+    const passwordUpdates: unknown[] = [];
+    dependencies = {
+      ...dependencies,
+      recordAudit: async (input) => {
+        audits.push(input);
+      },
+      updateUserPassword: async (input) => {
+        passwordUpdates.push(input);
+        return {
+          accessLevel: "READ",
+          approvalStatus: "APPROVED",
+          createdAt: new Date("2026-05-10T00:00:00.000Z"),
+          id: input.userId,
+          isAdmin: false,
+          passwordHash: input.passwordHash,
+          username: "Mako"
+        };
+      }
+    };
+
+    const result = await updateAdminUserPassword({
+      actor: adminActor,
+      password: "new-secure-password",
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        id: "user-1",
+        username: "Mako"
+      }
+    });
+    expect(passwordUpdates).toEqual([
+      {
+        passwordHash: "hashed:new-secure-password",
+        userId: "user-1"
+      }
+    ]);
+    expect(audits).toContainEqual({
+      action: "USER_PASSWORD_CHANGED",
+      actorUserId: "admin-id",
+      metadata: {
+        username: "Mako"
+      },
+      targetId: "user-1",
+      targetType: "USER"
+    });
+  });
+
+  it("rejects non-admin and invalid account password changes", async () => {
+    await expect(updateAdminUserPassword({
+      actor: writerActor,
+      password: "new-secure-password",
+      userId: "user-1"
+    }, dependencies)).resolves.toEqual({
+      ok: false,
+      error: "Admin access is required"
+    });
+
+    await expect(updateAdminUserPassword({
+      actor: adminActor,
+      password: "too-short",
+      userId: "user-1"
+    }, dependencies)).resolves.toEqual({
+      ok: false,
+      error: "Password must be 12-128 characters"
+    });
+  });
+
+  it("removes an account by deleting it from the user list", async () => {
     const result = await removeAdminUser({
       actor: adminActor,
       userId: "user-1"
@@ -157,10 +241,17 @@ describe("admin user management", () => {
     expect(result).toMatchObject({
       ok: true,
       value: {
-        accessLevel: "NONE",
-        approvalStatus: "REJECTED",
-        isAdmin: false,
+        id: "user-1",
         username: "Mako"
+      }
+    });
+
+    const users = await listAdminUsers({ actor: adminActor }, dependencies);
+
+    expect(users).toEqual({
+      ok: true,
+      value: {
+        users: []
       }
     });
   });

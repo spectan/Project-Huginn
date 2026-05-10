@@ -126,6 +126,7 @@ Expected map workspace capabilities:
 - Add towers, deeds, and notes from map context menus when the user has write access.
 - Edit or delete markers from existing marker context menus when the user has write access.
 - Show tower square overlays and deed size overlays.
+- Highlight terrain/resource tile types such as clay, tar, peat, cave entrances, roads, and other WurmMaps-style tile categories from a standalone Tile Highlighting dropdown. The default highlight color is bright purple, and the visual highlight outlines matching tile regions by coloring the surrounding tiles.
 - Let users hide overlays or marker categories from the account menu without changing shared marker data.
 - Provide a top-left search field that filters visible markers to matching towers, deeds, or notes and highlights matching marker centers with a radiating glow.
 - Keep the map itself as the primary surface, with only a quiet account control visible by default.

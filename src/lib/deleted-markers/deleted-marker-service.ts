@@ -1,4 +1,5 @@
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
+import { formatTowerCreator } from "@/lib/domain/markers";
 import {
   canRestoreDeletedMarkers,
   type UserAccess
@@ -238,7 +239,7 @@ function getLimit(limit: number | undefined): number {
 }
 
 function serializeDeletedTower(marker: DeletedTowerRecord): DeletedMarkerSummary {
-  return serializeDeletedMarker(marker, "tower", `${marker.makerName} ${marker.makerNumber}`);
+  return serializeDeletedMarker(marker, "tower", formatTowerCreator(marker));
 }
 
 function serializeDeletedDeed(marker: DeletedDeedRecord): DeletedMarkerSummary {

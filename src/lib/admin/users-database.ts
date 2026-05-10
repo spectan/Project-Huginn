@@ -1,3 +1,4 @@
+import argon2 from "argon2";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { AdminUserDependencies } from "./users";
@@ -13,6 +14,7 @@ const USER_SELECT = {
 
 export function createAdminUserDependencies(): AdminUserDependencies {
   return {
+    hashPassword: async (password) => argon2.hash(password),
     listUsers: async () => prisma.user.findMany({
       orderBy: [
         { approvalStatus: "asc" },
@@ -34,6 +36,28 @@ export function createAdminUserDependencies(): AdminUserDependencies {
     },
     removeUser: async ({ userId }) => {
       const existingUser = await prisma.user.findUnique({
+        select: USER_SELECT,
+        where: { id: userId }
+      });
+
+      if (existingUser === null) {
+        return null;
+      }
+
+      const [, deletedUser] = await prisma.$transaction([
+        prisma.session.deleteMany({
+          where: { userId }
+        }),
+        prisma.user.delete({
+          select: USER_SELECT,
+          where: { id: userId }
+        })
+      ]);
+
+      return deletedUser;
+    },
+    updateUserPassword: async ({ passwordHash, userId }) => {
+      const existingUser = await prisma.user.findUnique({
         select: { id: true },
         where: { id: userId }
       });
@@ -47,13 +71,7 @@ export function createAdminUserDependencies(): AdminUserDependencies {
           where: { userId }
         }),
         prisma.user.update({
-          data: {
-            accessLevel: "NONE",
-            approvalStatus: "REJECTED",
-            approvedAt: null,
-            approvedByUserId: null,
-            isAdmin: false
-          },
+          data: { passwordHash },
           select: USER_SELECT,
           where: { id: userId }
         })

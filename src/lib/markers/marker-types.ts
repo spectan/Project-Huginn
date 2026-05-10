@@ -49,15 +49,35 @@ export type MarkerType = WorkspaceMarker["type"];
 
 export type MarkerVisibility = {
   deeds: boolean;
+  deedNames: boolean;
+  missionGrid: boolean;
   notes: boolean;
   overlays: boolean;
+  sectorGrid: boolean;
   towers: boolean;
+  towerNames: boolean;
 };
 
 export type MarkerColors = {
   deeds: string;
+  missionGrid: string;
   notes: string;
+  sectorGrid: string;
   towers: string;
+};
+
+export type MarkerOpacities = {
+  deeds: number;
+  missionGrid: number;
+  notes: number;
+  sectorGrid: number;
+  towers: number;
+};
+
+export type TileHighlightSettings = {
+  color: string;
+  opacity: number;
+  selection: string;
 };
 
 export type NoteCategory = {

@@ -11,12 +11,22 @@ import {
   type CSSProperties,
   type FormEvent
 } from "react";
+import { formatTowerCreator } from "@/lib/domain/markers";
 import { canReadMap, canWriteMarkers } from "@/lib/domain/permissions";
+import {
+  TILE_HIGHLIGHT_GROUPS,
+  buildTileHighlightOutlineMask,
+  getTileHighlightTargetColors,
+  isTileHighlightSelection,
+  parseHexRgb
+} from "@/lib/domain/tile-highlighting";
 import type {
   MarkerColors,
+  MarkerOpacities,
   MarkerType,
   MarkerVisibility,
   NoteCategory,
+  TileHighlightSettings,
   WorkspaceMap,
   WorkspaceMarker
 } from "@/lib/markers/marker-types";
@@ -26,22 +36,46 @@ import { MarkerLayer } from "./marker-layer";
 
 const FALLBACK_MAP_SIZE_PX = 2048;
 const MAX_ZOOM = 64;
+const CLICK_DRAG_THRESHOLD_PX = 4;
 const ZOOM_STEP = 1.2;
 const SERVER_VIEWPORT_SNAPSHOT = `${FALLBACK_MAP_SIZE_PX}x${FALLBACK_MAP_SIZE_PX}`;
+const SECTOR_GRID_LEFT_OFFSET_PX = -16;
+const SECTOR_GRID_TOP_OFFSET_PX = 18;
+const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
+const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
 const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
   deeds: true,
+  deedNames: false,
+  missionGrid: false,
   notes: true,
   overlays: true,
-  towers: true
+  sectorGrid: false,
+  towers: true,
+  towerNames: false
 };
 const DEFAULT_MARKER_COLORS: MarkerColors = {
   deeds: "#facc15",
+  missionGrid: "#22c55e",
   notes: "#ff2bd6",
+  sectorGrid: "#ffffff",
   towers: "#ffffff"
+};
+const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
+  deeds: 100,
+  missionGrid: 100,
+  notes: 100,
+  sectorGrid: 100,
+  towers: 100
+};
+const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
+  color: "#c000ff",
+  opacity: 75,
+  selection: ""
 };
 const DEFAULT_NOTE_CATEGORIES: NoteCategory[] = [
   { id: "default-category-general", name: "General" }
 ];
+const tileSourceImageDataCache = new Map<string, Promise<ImageData>>();
 
 type ViewState = {
   x: number;
@@ -50,12 +84,28 @@ type ViewState = {
 };
 
 type DragState = {
+  hasMoved: boolean;
   pointerId: number;
   startClientX: number;
   startClientY: number;
   startX: number;
   startY: number;
   startZoom: number;
+};
+
+type FloatingPanelPosition = {
+  left: number;
+  top: number;
+};
+
+type FloatingPanelDragState = {
+  height: number;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startLeft: number;
+  startTop: number;
+  width: number;
 };
 
 type ViewportSize = {
@@ -110,12 +160,17 @@ export default function MapWorkspace({
 }: MapWorkspaceProps) {
   const viewport = useViewportSize();
   const mapSize = getMapSize(map);
+  const urlSearchSnapshot = useUrlSearchSnapshot();
   const fittedView = useMemo(() => getFitView(viewport, mapSize), [mapSize, viewport]);
-  const initialUrlCoordinate = useMemo(() => getInitialUrlCoordinate(map), [map]);
-  const initialCoordinateView = useMemo(
-    () => initialUrlCoordinate === null ? null : getCoordinateView(initialUrlCoordinate, viewport, mapSize),
-    [initialUrlCoordinate, mapSize, viewport]
+  const urlCoordinate = useMemo(
+    () => getUrlCoordinate(map, urlSearchSnapshot),
+    [map, urlSearchSnapshot]
   );
+  const urlCoordinateView = useMemo(
+    () => urlCoordinate === null ? null : getCoordinateView(urlCoordinate, viewport, mapSize),
+    [mapSize, urlCoordinate, viewport]
+  );
+  const [selectedCoordinate, setSelectedCoordinate] = useState<MapCoordinate | null>(null);
   const [manualView, setManualView] = useState<ViewState | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -124,13 +179,15 @@ export default function MapWorkspace({
   const [formError, setFormError] = useState<string | null>(null);
   const [markerVisibility, setMarkerVisibility] = useState<MarkerVisibility>(DEFAULT_MARKER_VISIBILITY);
   const [markerColors, setMarkerColors] = useState<MarkerColors>(DEFAULT_MARKER_COLORS);
+  const [markerOpacities, setMarkerOpacities] = useState<MarkerOpacities>(DEFAULT_MARKER_OPACITIES);
+  const [tileHighlight, setTileHighlight] = useState<TileHighlightSettings>(DEFAULT_TILE_HIGHLIGHT);
   const [hoveredMarker, setHoveredMarker] = useState<HoveredMarkerState | null>(null);
   const [noteCategories, setNoteCategories] = useState<NoteCategory[]>(
     Array.from(initialNoteCategories.length === 0 ? DEFAULT_NOTE_CATEGORIES : initialNoteCategories)
   );
   const [searchQuery, setSearchQuery] = useState("");
   const dragRef = useRef<DragState | null>(null);
-  const view = manualView ?? initialCoordinateView ?? fittedView;
+  const view = manualView ?? urlCoordinateView ?? fittedView;
   const markers = localMarkers ?? initialMarkers;
   const searchTerm = searchQuery.trim().toLowerCase();
   const displayedMarkers = useMemo(
@@ -143,6 +200,9 @@ export default function MapWorkspace({
     () => searchTerm.length === 0 ? new Set<string>() : new Set(displayedMarkers.map((marker) => marker.id)),
     [displayedMarkers, searchTerm.length]
   );
+  const hiddenDeedLabelId = hoveredMarker?.marker.type === "deed" ? hoveredMarker.marker.id : null;
+  const hiddenTowerLabelId = hoveredMarker?.marker.type === "tower" ? hoveredMarker.marker.id : null;
+  const renderedSelectedCoordinate = selectedCoordinate ?? urlCoordinate;
   const canViewMap = map !== null && viewer !== null && canReadMap({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
@@ -179,6 +239,11 @@ export default function MapWorkspace({
     setNoteCategories((current) => upsertNoteCategory(current, body.category));
     return body.category;
   }, [map]);
+
+  const selectCoordinate = useCallback((coordinate: MapCoordinate) => {
+    setSelectedCoordinate(coordinate);
+    updateBrowserCoordinate(coordinate);
+  }, []);
 
   const zoomAt = useCallback((nextZoom: number, clientX: number, clientY: number) => {
     setManualView((currentManualView) => {
@@ -221,6 +286,7 @@ export default function MapWorkspace({
       setContextMenu(null);
       event.currentTarget.setPointerCapture?.(event.pointerId);
       dragRef.current = {
+        hasMoved: false,
         pointerId: event.pointerId,
         startClientX: event.clientX,
         startClientY: event.clientY,
@@ -246,6 +312,7 @@ export default function MapWorkspace({
       }
 
       event.preventDefault();
+      selectCoordinate(coordinate);
       setContextMenu({
         mapX: coordinate.x,
         mapY: coordinate.y,
@@ -254,7 +321,7 @@ export default function MapWorkspace({
         screenY: event.clientY
       });
     },
-    [canViewMap, map, view]
+    [canViewMap, map, selectCoordinate, view]
   );
 
   const handleMarkerContextMenu = useCallback(
@@ -265,6 +332,7 @@ export default function MapWorkspace({
 
       event.preventDefault();
       event.stopPropagation();
+      selectCoordinate({ x: marker.x, y: marker.y });
       setContextMenu({
         mapX: marker.x,
         mapY: marker.y,
@@ -274,7 +342,7 @@ export default function MapWorkspace({
         screenY: event.clientY
       });
     },
-    [canWriteMapMarkers, displayedMarkers, markerVisibility]
+    [canWriteMapMarkers, displayedMarkers, markerVisibility, selectCoordinate]
   );
 
   useEffect(() => {
@@ -285,9 +353,18 @@ export default function MapWorkspace({
         return;
       }
 
+      const deltaX = event.clientX - drag.startClientX;
+      const deltaY = event.clientY - drag.startClientY;
+      const hasMoved = drag.hasMoved || Math.hypot(deltaX, deltaY) > CLICK_DRAG_THRESHOLD_PX;
+      drag.hasMoved = hasMoved;
+
+      if (!hasMoved) {
+        return;
+      }
+
       setManualView({
-        x: drag.startX + event.clientX - drag.startClientX,
-        y: drag.startY + event.clientY - drag.startClientY,
+        x: drag.startX + deltaX,
+        y: drag.startY + deltaY,
         zoom: drag.startZoom
       });
     }
@@ -301,6 +378,20 @@ export default function MapWorkspace({
 
       dragRef.current = null;
       setIsDragging(false);
+
+      if (drag.hasMoved || !canViewMap || map === null) {
+        return;
+      }
+
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, {
+        x: drag.startX,
+        y: drag.startY,
+        zoom: drag.startZoom
+      });
+
+      if (isInsideMap(coordinate, map)) {
+        selectCoordinate(coordinate);
+      }
     }
 
     window.addEventListener("pointermove", handlePointerMove);
@@ -312,7 +403,7 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, []);
+  }, [canViewMap, map, selectCoordinate]);
 
   const stageStyle = useMemo(
     () => ({
@@ -356,28 +447,58 @@ export default function MapWorkspace({
             unoptimized
             width={map.widthPx}
           />
+          <TileHighlightOverlay
+            imageStyle={imageStyle}
+            map={map}
+            tileHighlight={tileHighlight}
+          />
           <div
             className="map-stage"
             data-testid="map-stage"
             data-zoom={formatZoom(view.zoom)}
             style={stageStyle}
           >
-            <MarkerLayer
-              highlightedMarkerIds={highlightedMarkerIds}
-              markerColors={markerColors}
-              markers={displayedMarkers}
-              onContextMenu={handleMarkerContextMenu}
-              onHoverEnd={() => setHoveredMarker(null)}
-              onHoverMove={(marker, event) => {
-                setHoveredMarker({
-                  marker,
-                  screenX: event.clientX,
-                  screenY: event.clientY
-                });
-              }}
-              visibility={markerVisibility}
-            />
+            {markerVisibility.sectorGrid ? (
+              <SectorGridOverlay
+                color={markerColors.sectorGrid}
+                mapSize={mapSize}
+                opacity={markerOpacities.sectorGrid}
+              />
+            ) : null}
+            {markerVisibility.missionGrid ? (
+              <MissionGridOverlay color={markerColors.missionGrid} opacity={markerOpacities.missionGrid} />
+            ) : null}
           </div>
+          <MarkerLayer
+            highlightedMarkerIds={highlightedMarkerIds}
+            markerColors={markerColors}
+            markerOpacities={markerOpacities}
+            markers={displayedMarkers}
+            onContextMenu={handleMarkerContextMenu}
+            onHoverEnd={() => setHoveredMarker(null)}
+            onHoverMove={(marker, event) => {
+              setHoveredMarker({
+                marker,
+                screenX: event.clientX,
+                screenY: event.clientY
+              });
+            }}
+            view={view}
+            visibility={markerVisibility}
+          />
+          <DeedNameLayer
+            hiddenDeedLabelId={hiddenDeedLabelId}
+            markers={displayedMarkers}
+            view={view}
+            visibility={markerVisibility}
+          />
+          <TowerNameLayer
+            hiddenTowerLabelId={hiddenTowerLabelId}
+            markers={displayedMarkers}
+            view={view}
+            visibility={markerVisibility}
+          />
+          <SelectedCoordinateReticule coordinate={renderedSelectedCoordinate} view={view} />
         </section>
       ) : (
         <section className="map-locked" aria-label="Map access required" />
@@ -393,10 +514,6 @@ export default function MapWorkspace({
           <MapContextMenu
             canWrite={canWriteMapMarkers}
             contextMenu={contextMenu}
-            onCopyLink={() => {
-              setContextMenu(null);
-              void copyCoordinateLink({ x: contextMenu.mapX, y: contextMenu.mapY });
-            }}
             onCreate={(markerType) => {
               setFormError(null);
               setDialog({
@@ -411,6 +528,7 @@ export default function MapWorkspace({
         ) : (
           <MarkerContextMenu
             contextMenu={contextMenu}
+            markerColors={markerColors}
             onCreate={(markerType) => {
               setFormError(null);
               setDialog({
@@ -450,13 +568,23 @@ export default function MapWorkspace({
         />
       ) : null}
       <div className="map-top-controls">
+        {canViewMap ? (
+          <TileHighlightControl
+            onTileHighlightChange={setTileHighlight}
+            tileHighlight={tileHighlight}
+          />
+        ) : null}
         <AccountOverlay viewer={viewer} />
         {canViewMap ? (
           <MapSettingsOverlay
             markerColors={markerColors}
+            markerOpacities={markerOpacities}
             markerVisibility={markerVisibility}
+            tileHighlight={tileHighlight}
             onMarkerColorsChange={setMarkerColors}
+            onMarkerOpacitiesChange={setMarkerOpacities}
             onMarkerVisibilityChange={setMarkerVisibility}
+            onTileHighlightChange={setTileHighlight}
           />
         ) : null}
       </div>
@@ -467,12 +595,10 @@ export default function MapWorkspace({
 function MapContextMenu({
   canWrite,
   contextMenu,
-  onCopyLink,
   onCreate
 }: {
   canWrite: boolean;
   contextMenu: Extract<ContextMenuState, { mode: "map" }>;
-  onCopyLink(): void;
   onCreate(markerType: MarkerType): void;
 }) {
   return (
@@ -483,7 +609,6 @@ function MapContextMenu({
       style={{ left: `${contextMenu.screenX}px`, top: `${contextMenu.screenY}px` }}
     >
       <p>{contextMenu.mapX}, {contextMenu.mapY}</p>
-      <button onClick={onCopyLink} role="menuitem" type="button">Copy Link</button>
       {canWrite ? (
         <>
           <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
@@ -518,20 +643,327 @@ function SearchOverlay({
   );
 }
 
+function TileHighlightControl({
+  onTileHighlightChange,
+  tileHighlight
+}: {
+  onTileHighlightChange(settings: TileHighlightSettings): void;
+  tileHighlight: TileHighlightSettings;
+}) {
+  const panelRef = useRef<HTMLFieldSetElement | null>(null);
+  const dragRef = useRef<FloatingPanelDragState | null>(null);
+  const [position, setPosition] = useState<FloatingPanelPosition | null>(null);
+
+  const handleDragStart = useCallback((event: React.PointerEvent<HTMLLegendElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const panelRect = panelRef.current?.getBoundingClientRect();
+    dragRef.current = {
+      height: panelRect?.height && panelRect.height > 0 ? panelRect.height : 88,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startLeft: panelRect?.left ?? 0,
+      startTop: panelRect?.top ?? 0,
+      width: panelRect?.width && panelRect.width > 0 ? panelRect.width : 220
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePanelDrag(event: PointerEvent) {
+      const drag = dragRef.current;
+
+      if (drag === null || event.pointerId !== drag.pointerId) {
+        return;
+      }
+
+      setPosition(clampFloatingPanelPosition(
+        drag.startLeft + event.clientX - drag.startClientX,
+        drag.startTop + event.clientY - drag.startClientY,
+        drag.width,
+        drag.height
+      ));
+    }
+
+    function endPanelDrag(event: PointerEvent) {
+      const drag = dragRef.current;
+
+      if (drag !== null && event.pointerId === drag.pointerId) {
+        dragRef.current = null;
+      }
+    }
+
+    window.addEventListener("pointermove", handlePanelDrag);
+    window.addEventListener("pointerup", endPanelDrag);
+    window.addEventListener("pointercancel", endPanelDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePanelDrag);
+      window.removeEventListener("pointerup", endPanelDrag);
+      window.removeEventListener("pointercancel", endPanelDrag);
+    };
+  }, []);
+
+  return (
+    <fieldset
+      className={position === null ? "map-tile-highlight-controls" : "map-tile-highlight-controls is-positioned"}
+      aria-label="Tile Highlighting"
+      ref={panelRef}
+      style={getFloatingPanelStyle(position)}
+    >
+      <legend
+        className="map-tile-highlight-title"
+        data-testid="tile-highlight-drag-handle"
+        onPointerDown={handleDragStart}
+      >
+        Tile Highlighting
+      </legend>
+      <label className="map-tile-highlight-select">
+        <span>Tile Highlighting</span>
+        <select
+          aria-label="Tile Highlighting"
+          onChange={(event) => onTileHighlightChange({
+            ...tileHighlight,
+            selection: event.target.value
+          })}
+          value={tileHighlight.selection}
+        >
+          <option value="">None</option>
+          {TILE_HIGHLIGHT_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.options.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+    </fieldset>
+  );
+}
+
+function SectorGridOverlay({
+  color,
+  mapSize,
+  opacity
+}: {
+  color: string;
+  mapSize: { heightPx: number; widthPx: number };
+  opacity: number;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      className="map-sector-grid"
+      data-testid="sector-grid-overlay"
+      style={getSectorGridStyle(mapSize, color, opacity)}
+    >
+      {SECTOR_GRID_ROWS.flatMap((row) => SECTOR_GRID_COLUMNS.map((column) => (
+        <span key={`${row}${column}`}>{row}{column}</span>
+      )))}
+    </div>
+  );
+}
+
+function MissionGridOverlay({ color, opacity }: { color: string; opacity: number }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="map-mission-grid"
+      data-testid="mission-grid-overlay"
+      style={getMissionGridStyle(color, opacity)}
+    />
+  );
+}
+
+function DeedNameLayer({
+  hiddenDeedLabelId,
+  markers,
+  view,
+  visibility
+}: {
+  hiddenDeedLabelId: string | null;
+  markers: WorkspaceMarker[];
+  view: ViewState;
+  visibility: MarkerVisibility;
+}) {
+  if (!visibility.deeds || !visibility.deedNames) {
+    return null;
+  }
+
+  return (
+    <div aria-label="Deed names" className="map-deed-name-layer">
+      {markers.map((marker) => {
+        if (marker.type !== "deed" || marker.id === hiddenDeedLabelId) {
+          return null;
+        }
+
+        return (
+          <span
+            className="map-deed-name-label"
+            data-testid={`deed-name-label-${marker.id}`}
+            key={marker.id}
+            style={getDeedNameLabelStyle(marker, view)}
+          >
+            {marker.name}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function TowerNameLayer({
+  hiddenTowerLabelId,
+  markers,
+  view,
+  visibility
+}: {
+  hiddenTowerLabelId: string | null;
+  markers: WorkspaceMarker[];
+  view: ViewState;
+  visibility: MarkerVisibility;
+}) {
+  if (!visibility.towers || !visibility.towerNames) {
+    return null;
+  }
+
+  return (
+    <div aria-label="Tower names" className="map-deed-name-layer">
+      {markers.map((marker) => {
+        if (marker.type !== "tower" || marker.id === hiddenTowerLabelId) {
+          return null;
+        }
+
+        return (
+          <span
+            className="map-deed-name-label map-tower-name-label"
+            data-testid={`tower-name-label-${marker.id}`}
+            key={marker.id}
+            style={getTowerNameLabelStyle(marker, view)}
+          >
+            {formatTowerCreator(marker)}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function SelectedCoordinateReticule({
+  coordinate,
+  view
+}: {
+  coordinate: MapCoordinate | null;
+  view: ViewState;
+}) {
+  if (coordinate === null) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-label={`Selected coordinate ${coordinate.x}, ${coordinate.y}`}
+      className="map-selected-reticule"
+      data-testid="selected-coordinate-reticule"
+      style={getScreenCoordinateStyle(coordinate, view)}
+    />
+  );
+}
+
+function TileHighlightOverlay({
+  imageStyle,
+  map,
+  tileHighlight
+}: {
+  imageStyle: CSSProperties;
+  map: WorkspaceMap;
+  tileHighlight: TileHighlightSettings;
+}) {
+  const [overlay, setOverlay] = useState<{ key: string; src: string } | null>(null);
+  const selection = tileHighlight.selection;
+  const overlayKey = isTileHighlightSelection(selection)
+    ? getTileHighlightOverlayKey(map, selection, tileHighlight.color)
+    : "";
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!isTileHighlightSelection(selection)) {
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void loadTileSourceImageData(map).then((sourceImageData) => {
+        if (isCancelled) {
+          return;
+        }
+
+        const mask = buildTileHighlightOutlineMask(
+          sourceImageData.data,
+          map.widthPx,
+          map.heightPx,
+          getTileHighlightTargetColors(selection),
+          parseHexRgb(tileHighlight.color)
+        );
+        const nextOverlaySrc = renderTileHighlightDataUrl(mask, map);
+
+        if (!isCancelled) {
+          setOverlay({
+            key: overlayKey,
+            src: nextOverlaySrc
+          });
+        }
+      }).catch(() => {
+        if (!isCancelled) {
+          setOverlay(null);
+        }
+      });
+    }, 0);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [map, overlayKey, selection, tileHighlight.color]);
+
+  if (!isTileHighlightSelection(selection) || overlay === null || overlay.key !== overlayKey) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      className="map-tile-highlight-overlay"
+      data-testid="tile-highlight-overlay"
+      style={{
+        ...imageStyle,
+        backgroundImage: `url("${overlay.src}")`,
+        opacity: tileHighlight.opacity / 100
+      }}
+    />
+  );
+}
+
 function MarkerContextMenu({
   contextMenu,
+  markerColors,
   onCreate,
   onDelete,
   onEdit
 }: {
   contextMenu: Extract<ContextMenuState, { mode: "marker" }>;
+  markerColors: MarkerColors;
   onCreate(markerType: MarkerType): void;
   onDelete(marker: WorkspaceMarker): void;
   onEdit(marker: WorkspaceMarker): void;
 }) {
-  const hasStack = contextMenu.markers.length > 1;
-  const firstMarker = contextMenu.markers[0] ?? null;
-
   return (
     <div
       aria-label="Marker actions"
@@ -539,45 +971,91 @@ function MarkerContextMenu({
       role="menu"
       style={{ left: `${contextMenu.screenX}px`, top: `${contextMenu.screenY}px` }}
     >
-      {hasStack ? (
-        <>
-          <p>{contextMenu.markers.length} markers at {contextMenu.mapX}, {contextMenu.mapY}</p>
-          <div className="map-context-marker-list">
-            {contextMenu.markers.map((marker) => {
-              const label = getMarkerAtCoordinateLabel(marker);
-
-              return (
-                <div className="map-context-marker-row" key={marker.id}>
-                  <span>{label}</span>
-                  <div>
-                    <button onClick={() => onEdit(marker)} role="menuitem" type="button">
-                      Edit {label}
-                    </button>
-                    <button onClick={() => onDelete(marker)} role="menuitem" type="button">
-                      Delete {label}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      ) : firstMarker !== null ? (
-        <>
-          <p>{getMarkerLabel(firstMarker)}</p>
-          <button onClick={() => onEdit(firstMarker)} role="menuitem" type="button">
-            Edit
-          </button>
-          <button onClick={() => onDelete(firstMarker)} role="menuitem" type="button">
-            Delete
-          </button>
-        </>
+      {contextMenu.markers.length > 0 ? (
+        <MarkerContextRows
+          markerColors={markerColors}
+          markers={contextMenu.markers}
+          onDelete={onDelete}
+          onEdit={onEdit}
+        />
       ) : null}
       <div className="map-context-menu-section">
         <p>Add at {contextMenu.mapX}, {contextMenu.mapY}</p>
         <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
         <button onClick={() => onCreate("deed")} role="menuitem" type="button">Deed</button>
         <button onClick={() => onCreate("note")} role="menuitem" type="button">Note</button>
+      </div>
+    </div>
+  );
+}
+
+function MarkerContextRows({
+  markerColors,
+  markers,
+  onDelete,
+  onEdit
+}: {
+  markerColors: MarkerColors;
+  markers: WorkspaceMarker[];
+  onDelete(marker: WorkspaceMarker): void;
+  onEdit(marker: WorkspaceMarker): void;
+}) {
+  const firstMarker = markers[0] ?? null;
+
+  if (firstMarker === null) {
+    return null;
+  }
+
+  return (
+    <>
+      <p>
+        {markers.length} {markers.length === 1 ? "item" : "items"} at {firstMarker.x}, {firstMarker.y}
+      </p>
+      <div className="map-context-marker-list">
+        {markers.map((marker) => (
+          <MarkerContextRow
+            key={marker.id}
+            marker={marker}
+            markerColors={markerColors}
+            onDelete={onDelete}
+            onEdit={onEdit}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+function MarkerContextRow({
+  marker,
+  markerColors,
+  onDelete,
+  onEdit
+}: {
+  marker: WorkspaceMarker;
+  markerColors: MarkerColors;
+  onDelete(marker: WorkspaceMarker): void;
+  onEdit(marker: WorkspaceMarker): void;
+}) {
+  const label = getMarkerAtCoordinateLabel(marker);
+
+  return (
+    <div
+      className="map-context-marker-row"
+      data-testid={`context-marker-row-${marker.id}`}
+      style={getMarkerContextRowStyle(marker, markerColors)}
+    >
+      <span className="map-context-marker-copy">
+        <span className="map-context-marker-title">{getMarkerContextTitle(marker)}</span>
+        <span className="map-context-marker-meta">{getMarkerContextMeta(marker)}</span>
+      </span>
+      <div className="map-context-marker-actions">
+        <button aria-label={`Edit ${label}`} onClick={() => onEdit(marker)} role="menuitem" type="button">
+          Edit
+        </button>
+        <button aria-label={`Delete ${label}`} onClick={() => onDelete(marker)} role="menuitem" type="button">
+          Delete
+        </button>
       </div>
     </div>
   );
@@ -708,7 +1186,7 @@ function MarkerFields({
 
   if (markerType === "tower") {
     const tower = marker?.type === "tower" ? marker : null;
-    const creator = tower === null ? "" : `${tower.makerName} ${tower.makerNumber}`;
+    const creator = tower === null ? "" : formatTowerCreator(tower);
 
     return (
       <>
@@ -937,6 +1415,15 @@ function upsertNoteCategory(categories: NoteCategory[], category: NoteCategory):
 
 function parseCreatorInput(value: string): { makerName: string; makerNumber: string } {
   const trimmed = value.trim();
+  const missingNumberMatch = /^(.*\S)\s+-\s+\?\?\?$/.exec(trimmed);
+
+  if (missingNumberMatch !== null) {
+    return {
+      makerName: missingNumberMatch[1] ?? "",
+      makerNumber: ""
+    };
+  }
+
   const match = /^(.*\S)\s+(\d{3})$/.exec(trimmed);
 
   if (match === null) {
@@ -961,6 +1448,145 @@ function getMapSize(map: WorkspaceMap | null) {
   };
 }
 
+type SectorGridStyle = CSSProperties & {
+  "--map-sector-grid-color": string;
+};
+
+type MissionGridStyle = CSSProperties & {
+  "--map-mission-grid-color": string;
+};
+
+function getSectorGridStyle(
+  mapSize: { heightPx: number; widthPx: number },
+  color: string,
+  opacity: number
+): SectorGridStyle {
+  return {
+    "--map-sector-grid-color": color,
+    color,
+    height: formatPixels(mapSize.heightPx),
+    left: formatPixels(SECTOR_GRID_LEFT_OFFSET_PX),
+    opacity: percentageToOpacity(opacity),
+    top: formatPixels(SECTOR_GRID_TOP_OFFSET_PX),
+    width: formatPixels(mapSize.widthPx)
+  };
+}
+
+function getMissionGridStyle(color: string, opacity: number): MissionGridStyle {
+  return {
+    "--map-mission-grid-color": color,
+    color,
+    opacity: percentageToOpacity(opacity)
+  };
+}
+
+function getTileHighlightOverlayKey(
+  map: WorkspaceMap,
+  selection: string,
+  color: string
+): string {
+  return `${map.imageSrc}|${map.widthPx}x${map.heightPx}|${selection}|${color}`;
+}
+
+function loadTileSourceImageData(map: WorkspaceMap): Promise<ImageData> {
+  const cacheKey = `${map.imageSrc}|${map.widthPx}x${map.heightPx}`;
+  const cached = tileSourceImageDataCache.get(cacheKey);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const imageDataPromise = new Promise<ImageData>((resolve, reject) => {
+    const image = new window.Image();
+
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = map.widthPx;
+      canvas.height = map.heightPx;
+
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+
+      if (context === null) {
+        reject(new Error("Canvas 2D context is unavailable"));
+        return;
+      }
+
+      context.imageSmoothingEnabled = false;
+      context.drawImage(image, 0, 0, map.widthPx, map.heightPx);
+      resolve(context.getImageData(0, 0, map.widthPx, map.heightPx));
+    };
+    image.onerror = () => reject(new Error(`Could not load tile source image: ${map.imageSrc}`));
+    image.src = map.imageSrc;
+  });
+
+  tileSourceImageDataCache.set(cacheKey, imageDataPromise);
+  return imageDataPromise;
+}
+
+function renderTileHighlightDataUrl(mask: Uint8ClampedArray, map: WorkspaceMap): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = map.widthPx;
+  canvas.height = map.heightPx;
+
+  const context = canvas.getContext("2d");
+
+  if (context === null) {
+    throw new Error("Canvas 2D context is unavailable");
+  }
+
+  const imageDataArray = new Uint8ClampedArray(mask.length);
+  imageDataArray.set(mask);
+  context.putImageData(new ImageData(imageDataArray, map.widthPx, map.heightPx), 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
+function getDeedNameLabelStyle(
+  marker: Extract<WorkspaceMarker, { type: "deed" }>,
+  view: ViewState
+): CSSProperties {
+  return getScreenCoordinateStyle({ x: marker.x, y: marker.y - marker.north }, view);
+}
+
+function getTowerNameLabelStyle(
+  marker: Extract<WorkspaceMarker, { type: "tower" }>,
+  view: ViewState
+): CSSProperties {
+  return getScreenCoordinateStyle({ x: marker.x, y: marker.y - 1 }, view);
+}
+
+function getScreenCoordinateStyle(coordinate: MapCoordinate, view: ViewState): CSSProperties {
+  return {
+    left: formatPixels(view.x + (coordinate.x + 0.5) * view.zoom),
+    top: formatPixels(view.y + (coordinate.y + 0.5) * view.zoom)
+  };
+}
+
+function getFloatingPanelStyle(position: FloatingPanelPosition | null): CSSProperties | undefined {
+  if (position === null) {
+    return undefined;
+  }
+
+  return {
+    left: formatPixels(position.left),
+    top: formatPixels(position.top)
+  };
+}
+
+function clampFloatingPanelPosition(
+  left: number,
+  top: number,
+  width: number,
+  height: number
+): FloatingPanelPosition {
+  const viewportWidth = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
+
+  return {
+    left: clamp(left, 8, Math.max(8, viewportWidth - width - 8)),
+    top: clamp(top, 8, Math.max(8, viewportHeight - height - 8))
+  };
+}
+
 function useViewportSize(): ViewportSize {
   const snapshot = useSyncExternalStore(
     subscribeToViewport,
@@ -971,11 +1597,27 @@ function useViewportSize(): ViewportSize {
   return useMemo(() => parseViewportSnapshot(snapshot), [snapshot]);
 }
 
+function useUrlSearchSnapshot(): string {
+  return useSyncExternalStore(
+    subscribeToUrlSearch,
+    getUrlSearchSnapshot,
+    getServerUrlSearchSnapshot
+  );
+}
+
 function subscribeToViewport(listener: () => void): () => void {
   window.addEventListener("resize", listener);
 
   return () => {
     window.removeEventListener("resize", listener);
+  };
+}
+
+function subscribeToUrlSearch(listener: () => void): () => void {
+  window.addEventListener("popstate", listener);
+
+  return () => {
+    window.removeEventListener("popstate", listener);
   };
 }
 
@@ -987,8 +1629,20 @@ function getViewportSnapshot(): string {
   return `${window.innerWidth}x${window.innerHeight}`;
 }
 
+function getUrlSearchSnapshot(): string {
+  if (typeof window === "undefined") {
+    return getServerUrlSearchSnapshot();
+  }
+
+  return window.location.search;
+}
+
 function getServerViewportSnapshot(): string {
   return SERVER_VIEWPORT_SNAPSHOT;
+}
+
+function getServerUrlSearchSnapshot(): string {
+  return "";
 }
 
 function parseViewportSnapshot(snapshot: string): ViewportSize {
@@ -1055,12 +1709,12 @@ function getMapCoordinate(clientX: number, clientY: number, view: ViewState) {
   };
 }
 
-function getInitialUrlCoordinate(map: WorkspaceMap | null): MapCoordinate | null {
-  if (typeof window === "undefined" || map === null) {
+function getUrlCoordinate(map: WorkspaceMap | null, search: string): MapCoordinate | null {
+  if (map === null) {
     return null;
   }
 
-  const params = new URLSearchParams(window.location.search);
+  const params = new URLSearchParams(search);
   const x = parseCoordinateParam(params.get("x"));
   const y = parseCoordinateParam(params.get("y"));
 
@@ -1121,8 +1775,7 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
   if (marker.type === "tower") {
     return [
       "tower",
-      marker.makerName,
-      marker.makerNumber,
+      formatTowerCreator(marker),
       marker.ql,
       marker.damage,
       marker.x,
@@ -1151,17 +1804,15 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
   ].join(" ");
 }
 
-async function copyCoordinateLink(coordinate: MapCoordinate): Promise<void> {
+function updateBrowserCoordinate(coordinate: MapCoordinate): void {
+  window.history.replaceState(null, "", getCoordinateUrl(coordinate));
+}
+
+function getCoordinateUrl(coordinate: MapCoordinate): URL {
   const url = new URL(window.location.href);
   url.searchParams.set("x", String(coordinate.x));
   url.searchParams.set("y", String(coordinate.y));
-
-  if (navigator.clipboard !== undefined) {
-    await navigator.clipboard.writeText(url.toString());
-    return;
-  }
-
-  window.prompt("Copy map link", url.toString());
+  return url;
 }
 
 function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
@@ -1190,7 +1841,7 @@ function getMarkerTitle(marker: WorkspaceMarker): string {
 
 function getMarkerHoverTitle(marker: WorkspaceMarker): string {
   if (marker.type === "tower") {
-    return `Tower: ${marker.makerName} ${marker.makerNumber}`;
+    return `Tower: ${formatTowerCreator(marker)}`;
   }
 
   if (marker.type === "deed") {
@@ -1202,7 +1853,7 @@ function getMarkerHoverTitle(marker: WorkspaceMarker): string {
 
 function getMarkerLabel(marker: WorkspaceMarker): string {
   if (marker.type === "tower") {
-    return `Tower ${marker.makerName} ${marker.makerNumber}`;
+    return `Tower ${formatTowerCreator(marker)}`;
   }
 
   if (marker.type === "deed") {
@@ -1218,6 +1869,52 @@ function getMarkerAtCoordinateLabel(marker: WorkspaceMarker): string {
   }
 
   return getMarkerLabel(marker);
+}
+
+function getMarkerContextTitle(marker: WorkspaceMarker): string {
+  if (marker.type === "tower") {
+    return formatTowerCreator(marker);
+  }
+
+  if (marker.type === "deed") {
+    return marker.name;
+  }
+
+  return marker.title;
+}
+
+function getMarkerContextMeta(marker: WorkspaceMarker): string {
+  if (marker.type === "tower") {
+    return `Tower | QL ${marker.ql} | DMG ${marker.damage}`;
+  }
+
+  if (marker.type === "deed") {
+    return `Deed | Mayor ${marker.founder} | ${formatDeedDimensions(marker)}`;
+  }
+
+  return `Note | ${marker.category}`;
+}
+
+type MarkerContextRowStyle = CSSProperties & {
+  "--map-context-marker-color": string;
+};
+
+function getMarkerContextRowStyle(marker: WorkspaceMarker, markerColors: MarkerColors): MarkerContextRowStyle {
+  return {
+    "--map-context-marker-color": getMarkerContextColor(marker, markerColors)
+  };
+}
+
+function getMarkerContextColor(marker: WorkspaceMarker, markerColors: MarkerColors): string {
+  if (marker.type === "tower") {
+    return markerColors.towers;
+  }
+
+  if (marker.type === "deed") {
+    return markerColors.deeds;
+  }
+
+  return markerColors.notes;
 }
 
 function formatDeedDimensions(marker: Extract<WorkspaceMarker, { type: "deed" }>): string {
@@ -1245,6 +1942,10 @@ function getHoverDetailsStyle(screenX: number, screenY: number): CSSProperties {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+function percentageToOpacity(value: number): number {
+  return clamp(value, 0, 100) / 100;
 }
 
 function formatZoom(value: number): string {

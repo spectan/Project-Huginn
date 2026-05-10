@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatTowerCreator,
   validateDeedInput,
   validateNoteInput,
   validateTowerInput
@@ -37,7 +38,33 @@ describe("validateTowerInput", () => {
     });
   });
 
-  it("rejects creator numbers that are not exactly three digits", () => {
+  it("allows a tower creator without a known number", () => {
+    expect(
+      validateTowerInput(
+        {
+          x: 25,
+          y: 30,
+          ql: "89.50",
+          damage: "0.25",
+          makerName: "Mako",
+          makerNumber: ""
+        },
+        bounds
+      )
+    ).toEqual({
+      ok: true,
+      value: {
+        x: 25,
+        y: 30,
+        qlHundredths: 8950,
+        damageHundredths: 25,
+        makerName: "Mako",
+        makerNumber: ""
+      }
+    });
+  });
+
+  it("rejects creator numbers that are not blank or exactly three digits", () => {
     expect(
       validateTowerInput(
         {
@@ -52,8 +79,15 @@ describe("validateTowerInput", () => {
       )
     ).toEqual({
       ok: false,
-      error: "Creator number must be exactly three digits"
+      error: "Creator number must be blank or exactly three digits"
     });
+  });
+});
+
+describe("formatTowerCreator", () => {
+  it("shows unknown numbers for incomplete tower creator identities", () => {
+    expect(formatTowerCreator({ makerName: "Mako", makerNumber: "" })).toBe("Mako - ???");
+    expect(formatTowerCreator({ makerName: "Mako", makerNumber: "945" })).toBe("Mako 945");
   });
 });
 

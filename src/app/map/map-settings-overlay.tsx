@@ -1,20 +1,33 @@
 "use client";
 
 import { useState, type ChangeEvent } from "react";
-import type { MarkerColors, MarkerVisibility } from "@/lib/markers/marker-types";
+import type {
+  MarkerColors,
+  MarkerOpacities,
+  MarkerVisibility,
+  TileHighlightSettings
+} from "@/lib/markers/marker-types";
 
 type MapSettingsOverlayProps = {
   markerColors: MarkerColors;
+  markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
+  tileHighlight: TileHighlightSettings;
   onMarkerColorsChange(colors: MarkerColors): void;
+  onMarkerOpacitiesChange(opacities: MarkerOpacities): void;
   onMarkerVisibilityChange(visibility: MarkerVisibility): void;
+  onTileHighlightChange(settings: TileHighlightSettings): void;
 };
 
 export function MapSettingsOverlay({
   markerColors,
+  markerOpacities,
   markerVisibility,
+  tileHighlight,
   onMarkerColorsChange,
-  onMarkerVisibilityChange
+  onMarkerOpacitiesChange,
+  onMarkerVisibilityChange,
+  onTileHighlightChange
 }: MapSettingsOverlayProps) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -43,57 +56,110 @@ export function MapSettingsOverlay({
               x
             </button>
           </div>
-          <fieldset className="map-visibility-controls">
-            <legend>Map visibility</legend>
-            <VisibilityCheckbox
+          <fieldset className="map-layer-controls">
+            <legend>Map layers</legend>
+            <LayerControlRow
               checked={markerVisibility.overlays}
               label="Overlays"
-              onChange={() => onMarkerVisibilityChange({
+              onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 overlays: !markerVisibility.overlays
               })}
             />
-            <VisibilityCheckbox
+            <LayerControlRow
               checked={markerVisibility.towers}
+              colorLabel="Towers color"
+              colorValue={markerColors.towers}
               label="Towers"
-              onChange={() => onMarkerVisibilityChange({
+              opacityLabel="Towers opacity"
+              opacityValue={markerOpacities.towers}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, towers: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, towers: value })}
+              onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 towers: !markerVisibility.towers
               })}
             />
-            <VisibilityCheckbox
+            <LayerControlRow
+              checked={markerVisibility.towerNames}
+              label="Tower Names"
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                towerNames: !markerVisibility.towerNames
+              })}
+            />
+            <LayerControlRow
               checked={markerVisibility.deeds}
+              colorLabel="Deeds color"
+              colorValue={markerColors.deeds}
               label="Deeds"
-              onChange={() => onMarkerVisibilityChange({
+              opacityLabel="Deeds opacity"
+              opacityValue={markerOpacities.deeds}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, deeds: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, deeds: value })}
+              onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 deeds: !markerVisibility.deeds
               })}
             />
-            <VisibilityCheckbox
+            <LayerControlRow
+              checked={markerVisibility.deedNames}
+              label="Deed Names"
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                deedNames: !markerVisibility.deedNames
+              })}
+            />
+            <LayerControlRow
               checked={markerVisibility.notes}
+              colorLabel="Notes color"
+              colorValue={markerColors.notes}
               label="Notes"
-              onChange={() => onMarkerVisibilityChange({
+              opacityLabel="Notes opacity"
+              opacityValue={markerOpacities.notes}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, notes: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, notes: value })}
+              onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 notes: !markerVisibility.notes
               })}
             />
-          </fieldset>
-          <fieldset className="map-color-controls">
-            <legend>Marker colors</legend>
-            <MarkerColorInput
-              label="Tower color"
-              value={markerColors.towers}
-              onChange={(value) => onMarkerColorsChange({ ...markerColors, towers: value })}
+            <LayerControlRow
+              checked={markerVisibility.sectorGrid}
+              colorLabel="Grid Overlay color"
+              colorValue={markerColors.sectorGrid}
+              label="Grid Overlay"
+              opacityLabel="Grid Overlay opacity"
+              opacityValue={markerOpacities.sectorGrid}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, sectorGrid: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, sectorGrid: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                sectorGrid: !markerVisibility.sectorGrid
+              })}
             />
-            <MarkerColorInput
-              label="Deed color"
-              value={markerColors.deeds}
-              onChange={(value) => onMarkerColorsChange({ ...markerColors, deeds: value })}
+            <LayerControlRow
+              checked={markerVisibility.missionGrid}
+              colorLabel="Mission Grid color"
+              colorValue={markerColors.missionGrid}
+              label="Mission Grid"
+              opacityLabel="Mission Grid opacity"
+              opacityValue={markerOpacities.missionGrid}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, missionGrid: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, missionGrid: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                missionGrid: !markerVisibility.missionGrid
+              })}
             />
-            <MarkerColorInput
-              label="Note color"
-              value={markerColors.notes}
-              onChange={(value) => onMarkerColorsChange({ ...markerColors, notes: value })}
+            <LayerControlRow
+              colorLabel="Tile highlight color"
+              colorValue={tileHighlight.color}
+              label="Tile Highlight"
+              opacityLabel="Tile highlight opacity"
+              opacityValue={tileHighlight.opacity}
+              onColorChange={(value) => onTileHighlightChange({ ...tileHighlight, color: value })}
+              onOpacityChange={(value) => onTileHighlightChange({ ...tileHighlight, opacity: value })}
             />
           </fieldset>
         </section>
@@ -102,41 +168,69 @@ export function MapSettingsOverlay({
   );
 }
 
-function VisibilityCheckbox({
+function LayerControlRow({
   checked,
+  colorLabel,
+  colorValue,
   label,
-  onChange
+  opacityLabel,
+  opacityValue,
+  onColorChange,
+  onOpacityChange,
+  onToggle
 }: {
-  checked: boolean;
+  checked?: boolean;
+  colorLabel?: string;
+  colorValue?: string;
   label: string;
-  onChange(): void;
+  opacityLabel?: string;
+  opacityValue?: number;
+  onColorChange?(value: string): void;
+  onOpacityChange?(value: number): void;
+  onToggle?(): void;
 }) {
   return (
-    <label>
-      <input checked={checked} onChange={onChange} type="checkbox" />
+    <div className="map-layer-row">
+      {checked !== undefined && onToggle !== undefined ? (
+        <input aria-label={label} checked={checked} onChange={onToggle} type="checkbox" />
+      ) : (
+        <span aria-hidden="true" className="map-layer-checkbox-spacer" />
+      )}
       <span>{label}</span>
-    </label>
+      {colorValue !== undefined && colorLabel !== undefined && onColorChange !== undefined ? (
+        <input
+          aria-label={colorLabel}
+          className="map-layer-color"
+          onChange={(event: ChangeEvent<HTMLInputElement>) => onColorChange(event.target.value)}
+          type="color"
+          value={colorValue}
+        />
+      ) : (
+        <span aria-hidden="true" className="map-layer-color-spacer" />
+      )}
+      {opacityValue !== undefined && opacityLabel !== undefined && onOpacityChange !== undefined ? (
+        <input
+          aria-label={opacityLabel}
+          className="map-layer-opacity"
+          max={100}
+          min={0}
+          onChange={(event: ChangeEvent<HTMLInputElement>) => onOpacityChange(parseOpacity(event.target.value))}
+          type="range"
+          value={opacityValue}
+        />
+      ) : (
+        <span aria-hidden="true" className="map-layer-opacity-spacer" />
+      )}
+    </div>
   );
 }
 
-function MarkerColorInput({
-  label,
-  onChange,
-  value
-}: {
-  label: string;
-  onChange(value: string): void;
-  value: string;
-}) {
-  return (
-    <label>
-      <span>{label}</span>
-      <input
-        aria-label={label}
-        onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
-        type="color"
-        value={value}
-      />
-    </label>
-  );
+function parseOpacity(value: string): number {
+  const parsedValue = Number(value);
+
+  if (!Number.isFinite(parsedValue)) {
+    return 100;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(parsedValue)));
 }

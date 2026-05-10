@@ -110,6 +110,16 @@ Prevention:
 
 Render the image at its natural 2048x2048 dimensions so one CSS pixel matches one map coordinate unit. When the database-backed map storage workflow is added, preserve the same top-left coordinate convention and migrate this seed asset into the configured map storage path.
 
+### Tile Highlighting Source
+
+Decision:
+
+Terrain/resource highlighting is derived from exact RGB matches in the active map image, matching the WurmMaps approach for clay, tar, peat, roads, cave entrances, and other tile categories. The visible overlay should color the surrounding non-matching tiles instead of filling the matched resource tiles, so the highlight functions as an outline.
+
+Prevention:
+
+Keep tile type names, RGB values, and outline-mask generation centralized in the tile-highlighting domain module. Do not scatter color constants through UI components, and keep highlight overlays as local visual state rather than persisted marker data.
+
 ### Docker Desktop PATH
 
 Context:
@@ -175,6 +185,28 @@ Stop the local WurmMapUtil dev server before regenerating Prisma after schema ch
 Prevention:
 
 If `prisma generate`, `prisma db push`, or migration commands fail with a Windows DLL rename error, inspect Node processes for this workspace, stop the dev server, rerun the Prisma command, then restart the server.
+
+### Prisma No-Engine Generation
+
+Context:
+
+Regenerating Prisma on Windows after schema changes hit a locked query engine DLL.
+
+What happened:
+
+Using `PRISMA_GENERATE_NO_ENGINE=1 prisma generate` avoided the Windows rename error, but the generated client then failed local API requests with `P6001` because normal PostgreSQL URLs require the local query engine.
+
+Root cause:
+
+The no-engine Prisma client is for driver-adapter or Prisma Accelerate-style URLs, not this app's direct `postgresql://` local and Compose database connections.
+
+Decision:
+
+Do not use `PRISMA_GENERATE_NO_ENGINE=1` for this project. Stop the Next dev server, regenerate Prisma normally, then restart the dev server.
+
+Prevention:
+
+If admin APIs or other Prisma-backed routes suddenly fail while tests still pass, run a direct Prisma query with the same `DATABASE_URL`. If it reports `P6001`, regenerate Prisma normally after stopping the process that has `query_engine-windows.dll.node` loaded.
 
 ### Local Compose Database Access
 

@@ -33,6 +33,7 @@ export function AdminAccountsView({ users }: AdminAccountsViewProps) {
                 <th>Access</th>
                 <th>Admin</th>
                 <th>Created</th>
+                <th>Password</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -42,6 +43,7 @@ export function AdminAccountsView({ users }: AdminAccountsViewProps) {
                   key={user.id}
                   onError={setError}
                   onUserChange={(nextUser) => setAccountUsers((current) => upsertAdminUser(current, nextUser))}
+                  onUserRemove={(userId) => setAccountUsers((current) => current.filter((candidate) => candidate.id !== userId))}
                   user={user}
                 />
               ))}
@@ -71,10 +73,12 @@ export function AdminAccountsAccessDenied({ message }: { message: string }) {
 function AdminAccountRow({
   onError,
   onUserChange,
+  onUserRemove,
   user
 }: {
   onError(error: string | null): void;
   onUserChange(user: AdminUserSummary): void;
+  onUserRemove(userId: string): void;
   user: AdminUserSummary;
 }) {
   return (
@@ -111,6 +115,25 @@ function AdminAccountRow({
       </td>
       <td>
         <form
+          className="history-password-form"
+          onSubmit={(event) => void updateAdminUserPassword(event, user.id, onUserChange, onError)}
+        >
+          <input
+            aria-label={`New password for ${user.username}`}
+            autoComplete="new-password"
+            className="history-text-input"
+            maxLength={128}
+            minLength={12}
+            name="password"
+            type="password"
+          />
+          <button aria-label={`Change password ${user.username}`} className="history-action-button" type="submit">
+            Change
+          </button>
+        </form>
+      </td>
+      <td>
+        <form
           className="history-row-actions"
           id={`account-form-${user.id}`}
           onSubmit={(event) => void updateAdminUser(event, user.id, onUserChange, onError)}
@@ -121,7 +144,7 @@ function AdminAccountRow({
           <button
             aria-label={`Remove ${user.username}`}
             className="history-action-button history-action-button--danger"
-            onClick={() => void removeAdminUser(user.id, onUserChange, onError)}
+            onClick={() => void removeAdminUser(user.id, onUserRemove, onError)}
             type="button"
           >
             Remove
@@ -161,9 +184,39 @@ async function updateAdminUser(
   onUserChange(body.user);
 }
 
-async function removeAdminUser(
+async function updateAdminUserPassword(
+  event: FormEvent<HTMLFormElement>,
   userId: string,
   onUserChange: (user: AdminUserSummary) => void,
+  onError: (error: string | null) => void
+): Promise<void> {
+  event.preventDefault();
+  onError(null);
+
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const response = await fetch(`/api/admin/users/${userId}/password`, {
+    body: JSON.stringify({
+      password: formData.get("password")
+    }),
+    headers: { "content-type": "application/json" },
+    method: "PATCH"
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    onError(body?.error ?? "Password could not be changed");
+    return;
+  }
+
+  const body = (await response.json()) as { user: AdminUserSummary };
+  onUserChange(body.user);
+  form.reset();
+}
+
+async function removeAdminUser(
+  userId: string,
+  onUserRemove: (userId: string) => void,
   onError: (error: string | null) => void
 ): Promise<void> {
   onError(null);
@@ -176,8 +229,8 @@ async function removeAdminUser(
     return;
   }
 
-  const body = (await response.json()) as { user: AdminUserSummary };
-  onUserChange(body.user);
+  const body = (await response.json().catch(() => null)) as { userId?: string } | null;
+  onUserRemove(body?.userId ?? userId);
 }
 
 function upsertAdminUser(users: AdminUserSummary[], user: AdminUserSummary): AdminUserSummary[] {

@@ -30,7 +30,7 @@ export type AdminUserSummary = {
 };
 
 type AdminUserAuditInput = {
-  action: "FAILED_AUTHORIZATION" | "PERMISSION_CHANGED" | "USER_REJECTED";
+  action: "FAILED_AUTHORIZATION" | "PERMISSION_CHANGED" | "USER_DELETED" | "USER_PASSWORD_CHANGED";
   actorUserId: string;
   metadata: Record<string, unknown>;
   targetId: string | null;
@@ -38,10 +38,15 @@ type AdminUserAuditInput = {
 };
 
 export type AdminUserDependencies = {
+  hashPassword(password: string): Promise<string>;
   listUsers(): Promise<AdminUserRecord[]>;
   recordAudit(input: AdminUserAuditInput): Promise<void>;
   removeUser(input: {
     removedByUserId: string;
+    userId: string;
+  }): Promise<AdminUserRecord | null>;
+  updateUserPassword(input: {
+    passwordHash: string;
     userId: string;
   }): Promise<AdminUserRecord | null>;
   updateUserPrivileges(input: {
@@ -116,6 +121,46 @@ export async function updateAdminUser(
   return ok(serializeAdminUser(user));
 }
 
+export async function updateAdminUserPassword(
+  input: {
+    actor: AdminActor;
+    password: string;
+    userId: string;
+  },
+  dependencies: AdminUserDependencies
+): Promise<Result<AdminUserSummary>> {
+  if (!canAdminister(input.actor)) {
+    await recordFailedAuthorization(dependencies, input.actor, "USER_PASSWORD_CHANGED", input.userId);
+    return err("Admin access is required");
+  }
+
+  if (!isValidPassword(input.password)) {
+    return err("Password must be 12-128 characters");
+  }
+
+  const passwordHash = await dependencies.hashPassword(input.password);
+  const user = await dependencies.updateUserPassword({
+    passwordHash,
+    userId: input.userId
+  });
+
+  if (user === null) {
+    return err("User was not found");
+  }
+
+  await recordAudit(dependencies, {
+    action: "USER_PASSWORD_CHANGED",
+    actorUserId: input.actor.id,
+    metadata: {
+      username: user.username
+    },
+    targetId: user.id,
+    targetType: "USER"
+  });
+
+  return ok(serializeAdminUser(user));
+}
+
 export async function removeAdminUser(
   input: {
     actor: AdminActor;
@@ -124,7 +169,7 @@ export async function removeAdminUser(
   dependencies: AdminUserDependencies
 ): Promise<Result<AdminUserSummary>> {
   if (!canAdminister(input.actor)) {
-    await recordFailedAuthorization(dependencies, input.actor, "USER_REJECTED", input.userId);
+    await recordFailedAuthorization(dependencies, input.actor, "USER_DELETED", input.userId);
     return err("Admin access is required");
   }
 
@@ -142,7 +187,7 @@ export async function removeAdminUser(
   }
 
   await recordAudit(dependencies, {
-    action: "USER_REJECTED",
+    action: "USER_DELETED",
     actorUserId: input.actor.id,
     metadata: {
       username: user.username
@@ -167,6 +212,10 @@ function serializeAdminUser(user: AdminUserRecord): AdminUserSummary {
 
 function isAccessLevel(value: AccessLevel): boolean {
   return value === "NONE" || value === "READ" || value === "WRITE";
+}
+
+function isValidPassword(value: string): boolean {
+  return value.length >= 12 && value.length <= 128;
 }
 
 async function recordFailedAuthorization(

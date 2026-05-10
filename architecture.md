@@ -79,6 +79,7 @@ The client owns:
 - Overlay rendering for tower radii and deed bounds.
 - Read-only versus writable control visibility.
 - Client-side marker search, filtering, and visual match highlighting for the currently loaded map data.
+- Client-side tile-type highlighting by exact RGB matching against the loaded map image. The source map image remains the coordinate source: one pixel equals one tile, and generated highlight masks are local visual overlays only.
 
 Client code must treat server responses as authoritative. Client-calculated coordinates must be validated again on the server against the target map dimensions.
 
@@ -297,6 +298,14 @@ Deed overlays:
 - The stored coordinate is the center pixel.
 - Rectangle edges are calculated from north, west, east, and south tile counts.
 - The visual center pixel is highlighted independently from the area overlay.
+
+Tile highlighting:
+
+- Tile highlight selections use the same color-detected terrain categories as WurmMaps for the active map image.
+- The UI groups selections into Resources, Roads, Natural Terrain, Infected Terrain, and Other.
+- Highlight masks are transparent image overlays generated from exact RGB matches, with user-configurable highlight color and opacity.
+- The overlay highlights the non-matching tiles surrounding matched tiles, not the matched resource tiles themselves, so resources remain visible while the highlight reads as an outline.
+- Highlighting is local view state and must not create audit events or marker records.
 
 Client pointer conversion must account for zoom, pan, and image scaling. Server validation must only accept stored map coordinates, not screen coordinates.
 
