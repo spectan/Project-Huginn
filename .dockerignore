@@ -1,0 +1,11 @@
+node_modules/
+.next/
+coverage/
+dist/
+.git/
+.env
+.env.*
+!.env.example
+map-storage/
+postgres-data/
+tsconfig.tsbuildinfo

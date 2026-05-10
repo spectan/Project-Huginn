@@ -1,0 +1,50 @@
+# dependencies
+node_modules/
+
+# Next.js output
+.next/
+out/
+dist/
+build/
+
+# test and coverage output
+coverage/
+.nyc_output/
+
+# TypeScript and framework generated files
+*.tsbuildinfo
+next-env.d.ts
+
+# environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+
+# local storage and generated runtime data
+map-storage/
+postgres-data/
+*.sqlite
+*.sqlite3
+*.db
+
+# local raw map source files
+Celebration-classic*.png
+
+# package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# deployment tool state
+.vercel/
+docker-compose.override.yml

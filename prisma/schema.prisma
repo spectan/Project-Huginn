@@ -1,0 +1,225 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AccessLevel {
+  NONE
+  READ
+  WRITE
+}
+
+enum AuditAction {
+  REGISTRATION
+  LOGIN
+  LOGOUT
+  FAILED_LOGIN
+  FAILED_AUTHORIZATION
+  USER_APPROVED
+  USER_REJECTED
+  PERMISSION_CHANGED
+  MAP_VIEW
+  MAP_CREATED
+  MAP_UPDATED
+  MARKER_LIST_VIEW
+  MARKER_DETAIL_VIEW
+  MARKER_CREATED
+  MARKER_UPDATED
+  MARKER_DELETED
+  MARKER_RESTORED
+  MARKER_CLEANED_UP
+}
+
+enum AuditTargetType {
+  USER
+  MAP
+  TOWER
+  DEED
+  NOTE
+  SESSION
+  SYSTEM
+}
+
+model User {
+  id                 String         @id @default(cuid())
+  username           String         @unique
+  passwordHash       String
+  approvalStatus     ApprovalStatus @default(PENDING)
+  accessLevel        AccessLevel    @default(NONE)
+  isAdmin            Boolean        @default(false)
+  approvedAt         DateTime?
+  approvedByUserId   String?
+  approvedBy         User?          @relation("UserApprovals", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedUsers      User[]         @relation("UserApprovals")
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  createdTowers      Tower[]        @relation("TowerCreatedBy")
+  updatedTowers      Tower[]        @relation("TowerUpdatedBy")
+  deletedTowers      Tower[]        @relation("TowerDeletedBy")
+  createdDeeds       Deed[]         @relation("DeedCreatedBy")
+  updatedDeeds       Deed[]         @relation("DeedUpdatedBy")
+  deletedDeeds       Deed[]         @relation("DeedDeletedBy")
+  createdNotes       Note[]         @relation("NoteCreatedBy")
+  updatedNotes       Note[]         @relation("NoteUpdatedBy")
+  deletedNotes       Note[]         @relation("NoteDeletedBy")
+  auditEvents        AuditEvent[]   @relation("AuditActor")
+  sessions           Session[]
+
+  @@index([approvalStatus])
+  @@index([accessLevel])
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Map {
+  id          String       @id @default(cuid())
+  name        String
+  imagePath   String
+  widthPx     Int
+  heightPx    Int
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  towers      Tower[]
+  deeds       Deed[]
+  notes       Note[]
+  noteCategories NoteCategory[]
+  auditEvents AuditEvent[]
+
+  @@index([isActive])
+  @@map("maps")
+}
+
+model Tower {
+  id                String    @id @default(cuid())
+  mapId             String
+  map               Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x                 Int
+  y                 Int
+  qlHundredths      Int
+  damageHundredths  Int
+  makerName         String
+  makerNumber       String
+  createdByUserId   String
+  createdBy         User      @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUserId   String?
+  updatedBy         User?     @relation("TowerUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt         DateTime?
+  deletedByUserId   String?
+  deletedBy         User?     @relation("TowerDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("towers")
+}
+
+model Deed {
+  id              String    @id @default(cuid())
+  mapId           String
+  map             Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x               Int
+  y               Int
+  name            String
+  north           Int
+  west            Int
+  east            Int
+  south           Int
+  founder         String
+  createdByUserId String
+  createdBy       User      @relation("DeedCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUserId String?
+  updatedBy       User?     @relation("DeedUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt       DateTime?
+  deletedByUserId String?
+  deletedBy       User?     @relation("DeedDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("deeds")
+}
+
+model Note {
+  id              String    @id @default(cuid())
+  mapId           String
+  map             Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x               Int
+  y               Int
+  title           String    @default("Untitled")
+  category        String    @default("General")
+  text            String
+  createdByUserId String
+  createdBy       User      @relation("NoteCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  updatedByUserId String?
+  updatedBy       User?     @relation("NoteUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt       DateTime?
+  deletedByUserId String?
+  deletedBy       User?     @relation("NoteDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("notes")
+}
+
+model NoteCategory {
+  id        String   @id @default(cuid())
+  mapId     String
+  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mapId, name])
+  @@index([mapId])
+  @@map("note_categories")
+}
+
+model AuditEvent {
+  id          String          @id @default(cuid())
+  actorUserId String?
+  actor       User?           @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  action      AuditAction
+  targetType  AuditTargetType
+  targetId    String?
+  mapId       String?
+  map         Map?            @relation(fields: [mapId], references: [id], onDelete: SetNull)
+  metadata    Json
+  createdAt   DateTime        @default(now())
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+  @@index([mapId, createdAt])
+  @@map("audit_events")
+}

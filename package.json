@@ -1,0 +1,48 @@
+{
+  "name": "wurm-map-util",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "db:migrate": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "cleanup:deleted-markers": "node scripts/cleanup-deleted-markers.mjs",
+    "start": "next start",
+    "seed:admin": "node scripts/seed-admin.mjs",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@prisma/client": "6.19.3",
+    "argon2": "0.44.0",
+    "next": "16.2.6",
+    "prisma": "6.19.3",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@types/node": "25.6.2",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "5.2.0",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.2.6",
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.5"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
+  }
+}
