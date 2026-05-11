@@ -1,29 +1,56 @@
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
-import { createMarkerDependencies, findActiveMap, listNoteCategories } from "@/lib/markers/database";
+import { createUserMapSettingsDependencies } from "@/lib/map-settings/database";
+import { DEFAULT_USER_MAP_SETTINGS } from "@/lib/map-settings/map-settings";
+import { getUserMapSettings } from "@/lib/map-settings/map-settings-service";
+import {
+  createMarkerDependencies,
+  findActiveMap,
+  listActiveMapSummaries,
+  listNoteCategories
+} from "@/lib/markers/database";
 import { listMarkers } from "@/lib/markers/marker-service";
 import MapWorkspace from "./map-workspace";
 
-export default async function MapPage() {
+type MapPageProps = {
+  searchParams?: Promise<{
+    layer?: string;
+    server?: string;
+  }>;
+};
+
+export default async function MapPage({ searchParams }: MapPageProps) {
   const viewer = await getCurrentViewer();
-  const workspace = await getWorkspaceData(viewer);
+  const params = await searchParams;
+  const workspace = await getWorkspaceData(viewer, params?.server);
 
   return (
     <MapWorkspace
       initialMarkers={workspace?.markers ?? []}
       initialNoteCategories={workspace?.noteCategories ?? []}
+      initialSettings={workspace?.settings}
       map={workspace?.map ?? null}
+      selectedLayerId={params?.layer}
+      servers={workspace?.servers ?? []}
       viewer={viewer}
     />
   );
 }
 
-async function getWorkspaceData(viewer: Awaited<ReturnType<typeof getCurrentViewer>>) {
+async function getWorkspaceData(
+  viewer: Awaited<ReturnType<typeof getCurrentViewer>>,
+  requestedMapId?: string
+) {
   if (viewer === null || !canReadMap(viewer)) {
     return null;
   }
 
-  const map = await findActiveMap();
+  const [requestedMap, fallbackMap, servers] = await Promise.all([
+    requestedMapId === undefined ? null : findActiveMap(requestedMapId),
+    findActiveMap(),
+    listActiveMapSummaries()
+  ]);
+  const map = requestedMap ?? fallbackMap;
 
   if (map === null) {
     return null;
@@ -40,6 +67,20 @@ async function getWorkspaceData(viewer: Awaited<ReturnType<typeof getCurrentView
 
   return {
     ...result.value,
-    noteCategories: await listNoteCategories(map.id)
+    noteCategories: await listNoteCategories(map.id),
+    servers,
+    settings: await getReadableUserMapSettings(viewer, map.id)
   };
+}
+
+async function getReadableUserMapSettings(
+  viewer: NonNullable<Awaited<ReturnType<typeof getCurrentViewer>>>,
+  mapId: string
+) {
+  const result = await getUserMapSettings(
+    { actor: viewer, mapId },
+    createUserMapSettingsDependencies()
+  );
+
+  return result.ok ? result.value : DEFAULT_USER_MAP_SETTINGS;
 }

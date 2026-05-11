@@ -109,6 +109,30 @@ function formatMarkerType(type: DeletedMarkerSummary["type"]): string {
     return "Deed";
   }
 
+  if (type === "rift") {
+    return "Rift";
+  }
+
+  if (type === "camp") {
+    return "Camp";
+  }
+
+  if (type === "minedoor") {
+    return "Minedoor";
+  }
+
+  if (type === "bridge") {
+    return "Bridge";
+  }
+
+  if (type === "canal") {
+    return "Canal";
+  }
+
+  if (type === "highway") {
+    return "Highway";
+  }
+
   return "Note";
 }
 

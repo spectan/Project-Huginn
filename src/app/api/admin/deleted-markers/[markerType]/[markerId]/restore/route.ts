@@ -42,7 +42,17 @@ export async function POST(_request: Request, context: RouteContext) {
 }
 
 function parseMarkerType(value: string): MarkerType | null {
-  if (value === "tower" || value === "deed" || value === "note") {
+  if (
+    value === "tower" ||
+    value === "deed" ||
+    value === "note" ||
+    value === "rift" ||
+    value === "camp" ||
+    value === "minedoor" ||
+    value === "bridge" ||
+    value === "canal" ||
+    value === "highway"
+  ) {
     return value;
   }
 

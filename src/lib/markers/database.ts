@@ -2,19 +2,54 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { MarkerServiceDependencies } from "./marker-service";
 
+const mapWithLayers = {
+  layers: {
+    orderBy: [
+      { sortOrder: "asc" as const },
+      { name: "asc" as const }
+    ]
+  }
+};
+
 export function createMarkerDependencies(): MarkerServiceDependencies {
   return {
+    createCamp: async (input) => prisma.camp.create({ data: input }),
     createDeed: async (input) => prisma.deed.create({ data: input }),
+    createMinedoor: async (input) => prisma.minedoor.create({ data: input }),
     createNote: async (input) => prisma.note.create({ data: input }),
+    createPath: async (input) => prisma.pathMarker.create({
+      data: {
+        ...input,
+        points: input.points as Prisma.InputJsonValue
+      }
+    }).then(normalizePathRecord),
+    createRift: async (input) => prisma.rift.create({ data: input }),
     createTower: async (input) => prisma.tower.create({ data: input }),
+    findCamp: async (id) => prisma.camp.findFirst({
+      include: { map: true },
+      where: { deletedAt: null, id }
+    }),
     findDeed: async (id) => prisma.deed.findFirst({
       include: { map: true },
       where: { deletedAt: null, id }
     }),
     findMap: async (mapId) => prisma.map.findFirst({
+      include: mapWithLayers,
       where: { id: mapId, isActive: true }
     }),
+    findMinedoor: async (id) => prisma.minedoor.findFirst({
+      include: { map: true },
+      where: { deletedAt: null, id }
+    }),
     findNote: async (id) => prisma.note.findFirst({
+      include: { map: true },
+      where: { deletedAt: null, id }
+    }),
+    findPath: async (id) => prisma.pathMarker.findFirst({
+      include: { map: true },
+      where: { deletedAt: null, id }
+    }).then((path) => path === null ? null : normalizePathRecord(path)),
+    findRift: async (id) => prisma.rift.findFirst({
       include: { map: true },
       where: { deletedAt: null, id }
     }),
@@ -23,7 +58,7 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       where: { deletedAt: null, id }
     }),
     listActiveMarkers: async (mapId) => {
-      const [towers, deeds, notes] = await Promise.all([
+      const [towers, deeds, notes, rifts, camps, minedoors, paths] = await Promise.all([
         prisma.tower.findMany({
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
@@ -35,10 +70,26 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
         prisma.note.findMany({
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
+        }),
+        prisma.rift.findMany({
+          orderBy: { createdAt: "asc" },
+          where: { deletedAt: null, mapId }
+        }),
+        prisma.camp.findMany({
+          orderBy: { createdAt: "asc" },
+          where: { deletedAt: null, mapId }
+        }),
+        prisma.minedoor.findMany({
+          orderBy: { createdAt: "asc" },
+          where: { deletedAt: null, mapId }
+        }),
+        prisma.pathMarker.findMany({
+          orderBy: { createdAt: "asc" },
+          where: { deletedAt: null, mapId }
         })
       ]);
 
-      return { deeds, notes, towers };
+      return { camps, deeds, minedoors, notes, paths: paths.map(normalizePathRecord), rifts, towers };
     },
     now: () => new Date(),
     recordAudit: async (input) => {
@@ -52,6 +103,15 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
           targetType: input.targetType
         }
       });
+    },
+    softDeleteCamp: async (id, input) => {
+      const existing = await prisma.camp.findFirst({ where: { deletedAt: null, id } });
+
+      if (existing === null) {
+        return null;
+      }
+
+      return prisma.camp.update({ data: input, where: { id } });
     },
     softDeleteDeed: async (id, input) => {
       const existing = await prisma.deed.findFirst({ where: { deletedAt: null, id } });
@@ -71,6 +131,33 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
 
       return prisma.note.update({ data: input, where: { id } });
     },
+    softDeleteMinedoor: async (id, input) => {
+      const existing = await prisma.minedoor.findFirst({ where: { deletedAt: null, id } });
+
+      if (existing === null) {
+        return null;
+      }
+
+      return prisma.minedoor.update({ data: input, where: { id } });
+    },
+    softDeletePath: async (id, input) => {
+      const existing = await prisma.pathMarker.findFirst({ where: { deletedAt: null, id } });
+
+      if (existing === null) {
+        return null;
+      }
+
+      return prisma.pathMarker.update({ data: input, where: { id } }).then(normalizePathRecord);
+    },
+    softDeleteRift: async (id, input) => {
+      const existing = await prisma.rift.findFirst({ where: { deletedAt: null, id } });
+
+      if (existing === null) {
+        return null;
+      }
+
+      return prisma.rift.update({ data: input, where: { id } });
+    },
     softDeleteTower: async (id, input) => {
       const existing = await prisma.tower.findFirst({ where: { deletedAt: null, id } });
 
@@ -84,7 +171,26 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       data: input,
       where: { id }
     }),
+    updateCamp: async (id, input) => prisma.camp.update({
+      data: input,
+      where: { id }
+    }),
+    updateMinedoor: async (id, input) => prisma.minedoor.update({
+      data: input,
+      where: { id }
+    }),
     updateNote: async (id, input) => prisma.note.update({
+      data: input,
+      where: { id }
+    }),
+    updatePath: async (id, input) => prisma.pathMarker.update({
+      data: {
+        ...input,
+        points: input.points as Prisma.InputJsonValue
+      },
+      where: { id }
+    }).then(normalizePathRecord),
+    updateRift: async (id, input) => prisma.rift.update({
       data: input,
       where: { id }
     }),
@@ -95,9 +201,54 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
   };
 }
 
-export async function findActiveMap() {
+function normalizePathRecord<T extends {
+  points: Prisma.JsonValue;
+}>(path: T): T & { points: Array<{ x: number; y: number }> } {
+  return {
+    ...path,
+    points: parseStoredPathPoints(path.points)
+  };
+}
+
+function parseStoredPathPoints(points: Prisma.JsonValue): Array<{ x: number; y: number }> {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+
+  return points.map((point) => {
+    if (typeof point !== "object" || point === null || Array.isArray(point)) {
+      return { x: 0, y: 0 };
+    }
+
+    const record = point as Record<string, unknown>;
+    const x = record.x;
+    const y = record.y;
+
+    return {
+      x: typeof x === "number" ? x : 0,
+      y: typeof y === "number" ? y : 0
+    };
+  });
+}
+
+export async function findActiveMap(mapId?: string) {
   return prisma.map.findFirst({
+    include: mapWithLayers,
     orderBy: { createdAt: "asc" },
+    where: {
+      id: mapId,
+      isActive: true
+    }
+  });
+}
+
+export async function listActiveMapSummaries() {
+  return prisma.map.findMany({
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true
+    },
     where: { isActive: true }
   });
 }

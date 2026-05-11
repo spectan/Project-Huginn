@@ -2,6 +2,7 @@
 
 import type { CSSProperties, MouseEvent } from "react";
 import {
+  RIFT_OVERLAY_DISTANCE_TILES,
   TOWER_PLACEMENT_DISTANCE_TILES,
   TOWER_PROTECTION_DISTANCE_TILES
 } from "@/lib/domain/constants";
@@ -18,9 +19,9 @@ type MarkerLayerProps = {
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markers: WorkspaceMarker[];
-  onContextMenu(marker: WorkspaceMarker, event: MouseEvent<HTMLElement>): void;
+  onContextMenu(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
   onHoverEnd(): void;
-  onHoverMove(marker: WorkspaceMarker, event: MouseEvent<HTMLElement>): void;
+  onHoverMove(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
   view: MarkerLayerView;
   visibility: MarkerVisibility;
 };
@@ -54,13 +55,43 @@ function renderMarker(
   highlightedMarkerIds: Set<string>,
   markerColors: MarkerColors,
   markerOpacities: MarkerOpacities,
-  onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<HTMLElement>) => void,
+  onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
   onHoverEnd: () => void,
-  onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<HTMLElement>) => void,
+  onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
   view: MarkerLayerView,
   visibility: MarkerVisibility
 ) {
   const isHighlighted = highlightedMarkerIds.has(marker.id);
+
+  if (isPathMarker(marker)) {
+    if (!isPathVisible(marker, visibility)) {
+      return null;
+    }
+
+    const canInteract = marker.type !== "highway" || visibility.highwayDetails;
+
+    return (
+      <svg aria-label={`${getPathTypeLabel(marker.type)} path layer`} className="map-path-svg" key={marker.id}>
+        <polyline
+          aria-label={`${getPathTypeLabel(marker.type)} ${marker.name || "path"} from ${marker.x}, ${marker.y}`}
+          className={getPathClassName(isHighlighted, canInteract)}
+          data-testid={`path-marker-${marker.id}`}
+          fill="none"
+          onContextMenu={canInteract ? (event) => onContextMenu(marker, event) : undefined}
+          onMouseEnter={canInteract ? (event) => onHoverMove(marker, event) : undefined}
+          onMouseLeave={canInteract ? onHoverEnd : undefined}
+          onMouseMove={canInteract ? (event) => onHoverMove(marker, event) : undefined}
+          points={getPathSvgPoints(marker.points, view)}
+          role={canInteract ? "button" : undefined}
+          stroke={getPathColor(marker.type, markerColors)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={getPathStrokeWidth(marker.width, view)}
+          tabIndex={canInteract ? 0 : undefined}
+        />
+      </svg>
+    );
+  }
 
   if (marker.type === "tower") {
     if (!visibility.towers) {
@@ -111,6 +142,7 @@ function renderMarker(
         y: marker.y - marker.north
       }, view)
     };
+    const deedPerimeterStyles = getDeedPerimeterStyles(marker, markerColors.deeds, markerOpacities.deeds, view);
 
     return (
       <div className="map-marker-group" key={marker.id}>
@@ -131,6 +163,30 @@ function renderMarker(
               }}
               type="button"
             />
+            {visibility.deedPerimeters ? (
+              <>
+                <span
+                  className="map-deed-perimeter"
+                  data-testid={`deed-perimeter-top-${marker.id}`}
+                  style={deedPerimeterStyles.top}
+                />
+                <span
+                  className="map-deed-perimeter"
+                  data-testid={`deed-perimeter-bottom-${marker.id}`}
+                  style={deedPerimeterStyles.bottom}
+                />
+                <span
+                  className="map-deed-perimeter"
+                  data-testid={`deed-perimeter-left-${marker.id}`}
+                  style={deedPerimeterStyles.left}
+                />
+                <span
+                  className="map-deed-perimeter"
+                  data-testid={`deed-perimeter-right-${marker.id}`}
+                  style={deedPerimeterStyles.right}
+                />
+              </>
+            ) : null}
             <span
               className={isHighlighted ? "map-deed-center map-deed-center--visual map-search-match" : "map-deed-center map-deed-center--visual"}
               data-testid={`deed-center-${marker.id}`}
@@ -151,6 +207,73 @@ function renderMarker(
           />
         )}
       </div>
+    );
+  }
+
+  if (marker.type === "rift") {
+    return (
+      <div className="map-marker-group" key={marker.id}>
+        {visibility.overlays && visibility.riftOverlays ? (
+          <span
+            className="map-rift-overlay"
+            data-testid={`rift-overlay-${marker.id}`}
+            style={getOverlayStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, "#ef4444", 0.18, markerOpacities.riftOverlays, view)}
+          />
+        ) : null}
+        <button
+          aria-label={`Rift at ${marker.x}, ${marker.y}`}
+          className={isHighlighted ? "map-marker map-marker--rift map-search-match" : "map-marker map-marker--rift"}
+          data-testid={`rift-marker-${marker.id}`}
+          onContextMenu={(event) => onContextMenu(marker, event)}
+          onMouseEnter={(event) => onHoverMove(marker, event)}
+          onMouseLeave={onHoverEnd}
+          onMouseMove={(event) => onHoverMove(marker, event)}
+          style={getCenterTileStyle(marker.x, marker.y, view)}
+          type="button"
+        />
+      </div>
+    );
+  }
+
+  if (marker.type === "camp") {
+    if (!visibility.camps) {
+      return null;
+    }
+
+    return (
+      <button
+        aria-label={`Camp ${marker.campType} at ${marker.x}, ${marker.y}`}
+        className={isHighlighted ? "map-marker map-marker--camp map-search-match" : "map-marker map-marker--camp"}
+        data-testid={`camp-marker-${marker.id}`}
+        key={marker.id}
+        onContextMenu={(event) => onContextMenu(marker, event)}
+        onMouseEnter={(event) => onHoverMove(marker, event)}
+        onMouseLeave={onHoverEnd}
+        onMouseMove={(event) => onHoverMove(marker, event)}
+        style={getCampMarkerStyle(marker.x, marker.y, markerColors.camps, view)}
+        type="button"
+      />
+    );
+  }
+
+  if (marker.type === "minedoor") {
+    if (!visibility.minedoors) {
+      return null;
+    }
+
+    return (
+      <button
+        aria-label={`Minedoor at ${marker.x}, ${marker.y}`}
+        className={isHighlighted ? "map-marker map-marker--minedoor map-search-match" : "map-marker map-marker--minedoor"}
+        data-testid={`minedoor-marker-${marker.id}`}
+        key={marker.id}
+        onContextMenu={(event) => onContextMenu(marker, event)}
+        onMouseEnter={(event) => onHoverMove(marker, event)}
+        onMouseLeave={onHoverEnd}
+        onMouseMove={(event) => onHoverMove(marker, event)}
+        style={getMinedoorMarkerStyle(marker.x, marker.y, markerColors.minedoors, view)}
+        type="button"
+      />
     );
   }
 
@@ -181,6 +304,102 @@ function getCenterTileStyle(x: number, y: number, view: MarkerLayerView): CSSPro
     x: x - 1,
     y: y - 1
   }, view);
+}
+
+function getSingleTileStyle(x: number, y: number, view: MarkerLayerView): CSSProperties {
+  return getScreenRectStyle({
+    height: 1,
+    width: 1,
+    x,
+    y
+  }, view);
+}
+
+type CampMarkerStyle = CSSProperties & {
+  "--map-camp-color": string;
+};
+
+function getCampMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): CampMarkerStyle {
+  return {
+    ...getCenterTileStyle(x, y, view),
+    "--map-camp-color": color
+  };
+}
+
+type MinedoorMarkerStyle = CSSProperties & {
+  "--map-minedoor-color": string;
+};
+
+function getMinedoorMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): MinedoorMarkerStyle {
+  return {
+    ...getSingleTileStyle(x, y, view),
+    "--map-minedoor-color": color
+  };
+}
+
+function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" }> {
+  return marker.type === "bridge" || marker.type === "canal" || marker.type === "highway";
+}
+
+function isPathVisible(
+  marker: Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" }>,
+  visibility: MarkerVisibility
+): boolean {
+  if (marker.type === "bridge") {
+    return visibility.bridges;
+  }
+
+  if (marker.type === "canal") {
+    return visibility.canals;
+  }
+
+  return visibility.highways;
+}
+
+function getPathColor(type: "bridge" | "canal" | "highway", markerColors: MarkerColors): string {
+  if (type === "bridge") {
+    return markerColors.bridges;
+  }
+
+  if (type === "canal") {
+    return markerColors.canals;
+  }
+
+  return markerColors.highways;
+}
+
+function getPathClassName(isHighlighted: boolean, canInteract: boolean): string {
+  return [
+    "map-path",
+    isHighlighted ? "map-search-match" : "",
+    canInteract ? "" : "map-path--passive"
+  ].filter(Boolean).join(" ");
+}
+
+function getPathTypeLabel(type: "bridge" | "canal" | "highway"): string {
+  if (type === "bridge") {
+    return "Bridge";
+  }
+
+  if (type === "canal") {
+    return "Canal";
+  }
+
+  return "Highway";
+}
+
+function getPathSvgPoints(points: Array<{ x: number; y: number }>, view: MarkerLayerView): string {
+  return points.map((point) => (
+    `${formatSvgNumber(view.x + (point.x + 0.5) * view.zoom)},${formatSvgNumber(view.y + (point.y + 0.5) * view.zoom)}`
+  )).join(" ");
+}
+
+function getPathStrokeWidth(width: number, view: MarkerLayerView): number {
+  return Math.max(1, width * view.zoom);
+}
+
+function formatSvgNumber(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
 function getColoredCenterTileStyle(
@@ -261,6 +480,41 @@ function getDeedWidth(marker: Extract<WorkspaceMarker, { type: "deed" }>): numbe
 
 function getDeedHeight(marker: Extract<WorkspaceMarker, { type: "deed" }>): number {
   return marker.north + marker.south + 1;
+}
+
+function getDeedPerimeterStyles(
+  marker: Extract<WorkspaceMarker, { type: "deed" }>,
+  color: string,
+  opacity: number,
+  view: MarkerLayerView
+): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+  const x = marker.x - marker.west - marker.perimeter;
+  const y = marker.y - marker.north - marker.perimeter;
+  const width = getDeedWidth(marker) + marker.perimeter * 2;
+  const height = getDeedHeight(marker) + marker.perimeter * 2;
+  const edgeStyle = {
+    backgroundColor: colorWithAlpha(color, 0.9),
+    opacity: percentageToOpacity(opacity)
+  };
+
+  return {
+    bottom: {
+      ...getScreenRectStyle({ height: 1, width, x, y: y + height - 1 }, view),
+      ...edgeStyle
+    },
+    left: {
+      ...getScreenRectStyle({ height, width: 1, x, y }, view),
+      ...edgeStyle
+    },
+    right: {
+      ...getScreenRectStyle({ height, width: 1, x: x + width - 1, y }, view),
+      ...edgeStyle
+    },
+    top: {
+      ...getScreenRectStyle({ height: 1, width, x, y }, view),
+      ...edgeStyle
+    }
+  };
 }
 
 function formatPixels(value: number): string {

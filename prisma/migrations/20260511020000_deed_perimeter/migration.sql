@@ -1,0 +1,2 @@
+ALTER TABLE "deeds"
+  ADD COLUMN "perimeter" INTEGER NOT NULL DEFAULT 5;

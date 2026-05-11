@@ -28,6 +28,13 @@ export function createAuthDependencies(): AuthServiceDependencies {
         }
       });
     },
+    findUserById: async (userId) => {
+      return prisma.user.findUnique({
+        where: {
+          id: userId
+        }
+      });
+    },
     findUserByUsername: async (username) => {
       return prisma.user.findFirst({
         where: {
@@ -71,6 +78,35 @@ export function createAuthDependencies(): AuthServiceDependencies {
         where: {
           id: userId
         }
+      });
+    },
+    updateUserPassword: async ({ currentSessionTokenHash, passwordHash, userId }) => {
+      return prisma.$transaction(async (tx) => {
+        const existingUser = await tx.user.findUnique({
+          where: {
+            id: userId
+          }
+        });
+
+        if (existingUser === null) {
+          return null;
+        }
+
+        await tx.session.deleteMany({
+          where: {
+            ...(currentSessionTokenHash === null ? {} : { tokenHash: { not: currentSessionTokenHash } }),
+            userId
+          }
+        });
+
+        return tx.user.update({
+          data: {
+            passwordHash
+          },
+          where: {
+            id: userId
+          }
+        });
       });
     },
     verifyPassword: async (hash, password) => argon2.verify(hash, password)

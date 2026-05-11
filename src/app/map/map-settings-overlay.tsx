@@ -111,6 +111,14 @@ export function MapSettingsOverlay({
               })}
             />
             <LayerControlRow
+              checked={markerVisibility.deedPerimeters}
+              label="Deed Perimeters"
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                deedPerimeters: !markerVisibility.deedPerimeters
+              })}
+            />
+            <LayerControlRow
               checked={markerVisibility.notes}
               colorLabel="Notes color"
               colorValue={markerColors.notes}
@@ -122,6 +130,80 @@ export function MapSettingsOverlay({
               onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 notes: !markerVisibility.notes
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.camps}
+              colorLabel="Camps color"
+              colorValue={markerColors.camps}
+              label="Camps"
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, camps: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                camps: !markerVisibility.camps
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.minedoors}
+              colorLabel="Minedoors color"
+              colorValue={markerColors.minedoors}
+              label="Minedoors"
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, minedoors: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                minedoors: !markerVisibility.minedoors
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.bridges}
+              colorLabel="Bridges color"
+              colorValue={markerColors.bridges}
+              label="Bridges"
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, bridges: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                bridges: !markerVisibility.bridges
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.canals}
+              colorLabel="Canals color"
+              colorValue={markerColors.canals}
+              label="Canals"
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, canals: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                canals: !markerVisibility.canals
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.highways}
+              colorLabel="Highways color"
+              colorValue={markerColors.highways}
+              label="Highways"
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, highways: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                highways: !markerVisibility.highways
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.highwayDetails}
+              label="Highway Details"
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                highwayDetails: !markerVisibility.highwayDetails
+              })}
+            />
+            <LayerControlRow
+              checked={markerVisibility.riftOverlays}
+              label="Rift Overlays"
+              opacityLabel="Rift Overlay opacity"
+              opacityValue={markerOpacities.riftOverlays}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, riftOverlays: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                riftOverlays: !markerVisibility.riftOverlays
               })}
             />
             <LayerControlRow

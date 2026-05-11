@@ -20,7 +20,8 @@ type AuditRecordInput = {
     | "LOGIN"
     | "FAILED_LOGIN"
     | "FAILED_AUTHORIZATION"
-    | "USER_APPROVED";
+    | "USER_APPROVED"
+    | "USER_PASSWORD_CHANGED";
   actorUserId: string | null;
   metadata: Record<string, unknown>;
   targetId: string | null;
@@ -30,9 +31,15 @@ type AuditRecordInput = {
 export type AuthServiceDependencies = {
   createSession(userId: string): Promise<SessionCreation>;
   createUser(data: { passwordHash: string; username: string }): Promise<UserWithPassword>;
+  findUserById(userId: string): Promise<UserWithPassword | null>;
   findUserByUsername(username: string): Promise<UserWithPassword | null>;
   hashPassword(password: string): Promise<string>;
   recordAudit(input: AuditRecordInput): Promise<void>;
+  updateUserPassword(input: {
+    currentSessionTokenHash: string | null;
+    passwordHash: string;
+    userId: string;
+  }): Promise<UserWithPassword | null>;
   updateUserApproval(input: {
     accessLevel: "READ" | "WRITE";
     approvedByUserId: string;
@@ -45,6 +52,12 @@ type AuthResult = {
   sessionExpiresAt: Date;
   sessionToken: string;
   viewer: AuthViewer;
+};
+
+type OwnPasswordChangeInput = {
+  confirmPassword: string;
+  currentPassword: string;
+  newPassword: string;
 };
 
 export async function registerUser(
@@ -170,6 +183,95 @@ export async function approveUser(
   });
 
   return ok(toViewer(user));
+}
+
+export async function changeOwnPassword(
+  input: {
+    actor: { id: string };
+    currentSessionTokenHash: string | null;
+    input: unknown;
+  },
+  dependencies: AuthServiceDependencies
+): Promise<Result<{ ok: true }>> {
+  const passwordInput = parseOwnPasswordChangeInput(input.input);
+
+  if (!passwordInput.ok) {
+    return passwordInput;
+  }
+
+  const user = await dependencies.findUserById(input.actor.id);
+
+  if (user === null) {
+    return err("User was not found");
+  }
+
+  if (!(await dependencies.verifyPassword(user.passwordHash, passwordInput.value.currentPassword))) {
+    return err("Current password is incorrect");
+  }
+
+  const passwordHash = await dependencies.hashPassword(passwordInput.value.newPassword);
+  const updatedUser = await dependencies.updateUserPassword({
+    currentSessionTokenHash: input.currentSessionTokenHash,
+    passwordHash,
+    userId: user.id
+  });
+
+  if (updatedUser === null) {
+    return err("User was not found");
+  }
+
+  await recordAudit(dependencies, {
+    action: "USER_PASSWORD_CHANGED",
+    actorUserId: input.actor.id,
+    metadata: {
+      username: updatedUser.username
+    },
+    targetId: updatedUser.id,
+    targetType: "USER"
+  });
+
+  return ok({ ok: true });
+}
+
+function parseOwnPasswordChangeInput(input: unknown): Result<OwnPasswordChangeInput> {
+  if (typeof input !== "object" || input === null) {
+    return err("Password change input is required");
+  }
+
+  const currentPassword = getString(input, "currentPassword");
+  const newPassword = getString(input, "newPassword");
+  const confirmPassword = getString(input, "confirmPassword");
+
+  if (currentPassword.length === 0) {
+    return err("Current password is required");
+  }
+
+  if (!isValidPassword(newPassword)) {
+    return err("Password must be 12-128 characters");
+  }
+
+  if (newPassword !== confirmPassword) {
+    return err("New passwords do not match");
+  }
+
+  return ok({
+    confirmPassword,
+    currentPassword,
+    newPassword
+  });
+}
+
+function getString(input: object, key: string): string {
+  if (!(key in input)) {
+    return "";
+  }
+
+  const value = input[key as keyof typeof input];
+  return typeof value === "string" ? value : "";
+}
+
+function isValidPassword(password: string): boolean {
+  return password.length >= 12 && password.length <= 128;
 }
 
 async function passwordMatches(

@@ -48,34 +48,51 @@ enum AuditTargetType {
   TOWER
   DEED
   NOTE
+  RIFT
+  CAMP
+  MINEDOOR
+  PATH
   SESSION
   SYSTEM
 }
 
 model User {
-  id                 String         @id @default(cuid())
-  username           String         @unique
-  passwordHash       String
-  approvalStatus     ApprovalStatus @default(PENDING)
-  accessLevel        AccessLevel    @default(NONE)
-  isAdmin            Boolean        @default(false)
-  approvedAt         DateTime?
-  approvedByUserId   String?
-  approvedBy         User?          @relation("UserApprovals", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  approvedUsers      User[]         @relation("UserApprovals")
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  createdTowers      Tower[]        @relation("TowerCreatedBy")
-  updatedTowers      Tower[]        @relation("TowerUpdatedBy")
-  deletedTowers      Tower[]        @relation("TowerDeletedBy")
-  createdDeeds       Deed[]         @relation("DeedCreatedBy")
-  updatedDeeds       Deed[]         @relation("DeedUpdatedBy")
-  deletedDeeds       Deed[]         @relation("DeedDeletedBy")
-  createdNotes       Note[]         @relation("NoteCreatedBy")
-  updatedNotes       Note[]         @relation("NoteUpdatedBy")
-  deletedNotes       Note[]         @relation("NoteDeletedBy")
-  auditEvents        AuditEvent[]   @relation("AuditActor")
-  sessions           Session[]
+  id               String            @id @default(cuid())
+  username         String            @unique
+  passwordHash     String
+  approvalStatus   ApprovalStatus    @default(PENDING)
+  accessLevel      AccessLevel       @default(NONE)
+  isAdmin          Boolean           @default(false)
+  approvedAt       DateTime?
+  approvedByUserId String?
+  approvedBy       User?             @relation("UserApprovals", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedUsers    User[]            @relation("UserApprovals")
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  createdTowers    Tower[]           @relation("TowerCreatedBy")
+  updatedTowers    Tower[]           @relation("TowerUpdatedBy")
+  deletedTowers    Tower[]           @relation("TowerDeletedBy")
+  createdDeeds     Deed[]            @relation("DeedCreatedBy")
+  updatedDeeds     Deed[]            @relation("DeedUpdatedBy")
+  deletedDeeds     Deed[]            @relation("DeedDeletedBy")
+  createdNotes     Note[]            @relation("NoteCreatedBy")
+  updatedNotes     Note[]            @relation("NoteUpdatedBy")
+  deletedNotes     Note[]            @relation("NoteDeletedBy")
+  createdRifts     Rift[]            @relation("RiftCreatedBy")
+  updatedRifts     Rift[]            @relation("RiftUpdatedBy")
+  deletedRifts     Rift[]            @relation("RiftDeletedBy")
+  createdCamps     Camp[]            @relation("CampCreatedBy")
+  updatedCamps     Camp[]            @relation("CampUpdatedBy")
+  deletedCamps     Camp[]            @relation("CampDeletedBy")
+  createdMinedoors Minedoor[]        @relation("MinedoorCreatedBy")
+  updatedMinedoors Minedoor[]        @relation("MinedoorUpdatedBy")
+  deletedMinedoors Minedoor[]        @relation("MinedoorDeletedBy")
+  createdPaths     PathMarker[]      @relation("PathCreatedBy")
+  updatedPaths     PathMarker[]      @relation("PathUpdatedBy")
+  deletedPaths     PathMarker[]      @relation("PathDeletedBy")
+  auditEvents      AuditEvent[]      @relation("AuditActor")
+  sessions         Session[]
+  mapSettings      UserMapSettings[]
 
   @@index([approvalStatus])
   @@index([accessLevel])
@@ -97,44 +114,68 @@ model Session {
 }
 
 model Map {
-  id          String       @id @default(cuid())
-  name        String
-  imagePath   String
-  widthPx     Int
-  heightPx    Int
-  isActive    Boolean      @default(true)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  towers      Tower[]
-  deeds       Deed[]
-  notes       Note[]
+  id             String            @id @default(cuid())
+  name           String
+  imagePath      String
+  widthPx        Int
+  heightPx       Int
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  layers         MapLayer[]
+  towers         Tower[]
+  deeds          Deed[]
+  notes          Note[]
+  rifts          Rift[]
+  camps          Camp[]
+  minedoors      Minedoor[]
+  paths          PathMarker[]
   noteCategories NoteCategory[]
-  auditEvents AuditEvent[]
+  auditEvents    AuditEvent[]
+  userSettings   UserMapSettings[]
 
   @@index([isActive])
   @@map("maps")
 }
 
+model MapLayer {
+  id        String   @id @default(cuid())
+  mapId     String
+  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  name      String
+  imagePath String
+  widthPx   Int
+  heightPx  Int
+  sortOrder Int      @default(0)
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mapId, name])
+  @@index([mapId, sortOrder])
+  @@map("map_layers")
+}
+
 model Tower {
-  id                String    @id @default(cuid())
-  mapId             String
-  map               Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
-  x                 Int
-  y                 Int
-  qlHundredths      Int
-  damageHundredths  Int
-  makerName         String
-  makerNumber       String
-  createdByUserId   String?
-  createdBy         User?     @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  updatedByUserId   String?
-  updatedBy         User?     @relation("TowerUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
-  deletedAt         DateTime?
-  deletedByUserId   String?
-  deletedBy         User?     @relation("TowerDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
-  deleteExpiresAt   DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id               String    @id @default(cuid())
+  mapId            String
+  map              Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x                Int
+  y                Int
+  qlHundredths     Int
+  damageHundredths Int
+  makerName        String
+  makerNumber      String
+  createdByUserId  String?
+  createdBy        User?     @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId  String?
+  updatedBy        User?     @relation("TowerUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt        DateTime?
+  deletedByUserId  String?
+  deletedBy        User?     @relation("TowerDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([mapId, deletedAt])
   @@index([deleteExpiresAt])
@@ -148,7 +189,9 @@ model Deed {
   x               Int
   y               Int
   name            String
+  foundingDate    DateTime? @db.Date
   north           Int
+  perimeter       Int       @default(5)
   west            Int
   east            Int
   south           Int
@@ -194,6 +237,107 @@ model Note {
   @@map("notes")
 }
 
+model Rift {
+  id                String    @id @default(cuid())
+  mapId             String
+  map               Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x                 Int
+  y                 Int
+  arrivalDate       DateTime? @db.Date
+  estimatedRiftTime DateTime?
+  notes             String    @default("")
+  createdByUserId   String?
+  createdBy         User?     @relation("RiftCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId   String?
+  updatedBy         User?     @relation("RiftUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt         DateTime?
+  deletedByUserId   String?
+  deletedBy         User?     @relation("RiftDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt   DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("rifts")
+}
+
+model Camp {
+  id              String    @id @default(cuid())
+  mapId           String
+  map             Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x               Int
+  y               Int
+  campType        String
+  notes           String    @default("")
+  createdByUserId String?
+  createdBy       User?     @relation("CampCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId String?
+  updatedBy       User?     @relation("CampUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt       DateTime?
+  deletedByUserId String?
+  deletedBy       User?     @relation("CampDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("camps")
+}
+
+model Minedoor {
+  id              String    @id @default(cuid())
+  mapId           String
+  map             Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x               Int
+  y               Int
+  strength        String    @default("")
+  notes           String    @default("")
+  createdByUserId String?
+  createdBy       User?     @relation("MinedoorCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId String?
+  updatedBy       User?     @relation("MinedoorUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt       DateTime?
+  deletedByUserId String?
+  deletedBy       User?     @relation("MinedoorDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("minedoors")
+}
+
+model PathMarker {
+  id              String    @id @default(cuid())
+  mapId           String
+  map             Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  pathType        String
+  x               Int
+  y               Int
+  name            String    @default("")
+  width           Int       @default(1)
+  notes           String    @default("")
+  points          Json
+  createdByUserId String?
+  createdBy       User?     @relation("PathCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId String?
+  updatedBy       User?     @relation("PathUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt       DateTime?
+  deletedByUserId String?
+  deletedBy       User?     @relation("PathDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@index([pathType])
+  @@map("path_markers")
+}
+
 model NoteCategory {
   id        String   @id @default(cuid())
   mapId     String
@@ -205,6 +349,21 @@ model NoteCategory {
   @@unique([mapId, name])
   @@index([mapId])
   @@map("note_categories")
+}
+
+model UserMapSettings {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mapId     String
+  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  settings  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, mapId])
+  @@index([mapId])
+  @@map("user_map_settings")
 }
 
 model AuditEvent {

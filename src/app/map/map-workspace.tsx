@@ -4,15 +4,21 @@ import Image from "next/image";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
   type CSSProperties,
-  type FormEvent
+  type FormEvent,
+  type ReactNode
 } from "react";
 import { formatTowerCreator } from "@/lib/domain/markers";
 import { canReadMap, canWriteMarkers } from "@/lib/domain/permissions";
+import {
+  MAX_PATH_POINTS,
+  MAX_PATH_WIDTH_TILES
+} from "@/lib/domain/constants";
 import {
   TILE_HIGHLIGHT_GROUPS,
   buildTileHighlightOutlineMask,
@@ -20,6 +26,11 @@ import {
   isTileHighlightSelection,
   parseHexRgb
 } from "@/lib/domain/tile-highlighting";
+import {
+  DEFAULT_USER_MAP_SETTINGS,
+  type TileHighlightPanelPosition,
+  type UserMapSettings
+} from "@/lib/map-settings/map-settings";
 import type {
   MarkerColors,
   MarkerOpacities,
@@ -28,7 +39,9 @@ import type {
   NoteCategory,
   TileHighlightSettings,
   WorkspaceMap,
-  WorkspaceMarker
+  WorkspaceMapLayer,
+  WorkspaceMarker,
+  WorkspaceServer
 } from "@/lib/markers/marker-types";
 import { AccountOverlay, type AccountViewer } from "./account-overlay";
 import { MapSettingsOverlay } from "./map-settings-overlay";
@@ -43,35 +56,6 @@ const SECTOR_GRID_LEFT_OFFSET_PX = -16;
 const SECTOR_GRID_TOP_OFFSET_PX = 18;
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
-const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
-  deeds: true,
-  deedNames: false,
-  missionGrid: false,
-  notes: true,
-  overlays: true,
-  sectorGrid: false,
-  towers: true,
-  towerNames: false
-};
-const DEFAULT_MARKER_COLORS: MarkerColors = {
-  deeds: "#facc15",
-  missionGrid: "#22c55e",
-  notes: "#ff2bd6",
-  sectorGrid: "#ffffff",
-  towers: "#ffffff"
-};
-const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
-  deeds: 100,
-  missionGrid: 100,
-  notes: 100,
-  sectorGrid: 100,
-  towers: 100
-};
-const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
-  color: "#c000ff",
-  opacity: 75,
-  selection: ""
-};
 const DEFAULT_NOTE_CATEGORIES: NoteCategory[] = [
   { id: "default-category-general", name: "General" }
 ];
@@ -91,11 +75,6 @@ type DragState = {
   startX: number;
   startY: number;
   startZoom: number;
-};
-
-type FloatingPanelPosition = {
-  left: number;
-  top: number;
 };
 
 type FloatingPanelDragState = {
@@ -121,6 +100,7 @@ type MapCoordinate = {
 type ContextMenuState = {
   screenX: number;
   screenY: number;
+  view: ViewState;
 } & (
   | {
       mapX: number;
@@ -145,26 +125,65 @@ type HoveredMarkerState = {
   screenY: number;
 };
 
+type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway">;
+
+type PathDraftState = {
+  id?: string;
+  mode: "create" | "edit";
+  name: string;
+  notes: string;
+  points: MapCoordinate[];
+  type: PathMarkerType;
+  width: number;
+};
+
+type PathPointDragState = {
+  pointIndex: number;
+  pointerId: number;
+};
+
 type MapWorkspaceProps = {
   initialMarkers: WorkspaceMarker[];
   initialNoteCategories?: readonly NoteCategory[];
+  initialSettings?: UserMapSettings;
   map: WorkspaceMap | null;
+  selectedLayerId?: string;
+  servers?: readonly WorkspaceServer[];
   viewer: AccountViewer | null;
 };
 
 export default function MapWorkspace({
   initialMarkers,
   initialNoteCategories = DEFAULT_NOTE_CATEGORIES,
+  initialSettings = DEFAULT_USER_MAP_SETTINGS,
   map,
+  selectedLayerId,
+  servers = [],
   viewer
 }: MapWorkspaceProps) {
   const viewport = useViewportSize();
-  const mapSize = getMapSize(map);
+  const mapLayers = useMemo(() => getWorkspaceMapLayers(map), [map]);
+  const initialSelectedLayerId = useMemo(
+    () => getInitialSelectedLayerId(mapLayers, selectedLayerId),
+    [mapLayers, selectedLayerId]
+  );
+  const [selectedMapLayerOverrideId, setSelectedMapLayerOverrideId] = useState<string | null>(null);
+  const effectiveSelectedLayerId = selectedMapLayerOverrideId ?? initialSelectedLayerId;
+  const selectedMapLayer = useMemo(
+    () => mapLayers.find((layer) => layer.id === effectiveSelectedLayerId) ?? mapLayers[0] ?? null,
+    [effectiveSelectedLayerId, mapLayers]
+  );
+  const visualMap = useMemo(
+    () => map === null ? null : applyMapLayer(map, selectedMapLayer),
+    [map, selectedMapLayer]
+  );
+  const availableServers = useMemo(() => getAvailableServers(servers, map), [map, servers]);
+  const mapSize = getMapSize(visualMap);
   const urlSearchSnapshot = useUrlSearchSnapshot();
   const fittedView = useMemo(() => getFitView(viewport, mapSize), [mapSize, viewport]);
   const urlCoordinate = useMemo(
-    () => getUrlCoordinate(map, urlSearchSnapshot),
-    [map, urlSearchSnapshot]
+    () => getUrlCoordinate(visualMap, urlSearchSnapshot),
+    [visualMap, urlSearchSnapshot]
   );
   const urlCoordinateView = useMemo(
     () => urlCoordinate === null ? null : getCoordinateView(urlCoordinate, viewport, mapSize),
@@ -177,16 +196,22 @@ export default function MapWorkspace({
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [localMarkers, setLocalMarkers] = useState<WorkspaceMarker[] | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [markerVisibility, setMarkerVisibility] = useState<MarkerVisibility>(DEFAULT_MARKER_VISIBILITY);
-  const [markerColors, setMarkerColors] = useState<MarkerColors>(DEFAULT_MARKER_COLORS);
-  const [markerOpacities, setMarkerOpacities] = useState<MarkerOpacities>(DEFAULT_MARKER_OPACITIES);
-  const [tileHighlight, setTileHighlight] = useState<TileHighlightSettings>(DEFAULT_TILE_HIGHLIGHT);
+  const [markerVisibility, setMarkerVisibility] = useState<MarkerVisibility>(initialSettings.markerVisibility);
+  const [markerColors, setMarkerColors] = useState<MarkerColors>(initialSettings.markerColors);
+  const [markerOpacities, setMarkerOpacities] = useState<MarkerOpacities>(initialSettings.markerOpacities);
+  const [tileHighlight, setTileHighlight] = useState<TileHighlightSettings>(initialSettings.tileHighlight);
+  const [tileHighlightPanelPosition, setTileHighlightPanelPosition] =
+    useState<TileHighlightPanelPosition | null>(initialSettings.tileHighlightPanelPosition);
   const [hoveredMarker, setHoveredMarker] = useState<HoveredMarkerState | null>(null);
+  const [pathDraft, setPathDraft] = useState<PathDraftState | null>(null);
+  const pathDraftRef = useRef<PathDraftState | null>(pathDraft);
   const [noteCategories, setNoteCategories] = useState<NoteCategory[]>(
     Array.from(initialNoteCategories.length === 0 ? DEFAULT_NOTE_CATEGORIES : initialNoteCategories)
   );
   const [searchQuery, setSearchQuery] = useState("");
   const dragRef = useRef<DragState | null>(null);
+  const pathPointDragRef = useRef<PathPointDragState | null>(null);
+  const hasInitializedSettingsSaveRef = useRef(false);
   const view = manualView ?? urlCoordinateView ?? fittedView;
   const markers = localMarkers ?? initialMarkers;
   const searchTerm = searchQuery.trim().toLowerCase();
@@ -213,6 +238,13 @@ export default function MapWorkspace({
     approvalStatus: viewer.approvalStatus,
     isAdmin: viewer.isAdmin
   });
+  const userMapSettings = useMemo<UserMapSettings>(() => ({
+    markerColors,
+    markerOpacities,
+    markerVisibility,
+    tileHighlight,
+    tileHighlightPanelPosition
+  }), [markerColors, markerOpacities, markerVisibility, tileHighlight, tileHighlightPanelPosition]);
 
   const updateMarkers = useCallback(
     (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => {
@@ -220,6 +252,10 @@ export default function MapWorkspace({
     },
     [initialMarkers]
   );
+  useLayoutEffect(() => {
+    pathDraftRef.current = pathDraft;
+  }, [pathDraft]);
+
   const createNoteCategory = useCallback(async (name: string): Promise<NoteCategory | null> => {
     if (map === null) {
       return null;
@@ -239,6 +275,62 @@ export default function MapWorkspace({
     setNoteCategories((current) => upsertNoteCategory(current, body.category));
     return body.category;
   }, [map]);
+  const startCreateMarker = useCallback((markerType: MarkerType, coordinate: MapCoordinate, creationView: ViewState = view) => {
+    setFormError(null);
+    setContextMenu(null);
+
+    if (isPathMarkerType(markerType)) {
+      setManualView(creationView);
+      setPathDraft({
+        mode: "create",
+        name: "",
+        notes: "",
+        points: [coordinate],
+        type: markerType,
+        width: 1
+      });
+      return;
+    }
+
+    setDialog({
+      markerType,
+      mode: "create",
+      x: coordinate.x,
+      y: coordinate.y
+    });
+  }, [view]);
+  const startEditMarker = useCallback((marker: WorkspaceMarker) => {
+    setFormError(null);
+    setContextMenu(null);
+
+    if (isPathMarker(marker)) {
+      setPathDraft({
+        id: marker.id,
+        mode: "edit",
+        name: marker.name,
+        notes: marker.notes,
+        points: marker.points,
+        type: marker.type,
+        width: marker.width
+      });
+      return;
+    }
+
+    setDialog({ marker, mode: "edit" });
+  }, []);
+  const handlePathPointPointerDown = useCallback((pointIndex: number, event: React.PointerEvent<HTMLButtonElement>) => {
+    if (!isPrimaryPointerButton(event.button)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    pathPointDragRef.current = {
+      pointIndex,
+      pointerId: event.pointerId
+    };
+  }, []);
 
   const selectCoordinate = useCallback((coordinate: MapCoordinate) => {
     setSelectedCoordinate(coordinate);
@@ -278,7 +370,7 @@ export default function MapWorkspace({
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
-      if (event.button !== 0 || isInteractivePanTarget(event.target)) {
+      if (!isPrimaryPointerButton(event.button) || isInteractivePanTarget(event.target)) {
         return;
       }
 
@@ -301,13 +393,13 @@ export default function MapWorkspace({
 
   const handleContextMenu = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
-      if (!canViewMap || map === null) {
+      if (!canViewMap || visualMap === null) {
         return;
       }
 
       const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
 
-      if (!isInsideMap(coordinate, map)) {
+      if (!isInsideMap(coordinate, visualMap)) {
         return;
       }
 
@@ -318,14 +410,15 @@ export default function MapWorkspace({
         mapY: coordinate.y,
         mode: "map",
         screenX: event.clientX,
-        screenY: event.clientY
+        screenY: event.clientY,
+        view
       });
     },
-    [canViewMap, map, selectCoordinate, view]
+    [canViewMap, selectCoordinate, view, visualMap]
   );
 
   const handleMarkerContextMenu = useCallback(
-    (marker: WorkspaceMarker, event: React.MouseEvent<HTMLElement>) => {
+    (marker: WorkspaceMarker, event: React.MouseEvent<Element>) => {
       if (!canWriteMapMarkers) {
         return;
       }
@@ -339,11 +432,84 @@ export default function MapWorkspace({
         markers: getVisibleMarkersAtCoordinate(displayedMarkers, markerVisibility, marker.x, marker.y),
         mode: "marker",
         screenX: event.clientX,
-        screenY: event.clientY
+        screenY: event.clientY,
+        view
       });
     },
-    [canWriteMapMarkers, displayedMarkers, markerVisibility, selectCoordinate]
+    [canWriteMapMarkers, displayedMarkers, markerVisibility, selectCoordinate, view]
   );
+
+  const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; pointerId: number }) => {
+    const drag = dragRef.current;
+
+    if (drag === null) {
+      return;
+    }
+
+    const dragPointerId = drag.pointerId as number | undefined;
+
+    if (dragPointerId !== undefined && dragPointerId !== event.pointerId) {
+      return;
+    }
+
+    dragRef.current = null;
+    setIsDragging(false);
+
+    if (drag.hasMoved || !canViewMap || visualMap === null) {
+      return;
+    }
+
+    const coordinate = getMapCoordinate(event.clientX, event.clientY, {
+      x: drag.startX,
+      y: drag.startY,
+      zoom: drag.startZoom
+    });
+
+    if (isInsideMap(coordinate, visualMap)) {
+      if (pathDraftRef.current !== null) {
+        setPathDraft((current) => current === null
+          ? current
+          : {
+              ...current,
+              points: appendPathDraftPoint(current.points, coordinate)
+            });
+        return;
+      }
+
+      selectCoordinate(coordinate);
+    }
+  }, [canViewMap, selectCoordinate, visualMap]);
+
+  useEffect(() => {
+    function handleNativePointerDown(event: PointerEvent) {
+      if (!isPrimaryPointerButton(event.button) || isInteractivePanTarget(event.target)) {
+        return;
+      }
+
+      if (!(event.target instanceof Element) || event.target.closest(".map-viewport") === null) {
+        return;
+      }
+
+      event.preventDefault();
+      setContextMenu(null);
+      dragRef.current = {
+        hasMoved: false,
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: view.x,
+        startY: view.y,
+        startZoom: view.zoom
+      };
+      setIsDragging(true);
+    }
+
+    window.addEventListener("pointerdown", handleNativePointerDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handleNativePointerDown);
+    };
+  }, [view.x, view.y, view.zoom]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -370,28 +536,7 @@ export default function MapWorkspace({
     }
 
     function endDrag(event: PointerEvent) {
-      const drag = dragRef.current;
-
-      if (drag === null || drag.pointerId !== event.pointerId) {
-        return;
-      }
-
-      dragRef.current = null;
-      setIsDragging(false);
-
-      if (drag.hasMoved || !canViewMap || map === null) {
-        return;
-      }
-
-      const coordinate = getMapCoordinate(event.clientX, event.clientY, {
-        x: drag.startX,
-        y: drag.startY,
-        zoom: drag.startZoom
-      });
-
-      if (isInsideMap(coordinate, map)) {
-        selectCoordinate(coordinate);
-      }
+      finishPointerDrag(event);
     }
 
     window.addEventListener("pointermove", handlePointerMove);
@@ -403,7 +548,71 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [canViewMap, map, selectCoordinate]);
+  }, [finishPointerDrag]);
+
+  useEffect(() => {
+    function handlePathPointDrag(event: PointerEvent) {
+      const drag = pathPointDragRef.current;
+
+      if (drag === null || drag.pointerId !== event.pointerId || visualMap === null) {
+        return;
+      }
+
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+
+      if (!isInsideMap(coordinate, visualMap)) {
+        return;
+      }
+
+      setPathDraft((current) => {
+        if (current === null || drag.pointIndex >= current.points.length) {
+          return current;
+        }
+
+        return {
+          ...current,
+          points: current.points.map((point, index) => (index === drag.pointIndex ? coordinate : point))
+        };
+      });
+    }
+
+    function endPathPointDrag(event: PointerEvent) {
+      const drag = pathPointDragRef.current;
+
+      if (drag !== null && drag.pointerId === event.pointerId) {
+        pathPointDragRef.current = null;
+      }
+    }
+
+    window.addEventListener("pointermove", handlePathPointDrag);
+    window.addEventListener("pointerup", endPathPointDrag);
+    window.addEventListener("pointercancel", endPathPointDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePathPointDrag);
+      window.removeEventListener("pointerup", endPathPointDrag);
+      window.removeEventListener("pointercancel", endPathPointDrag);
+    };
+  }, [view, visualMap]);
+
+  useEffect(() => {
+    if (!canViewMap || map === null) {
+      return;
+    }
+
+    if (!hasInitializedSettingsSaveRef.current) {
+      hasInitializedSettingsSaveRef.current = true;
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void saveUserMapSettings(map.id, userMapSettings);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [canViewMap, map, userMapSettings]);
 
   const stageStyle = useMemo(
     () => ({
@@ -426,7 +635,7 @@ export default function MapWorkspace({
 
   return (
     <main className="map-page" aria-label="Map workspace">
-      {canViewMap && map !== null ? (
+      {canViewMap && map !== null && visualMap !== null ? (
         <section
           aria-label="Map image area"
           className={isDragging ? "map-viewport is-dragging" : "map-viewport"}
@@ -439,17 +648,17 @@ export default function MapWorkspace({
             alt="Wurm Online map"
             className="map-image"
             draggable={false}
-            height={map.heightPx}
+            height={visualMap.heightPx}
             onDragStart={preventNativeDrag}
             priority
-            src={map.imageSrc}
+            src={visualMap.imageSrc}
             style={imageStyle}
             unoptimized
-            width={map.widthPx}
+            width={visualMap.widthPx}
           />
           <TileHighlightOverlay
             imageStyle={imageStyle}
-            map={map}
+            map={visualMap}
             tileHighlight={tileHighlight}
           />
           <div
@@ -486,6 +695,13 @@ export default function MapWorkspace({
             view={view}
             visibility={markerVisibility}
           />
+          {pathDraft !== null ? (
+            <PathDraftLayer
+              draft={pathDraft}
+              onPointPointerDown={handlePathPointPointerDown}
+              view={view}
+            />
+          ) : null}
           <DeedNameLayer
             hiddenDeedLabelId={hiddenDeedLabelId}
             markers={displayedMarkers}
@@ -507,51 +723,70 @@ export default function MapWorkspace({
         <SearchOverlay
           onSearchChange={setSearchQuery}
           value={searchQuery}
-        />
+        >
+          {map !== null ? (
+            <MapSelectionControls
+              layers={mapLayers}
+              onLayerChange={(layerId) => {
+                setSelectedMapLayerOverrideId(layerId);
+                updateBrowserLayer(layerId);
+              }}
+              onServerChange={(serverId) => {
+                if (serverId !== map.id) {
+                  navigateToServer(serverId);
+                }
+              }}
+              selectedLayerId={selectedMapLayer?.id ?? ""}
+              selectedServerId={map.id}
+              servers={availableServers}
+            />
+          ) : null}
+        </SearchOverlay>
       ) : null}
       {contextMenu !== null ? (
         contextMenu.mode === "map" ? (
           <MapContextMenu
             canWrite={canWriteMapMarkers}
             contextMenu={contextMenu}
-            onCreate={(markerType) => {
-              setFormError(null);
-              setDialog({
-                markerType,
-                mode: "create",
-                x: contextMenu.mapX,
-                y: contextMenu.mapY
-              });
-              setContextMenu(null);
-            }}
+            onCreate={(markerType) => startCreateMarker(markerType, { x: contextMenu.mapX, y: contextMenu.mapY }, contextMenu.view)}
           />
         ) : (
           <MarkerContextMenu
             contextMenu={contextMenu}
             markerColors={markerColors}
-            onCreate={(markerType) => {
-              setFormError(null);
-              setDialog({
-                markerType,
-                mode: "create",
-                x: contextMenu.mapX,
-                y: contextMenu.mapY
-              });
-              setContextMenu(null);
-            }}
+            onCreate={(markerType) => startCreateMarker(markerType, { x: contextMenu.mapX, y: contextMenu.mapY }, contextMenu.view)}
             onDelete={(marker) => {
               setContextMenu(null);
               void deleteMarkerRequest(marker, updateMarkers, setDialog, setFormError);
             }}
-            onEdit={(marker) => {
-              setFormError(null);
-              setDialog({ marker, mode: "edit" });
-              setContextMenu(null);
-            }}
+            onEdit={startEditMarker}
           />
         )
       ) : null}
-      {hoveredMarker !== null ? <MarkerHoverDetails hoveredMarker={hoveredMarker} /> : null}
+      {pathDraft !== null && map !== null ? (
+        <PathDraftPanel
+          draft={pathDraft}
+          error={formError}
+          onCancel={() => {
+            setPathDraft(null);
+            setFormError(null);
+          }}
+          onChange={(nextDraft) => setPathDraft(nextDraft)}
+          onClear={() => setPathDraft((current) => current === null ? current : { ...current, points: [] })}
+          onRemovePoint={(pointIndex) => setPathDraft((current) => current === null ? current : {
+            ...current,
+            points: current.points.filter((_, index) => index !== pointIndex)
+          })}
+          onSave={() => void savePathDraft(pathDraft, map.id, updateMarkers, setPathDraft, setFormError)}
+          onUndo={() => setPathDraft((current) => current === null ? current : {
+            ...current,
+            points: current.points.slice(0, -1)
+          })}
+        />
+      ) : null}
+      {hoveredMarker !== null && canUseMarkerDetails(hoveredMarker.marker, markerVisibility) ? (
+        <MarkerHoverDetails hoveredMarker={hoveredMarker} />
+      ) : null}
       {dialog !== null && map !== null ? (
         <MarkerDialog
           dialog={dialog}
@@ -571,6 +806,8 @@ export default function MapWorkspace({
         {canViewMap ? (
           <TileHighlightControl
             onTileHighlightChange={setTileHighlight}
+            onTileHighlightPanelPositionChange={setTileHighlightPanelPosition}
+            position={tileHighlightPanelPosition}
             tileHighlight={tileHighlight}
           />
         ) : null}
@@ -614,6 +851,12 @@ function MapContextMenu({
           <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
           <button onClick={() => onCreate("deed")} role="menuitem" type="button">Deed</button>
           <button onClick={() => onCreate("note")} role="menuitem" type="button">Note</button>
+          <button onClick={() => onCreate("rift")} role="menuitem" type="button">Rift</button>
+          <button onClick={() => onCreate("camp")} role="menuitem" type="button">Camp</button>
+          <button onClick={() => onCreate("minedoor")} role="menuitem" type="button">Minedoor</button>
+          <button onClick={() => onCreate("bridge")} role="menuitem" type="button">Bridge</button>
+          <button onClick={() => onCreate("canal")} role="menuitem" type="button">Canal</button>
+          <button onClick={() => onCreate("highway")} role="menuitem" type="button">Highway</button>
         </>
       ) : null}
     </div>
@@ -621,15 +864,17 @@ function MapContextMenu({
 }
 
 function SearchOverlay({
+  children,
   onSearchChange,
   value
 }: {
+  children?: ReactNode;
   onSearchChange(value: string): void;
   value: string;
 }) {
   return (
     <div className="map-search">
-      <label>
+      <label className="map-search-field">
         <span>Search map</span>
         <input
           aria-label="Search map"
@@ -639,23 +884,72 @@ function SearchOverlay({
           value={value}
         />
       </label>
+      {children}
+    </div>
+  );
+}
+
+function MapSelectionControls({
+  layers,
+  onLayerChange,
+  onServerChange,
+  selectedLayerId,
+  selectedServerId,
+  servers
+}: {
+  layers: readonly WorkspaceMapLayer[];
+  onLayerChange(layerId: string): void;
+  onServerChange(serverId: string): void;
+  selectedLayerId: string;
+  selectedServerId: string;
+  servers: readonly WorkspaceServer[];
+}) {
+  return (
+    <div className="map-selection-controls">
+      <label>
+        <span>Server</span>
+        <select
+          aria-label="Server"
+          onChange={(event) => onServerChange(event.target.value)}
+          value={selectedServerId}
+        >
+          {servers.map((server) => (
+            <option key={server.id} value={server.id}>{server.name}</option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>Map</span>
+        <select
+          aria-label="Map"
+          onChange={(event) => onLayerChange(event.target.value)}
+          value={selectedLayerId}
+        >
+          {layers.map((layer) => (
+            <option key={layer.id} value={layer.id}>{layer.name}</option>
+          ))}
+        </select>
+      </label>
     </div>
   );
 }
 
 function TileHighlightControl({
   onTileHighlightChange,
+  onTileHighlightPanelPositionChange,
+  position,
   tileHighlight
 }: {
   onTileHighlightChange(settings: TileHighlightSettings): void;
+  onTileHighlightPanelPositionChange(position: TileHighlightPanelPosition): void;
+  position: TileHighlightPanelPosition | null;
   tileHighlight: TileHighlightSettings;
 }) {
   const panelRef = useRef<HTMLFieldSetElement | null>(null);
   const dragRef = useRef<FloatingPanelDragState | null>(null);
-  const [position, setPosition] = useState<FloatingPanelPosition | null>(null);
 
   const handleDragStart = useCallback((event: React.PointerEvent<HTMLLegendElement>) => {
-    if (event.button !== 0) {
+    if (!isPrimaryPointerButton(event.button)) {
       return;
     }
 
@@ -681,7 +975,7 @@ function TileHighlightControl({
         return;
       }
 
-      setPosition(clampFloatingPanelPosition(
+      onTileHighlightPanelPositionChange(clampFloatingPanelPosition(
         drag.startLeft + event.clientX - drag.startClientX,
         drag.startTop + event.clientY - drag.startClientY,
         drag.width,
@@ -706,7 +1000,7 @@ function TileHighlightControl({
       window.removeEventListener("pointerup", endPanelDrag);
       window.removeEventListener("pointercancel", endPanelDrag);
     };
-  }, []);
+  }, [onTileHighlightPanelPositionChange]);
 
   return (
     <fieldset
@@ -777,6 +1071,98 @@ function MissionGridOverlay({ color, opacity }: { color: string; opacity: number
       data-testid="mission-grid-overlay"
       style={getMissionGridStyle(color, opacity)}
     />
+  );
+}
+
+function PathDraftLayer({
+  draft,
+  onPointPointerDown,
+  view
+}: {
+  draft: PathDraftState;
+  onPointPointerDown(pointIndex: number, event: React.PointerEvent<HTMLButtonElement>): void;
+  view: ViewState;
+}) {
+  return (
+    <div className="map-path-draft-layer" aria-label="Path draft">
+      <svg aria-hidden="true" className="map-path-draft-svg">
+        <polyline
+          className="map-path-draft-line"
+          fill="none"
+          points={getPathDraftSvgPoints(draft.points, view)}
+          stroke={getDefaultPathColor(draft.type)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={Math.max(1, draft.width * view.zoom)}
+        />
+      </svg>
+      {draft.points.map((point, index) => (
+        <button
+          aria-label={`Path point ${index + 1}`}
+          className="map-path-draft-point"
+          key={`${point.x}-${point.y}-${index}`}
+          onPointerDown={(event) => onPointPointerDown(index, event)}
+          style={getScreenCoordinateStyle(point, view)}
+          type="button"
+        />
+      ))}
+    </div>
+  );
+}
+
+function PathDraftPanel({
+  draft,
+  error,
+  onCancel,
+  onChange,
+  onClear,
+  onRemovePoint,
+  onSave,
+  onUndo
+}: {
+  draft: PathDraftState;
+  error: string | null;
+  onCancel(): void;
+  onChange(draft: PathDraftState): void;
+  onClear(): void;
+  onRemovePoint(pointIndex: number): void;
+  onSave(): void;
+  onUndo(): void;
+}) {
+  return (
+    <section className="map-path-draft-panel" role="dialog" aria-label={`Draw ${getPathTypeTitle(draft.type)}`}>
+      <DialogHeader title={`Draw ${getPathTypeTitle(draft.type)}`} onClose={onCancel} />
+      <div className="map-marker-form">
+        <p>{draft.points.length} {draft.points.length === 1 ? "point" : "points"}</p>
+        <label><span>Name</span><input aria-label="Name" onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} /></label>
+        <label><span>Width</span><input aria-label="Width" min={1} max={MAX_PATH_WIDTH_TILES} onChange={(event) => onChange({ ...draft, width: Number(event.target.value) })} type="number" value={draft.width} /></label>
+        <label>
+          <span>Notes</span>
+          <textarea aria-label="Notes" onChange={(event) => onChange({ ...draft, notes: event.target.value })} value={draft.notes} />
+        </label>
+        {draft.points.length > 0 ? (
+          <div className="map-path-point-list">
+            {draft.points.map((point, index) => (
+              <button
+                aria-label={`Remove path point ${index + 1}`}
+                key={`${point.x}-${point.y}-${index}`}
+                onClick={() => onRemovePoint(index)}
+                type="button"
+              >
+                {index + 1}: {point.x}, {point.y}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {error !== null ? <p className="map-auth-error">{error}</p> : null}
+        <div className="map-path-draft-actions">
+          <button disabled={draft.points.length === 0} onClick={onUndo} type="button">Undo point</button>
+          <button disabled={draft.points.length === 0} onClick={onClear} type="button">Clear points</button>
+          <button onClick={onCancel} type="button">Cancel path</button>
+          <button className="map-dialog-primary" disabled={draft.points.length < 2} onClick={onSave} type="button">Save path</button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -984,6 +1370,12 @@ function MarkerContextMenu({
         <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
         <button onClick={() => onCreate("deed")} role="menuitem" type="button">Deed</button>
         <button onClick={() => onCreate("note")} role="menuitem" type="button">Note</button>
+        <button onClick={() => onCreate("rift")} role="menuitem" type="button">Rift</button>
+        <button onClick={() => onCreate("camp")} role="menuitem" type="button">Camp</button>
+        <button onClick={() => onCreate("minedoor")} role="menuitem" type="button">Minedoor</button>
+        <button onClick={() => onCreate("bridge")} role="menuitem" type="button">Bridge</button>
+        <button onClick={() => onCreate("canal")} role="menuitem" type="button">Canal</button>
+        <button onClick={() => onCreate("highway")} role="menuitem" type="button">Highway</button>
       </div>
     </div>
   );
@@ -1157,7 +1549,51 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
       <dl className="map-hover-details-list">
         <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
         <div><dt>Mayor</dt><dd>{marker.founder}</dd></div>
+        {marker.foundingDate === null ? null : <div><dt>Founding date</dt><dd>{marker.foundingDate}</dd></div>}
         <div><dt>Dimensions</dt><dd>{formatDeedDimensions(marker)}</dd></div>
+        <div><dt>Perimeter</dt><dd>{marker.perimeter} tiles</dd></div>
+      </dl>
+    );
+  }
+
+  if (marker.type === "rift") {
+    return (
+      <dl className="map-hover-details-list">
+        <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
+        {marker.arrivalDate === null ? null : <div><dt>Date of arrival</dt><dd>{marker.arrivalDate}</dd></div>}
+        {marker.estimatedRiftTime === null ? null : <div><dt>Estimated rift time</dt><dd>{marker.estimatedRiftTime}</dd></div>}
+        {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
+      </dl>
+    );
+  }
+
+  if (marker.type === "camp") {
+    return (
+      <dl className="map-hover-details-list">
+        <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
+        <div><dt>Type</dt><dd>{marker.campType}</dd></div>
+        {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
+      </dl>
+    );
+  }
+
+  if (marker.type === "minedoor") {
+    return (
+      <dl className="map-hover-details-list">
+        <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
+        {marker.strength.length === 0 ? null : <div><dt>Strength</dt><dd>{marker.strength}</dd></div>}
+        {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
+      </dl>
+    );
+  }
+
+  if (isPathMarker(marker)) {
+    return (
+      <dl className="map-hover-details-list">
+        <div><dt>Start</dt><dd>{marker.x}, {marker.y}</dd></div>
+        <div><dt>Points</dt><dd>{marker.points.length}</dd></div>
+        <div><dt>Width</dt><dd>{marker.width} tiles</dd></div>
+        {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
   }
@@ -1203,12 +1639,74 @@ function MarkerFields({
       <>
         <label><span>Name</span><input name="name" required defaultValue={deed?.name ?? ""} /></label>
         <label><span>Mayor</span><input name="founder" required defaultValue={deed?.founder ?? ""} /></label>
+        <label><span>Founding date</span><input name="foundingDate" type="date" defaultValue={deed?.foundingDate ?? ""} /></label>
         <div className="map-position-fields">
           <label><span>North</span><input name="north" required type="number" min={0} defaultValue={deed?.north ?? 5} /></label>
           <label><span>West</span><input name="west" required type="number" min={0} defaultValue={deed?.west ?? 5} /></label>
           <label><span>East</span><input name="east" required type="number" min={0} defaultValue={deed?.east ?? 5} /></label>
           <label><span>South</span><input name="south" required type="number" min={0} defaultValue={deed?.south ?? 5} /></label>
+          <label><span>Perimeter</span><input name="perimeter" required type="number" min={0} max={100} defaultValue={deed?.perimeter ?? 5} /></label>
         </div>
+      </>
+    );
+  }
+
+  if (markerType === "rift") {
+    const rift = marker?.type === "rift" ? marker : null;
+    return (
+      <>
+        <label><span>Date of arrival</span><input name="arrivalDate" type="date" defaultValue={rift?.arrivalDate ?? ""} /></label>
+        <label><span>Estimated rift time</span><input name="estimatedRiftTime" type="datetime-local" defaultValue={rift?.estimatedRiftTime ?? ""} /></label>
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" defaultValue={rift?.notes ?? ""} />
+        </label>
+      </>
+    );
+  }
+
+  if (markerType === "camp") {
+    const camp = marker?.type === "camp" ? marker : null;
+    return (
+      <>
+        <label>
+          <span>Type</span>
+          <select name="campType" required defaultValue={camp?.campType ?? "Rift"}>
+            <option value="Rift">Rift</option>
+            <option value="Goblin">Goblin</option>
+          </select>
+        </label>
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" defaultValue={camp?.notes ?? ""} />
+        </label>
+      </>
+    );
+  }
+
+  if (markerType === "minedoor") {
+    const minedoor = marker?.type === "minedoor" ? marker : null;
+    return (
+      <>
+        <label><span>Strength</span><input name="strength" defaultValue={minedoor?.strength ?? ""} /></label>
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" defaultValue={minedoor?.notes ?? ""} />
+        </label>
+      </>
+    );
+  }
+
+  if (isPathMarkerType(markerType)) {
+    const path = marker !== null && isPathMarker(marker) ? marker : null;
+    return (
+      <>
+        <label><span>Name</span><input name="name" defaultValue={path?.name ?? ""} /></label>
+        <label><span>Width</span><input name="width" type="number" min={1} max={MAX_PATH_WIDTH_TILES} defaultValue={path?.width ?? 1} /></label>
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" defaultValue={path?.notes ?? ""} />
+        </label>
       </>
     );
   }
@@ -1354,6 +1852,58 @@ async function deleteMarkerRequest(
   setFormError(null);
 }
 
+async function savePathDraft(
+  draft: PathDraftState,
+  mapId: string,
+  setMarkers: (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => void,
+  setPathDraft: (draft: PathDraftState | null) => void,
+  setFormError: (error: string | null) => void
+): Promise<void> {
+  if (draft.points.length < 2) {
+    setFormError("Path must have at least two points");
+    return;
+  }
+
+  const payload = {
+    name: draft.name,
+    notes: draft.notes,
+    points: draft.points,
+    type: draft.type,
+    width: draft.width
+  };
+  const url = draft.mode === "edit" && draft.id !== undefined
+    ? `/api/markers/${draft.type}/${draft.id}`
+    : `/api/maps/${mapId}/markers`;
+  const response = await fetch(url, {
+    body: JSON.stringify(payload),
+    headers: { "content-type": "application/json" },
+    method: draft.mode === "edit" ? "PATCH" : "POST"
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    setFormError(body?.error ?? "Path could not be saved");
+    return;
+  }
+
+  const body = (await response.json()) as { marker: WorkspaceMarker };
+  setMarkers((current) => upsertMarker(current, body.marker));
+  setPathDraft(null);
+  setFormError(null);
+}
+
+async function saveUserMapSettings(mapId: string, settings: UserMapSettings): Promise<void> {
+  try {
+    await fetch(`/api/maps/${mapId}/settings`, {
+      body: JSON.stringify(settings),
+      headers: { "content-type": "application/json" },
+      method: "PATCH"
+    });
+  } catch {
+    // Preference saves are best-effort; the next successful change will send the full settings payload.
+  }
+}
+
 function buildMarkerPayload(markerType: MarkerType, formData: FormData) {
   const base = {
     type: markerType,
@@ -1377,11 +1927,48 @@ function buildMarkerPayload(markerType: MarkerType, formData: FormData) {
     return {
       ...base,
       east: Number(formData.get("east")),
+      foundingDate: String(formData.get("foundingDate") ?? ""),
       founder: String(formData.get("founder") ?? ""),
       name: String(formData.get("name") ?? ""),
       north: Number(formData.get("north")),
+      perimeter: Number(formData.get("perimeter")),
       south: Number(formData.get("south")),
       west: Number(formData.get("west"))
+    };
+  }
+
+  if (markerType === "rift") {
+    return {
+      ...base,
+      arrivalDate: String(formData.get("arrivalDate") ?? ""),
+      estimatedRiftTime: String(formData.get("estimatedRiftTime") ?? ""),
+      notes: String(formData.get("notes") ?? "")
+    };
+  }
+
+  if (markerType === "camp") {
+    return {
+      ...base,
+      campType: String(formData.get("campType") ?? ""),
+      notes: String(formData.get("notes") ?? "")
+    };
+  }
+
+  if (markerType === "minedoor") {
+    return {
+      ...base,
+      notes: String(formData.get("notes") ?? ""),
+      strength: String(formData.get("strength") ?? "")
+    };
+  }
+
+  if (isPathMarkerType(markerType)) {
+    return {
+      name: String(formData.get("name") ?? ""),
+      notes: String(formData.get("notes") ?? ""),
+      points: [],
+      type: markerType,
+      width: 1
     };
   }
 
@@ -1446,6 +2033,56 @@ function getMapSize(map: WorkspaceMap | null) {
     heightPx: map?.heightPx ?? FALLBACK_MAP_SIZE_PX,
     widthPx: map?.widthPx ?? FALLBACK_MAP_SIZE_PX
   };
+}
+
+function getWorkspaceMapLayers(map: WorkspaceMap | null): WorkspaceMapLayer[] {
+  if (map === null) {
+    return [];
+  }
+
+  if (map.layers.length > 0) {
+    return Array.from(map.layers);
+  }
+
+  return [
+    {
+      heightPx: map.heightPx,
+      id: `${map.id}:default`,
+      imageSrc: map.imageSrc,
+      isDefault: true,
+      name: "Terrain",
+      widthPx: map.widthPx
+    }
+  ];
+}
+
+function getInitialSelectedLayerId(layers: readonly WorkspaceMapLayer[], selectedLayerId: string | undefined): string {
+  if (selectedLayerId !== undefined && layers.some((layer) => layer.id === selectedLayerId)) {
+    return selectedLayerId;
+  }
+
+  return layers.find((layer) => layer.isDefault)?.id ?? layers[0]?.id ?? "";
+}
+
+function applyMapLayer(map: WorkspaceMap, layer: WorkspaceMapLayer | null): WorkspaceMap {
+  if (layer === null) {
+    return map;
+  }
+
+  return {
+    ...map,
+    heightPx: layer.heightPx,
+    imageSrc: layer.imageSrc,
+    widthPx: layer.widthPx
+  };
+}
+
+function getAvailableServers(servers: readonly WorkspaceServer[], map: WorkspaceMap | null): WorkspaceServer[] {
+  if (servers.length > 0) {
+    return Array.from(servers);
+  }
+
+  return map === null ? [] : [{ id: map.id, name: map.name }];
 }
 
 type SectorGridStyle = CSSProperties & {
@@ -1561,7 +2198,52 @@ function getScreenCoordinateStyle(coordinate: MapCoordinate, view: ViewState): C
   };
 }
 
-function getFloatingPanelStyle(position: FloatingPanelPosition | null): CSSProperties | undefined {
+function getPathDraftSvgPoints(points: MapCoordinate[], view: ViewState): string {
+  return points.map((point) => {
+    const x = view.x + (point.x + 0.5) * view.zoom;
+    const y = view.y + (point.y + 0.5) * view.zoom;
+
+    return `${formatSvgNumber(x)},${formatSvgNumber(y)}`;
+  }).join(" ");
+}
+
+function getDefaultPathColor(type: PathMarkerType): string {
+  if (type === "bridge") {
+    return DEFAULT_USER_MAP_SETTINGS.markerColors.bridges;
+  }
+
+  if (type === "canal") {
+    return DEFAULT_USER_MAP_SETTINGS.markerColors.canals;
+  }
+
+  return DEFAULT_USER_MAP_SETTINGS.markerColors.highways;
+}
+
+function getPathTypeTitle(type: PathMarkerType): string {
+  if (type === "bridge") {
+    return "Bridge";
+  }
+
+  if (type === "canal") {
+    return "Canal";
+  }
+
+  return "Highway";
+}
+
+function appendPathDraftPoint(points: MapCoordinate[], coordinate: MapCoordinate): MapCoordinate[] {
+  if (points.length >= MAX_PATH_POINTS) {
+    return points;
+  }
+
+  return [...points, coordinate];
+}
+
+function formatSvgNumber(value: number): string {
+  return Number(value.toFixed(3)).toString();
+}
+
+function getFloatingPanelStyle(position: TileHighlightPanelPosition | null): CSSProperties | undefined {
   if (position === null) {
     return undefined;
   }
@@ -1577,7 +2259,7 @@ function clampFloatingPanelPosition(
   top: number,
   width: number,
   height: number
-): FloatingPanelPosition {
+): TileHighlightPanelPosition {
   const viewportWidth = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
 
@@ -1752,10 +2434,27 @@ function getVisibleMarkersAtCoordinate(
   x: number,
   y: number
 ): WorkspaceMarker[] {
-  return markers.filter((marker) => marker.x === x && marker.y === y && isMarkerVisible(marker, visibility));
+  return markers.filter((marker) => (
+    marker.x === x &&
+    marker.y === y &&
+    isMarkerVisible(marker, visibility) &&
+    canUseMarkerDetails(marker, visibility)
+  ));
 }
 
 function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility): boolean {
+  if (isPathMarker(marker)) {
+    if (marker.type === "bridge") {
+      return visibility.bridges;
+    }
+
+    if (marker.type === "canal") {
+      return visibility.canals;
+    }
+
+    return visibility.highways;
+  }
+
   if (marker.type === "tower") {
     return visibility.towers;
   }
@@ -1764,7 +2463,31 @@ function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility):
     return visibility.deeds;
   }
 
+  if (marker.type === "rift") {
+    return true;
+  }
+
+  if (marker.type === "camp") {
+    return visibility.camps;
+  }
+
+  if (marker.type === "minedoor") {
+    return visibility.minedoors;
+  }
+
   return visibility.notes;
+}
+
+function canUseMarkerDetails(marker: WorkspaceMarker, visibility: MarkerVisibility): boolean {
+  return marker.type !== "highway" || visibility.highwayDetails;
+}
+
+function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: PathMarkerType }> {
+  return isPathMarkerType(marker.type);
+}
+
+function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType {
+  return markerType === "bridge" || markerType === "canal" || markerType === "highway";
 }
 
 function markerMatchesSearch(marker: WorkspaceMarker, searchTerm: string): boolean {
@@ -1794,6 +2517,56 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
     ].join(" ");
   }
 
+  if (marker.type === "rift") {
+    return [
+      "rift",
+      "rifts",
+      marker.arrivalDate ?? "",
+      marker.estimatedRiftTime ?? "",
+      marker.notes,
+      marker.x,
+      marker.y
+    ].join(" ");
+  }
+
+  if (marker.type === "camp") {
+    return [
+      "camp",
+      "camps",
+      marker.campType,
+      marker.notes,
+      marker.x,
+      marker.y
+    ].join(" ");
+  }
+
+  if (marker.type === "minedoor") {
+    return [
+      "minedoor",
+      "minedoors",
+      "mine door",
+      "mine doors",
+      marker.strength,
+      marker.notes,
+      marker.x,
+      marker.y
+    ].join(" ");
+  }
+
+  if (isPathMarker(marker)) {
+    return [
+      marker.type,
+      `${marker.type}s`,
+      getPathTypeTitle(marker.type),
+      marker.name,
+      marker.notes,
+      `${marker.width} wide`,
+      ...marker.points.flatMap((point) => [point.x, point.y]),
+      marker.x,
+      marker.y
+    ].join(" ");
+  }
+
   return [
     "note",
     marker.category,
@@ -1808,6 +2581,19 @@ function updateBrowserCoordinate(coordinate: MapCoordinate): void {
   window.history.replaceState(null, "", getCoordinateUrl(coordinate));
 }
 
+function updateBrowserLayer(layerId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("layer", layerId);
+  window.history.replaceState(null, "", url);
+}
+
+function navigateToServer(serverId: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("server", serverId);
+  url.searchParams.delete("layer");
+  window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+}
+
 function getCoordinateUrl(coordinate: MapCoordinate): URL {
   const url = new URL(window.location.href);
   url.searchParams.set("x", String(coordinate.x));
@@ -1819,7 +2605,11 @@ function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
   event.preventDefault();
 }
 
-function isInteractivePanTarget(target: EventTarget): boolean {
+function isPrimaryPointerButton(button: number | undefined): boolean {
+  return button === undefined || button === 0;
+}
+
+function isInteractivePanTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
     return false;
   }
@@ -1836,6 +2626,22 @@ function getMarkerTitle(marker: WorkspaceMarker): string {
     return "Deed";
   }
 
+  if (marker.type === "rift") {
+    return "Rift";
+  }
+
+  if (marker.type === "camp") {
+    return "Camp";
+  }
+
+  if (marker.type === "minedoor") {
+    return "Minedoor";
+  }
+
+  if (isPathMarker(marker)) {
+    return getPathTypeTitle(marker.type);
+  }
+
   return `Note ${marker.category} - ${marker.title}`;
 }
 
@@ -1848,6 +2654,22 @@ function getMarkerHoverTitle(marker: WorkspaceMarker): string {
     return `Deed: ${marker.name}`;
   }
 
+  if (marker.type === "rift") {
+    return "Rift";
+  }
+
+  if (marker.type === "camp") {
+    return `Camp: ${marker.campType}`;
+  }
+
+  if (marker.type === "minedoor") {
+    return "Minedoor";
+  }
+
+  if (isPathMarker(marker)) {
+    return `${getPathTypeTitle(marker.type)}: ${marker.name || "Unnamed path"}`;
+  }
+
   return `${marker.category} - ${marker.title}`;
 }
 
@@ -1858,6 +2680,22 @@ function getMarkerLabel(marker: WorkspaceMarker): string {
 
   if (marker.type === "deed") {
     return `Deed ${marker.name}`;
+  }
+
+  if (marker.type === "rift") {
+    return "Rift";
+  }
+
+  if (marker.type === "camp") {
+    return `Camp ${marker.campType}`;
+  }
+
+  if (marker.type === "minedoor") {
+    return "Minedoor";
+  }
+
+  if (isPathMarker(marker)) {
+    return `${getPathTypeTitle(marker.type)} ${marker.name || "path"}`;
   }
 
   return "Note";
@@ -1880,6 +2718,22 @@ function getMarkerContextTitle(marker: WorkspaceMarker): string {
     return marker.name;
   }
 
+  if (marker.type === "rift") {
+    return "Rift";
+  }
+
+  if (marker.type === "camp") {
+    return `${marker.campType} camp`;
+  }
+
+  if (marker.type === "minedoor") {
+    return "Minedoor";
+  }
+
+  if (isPathMarker(marker)) {
+    return marker.name || getPathTypeTitle(marker.type);
+  }
+
   return marker.title;
 }
 
@@ -1890,6 +2744,22 @@ function getMarkerContextMeta(marker: WorkspaceMarker): string {
 
   if (marker.type === "deed") {
     return `Deed | Mayor ${marker.founder} | ${formatDeedDimensions(marker)}`;
+  }
+
+  if (marker.type === "rift") {
+    return marker.estimatedRiftTime === null ? "Rift" : `Rift | ${marker.estimatedRiftTime}`;
+  }
+
+  if (marker.type === "camp") {
+    return `Camp | ${marker.campType}`;
+  }
+
+  if (marker.type === "minedoor") {
+    return marker.strength.length === 0 ? "Minedoor" : `Minedoor | Strength ${marker.strength}`;
+  }
+
+  if (isPathMarker(marker)) {
+    return `${getPathTypeTitle(marker.type)} | ${marker.points.length} points | Width ${marker.width}`;
   }
 
   return `Note | ${marker.category}`;
@@ -1914,6 +2784,30 @@ function getMarkerContextColor(marker: WorkspaceMarker, markerColors: MarkerColo
     return markerColors.deeds;
   }
 
+  if (marker.type === "rift") {
+    return "#ef4444";
+  }
+
+  if (marker.type === "camp") {
+    return markerColors.camps;
+  }
+
+  if (marker.type === "minedoor") {
+    return markerColors.minedoors;
+  }
+
+  if (marker.type === "bridge") {
+    return markerColors.bridges;
+  }
+
+  if (marker.type === "canal") {
+    return markerColors.canals;
+  }
+
+  if (marker.type === "highway") {
+    return markerColors.highways;
+  }
+
   return markerColors.notes;
 }
 
@@ -1928,6 +2822,30 @@ function getMarkerTypeTitle(markerType: MarkerType): string {
 
   if (markerType === "deed") {
     return "deed";
+  }
+
+  if (markerType === "rift") {
+    return "rift";
+  }
+
+  if (markerType === "camp") {
+    return "camp";
+  }
+
+  if (markerType === "minedoor") {
+    return "minedoor";
+  }
+
+  if (markerType === "bridge") {
+    return "bridge";
+  }
+
+  if (markerType === "canal") {
+    return "canal";
+  }
+
+  if (markerType === "highway") {
+    return "highway";
   }
 
   return "note";

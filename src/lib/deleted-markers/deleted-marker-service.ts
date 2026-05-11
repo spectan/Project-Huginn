@@ -20,7 +20,8 @@ type DeletedMarkerAuditAction =
   | "MARKER_CLEANED_UP"
   | "MARKER_RESTORED";
 
-type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "SYSTEM";
+type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "PATH" | "SYSTEM";
+type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway">;
 
 type DeletedMarkerAuditInput = {
   action: DeletedMarkerAuditAction;
@@ -42,6 +43,10 @@ type ExpiredDeletedMarkerReference = {
   deleteExpiresAt: Date;
   id: string;
   mapId: string;
+};
+
+type ExpiredDeletedPathReference = ExpiredDeletedMarkerReference & {
+  pathType: PathMarkerType;
 };
 
 type DeletedMarkerRecordBase = {
@@ -69,6 +74,24 @@ type DeletedNoteRecord = DeletedMarkerRecordBase & {
   text: string;
 };
 
+type DeletedRiftRecord = DeletedMarkerRecordBase & {
+  arrivalDate: Date | null;
+  estimatedRiftTime: Date | null;
+};
+
+type DeletedCampRecord = DeletedMarkerRecordBase & {
+  campType: string;
+};
+
+type DeletedMinedoorRecord = DeletedMarkerRecordBase & {
+  strength: string;
+};
+
+type DeletedPathRecord = DeletedMarkerRecordBase & {
+  name: string;
+  pathType: PathMarkerType;
+};
+
 export type DeletedMarkerSummary = {
   deletedAt: string;
   deletedByUsername: string;
@@ -82,32 +105,52 @@ export type DeletedMarkerSummary = {
 };
 
 export type DeletedMarkerDependencies = {
+  findDeletedCamp(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedDeed(id: string): Promise<DeletedMarkerReference | null>;
+  findDeletedMinedoor(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedNote(id: string): Promise<DeletedMarkerReference | null>;
+  findDeletedPath(id: string): Promise<DeletedMarkerReference | null>;
+  findDeletedRift(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedTower(id: string): Promise<DeletedMarkerReference | null>;
   listExpiredDeletedMarkers(input: {
     limit: number;
     now: Date;
   }): Promise<{
+    camps: ExpiredDeletedMarkerReference[];
     deeds: ExpiredDeletedMarkerReference[];
+    minedoors: ExpiredDeletedMarkerReference[];
     notes: ExpiredDeletedMarkerReference[];
+    paths: ExpiredDeletedPathReference[];
+    rifts: ExpiredDeletedMarkerReference[];
     towers: ExpiredDeletedMarkerReference[];
   }>;
   listRestorableDeletedMarkers(input: {
     limit: number;
     now: Date;
   }): Promise<{
+    camps: DeletedCampRecord[];
     deeds: DeletedDeedRecord[];
+    minedoors: DeletedMinedoorRecord[];
     notes: DeletedNoteRecord[];
+    paths: DeletedPathRecord[];
+    rifts: DeletedRiftRecord[];
     towers: DeletedTowerRecord[];
   }>;
   now(): Date;
+  permanentlyDeleteCamps(ids: string[]): Promise<number>;
   permanentlyDeleteDeeds(ids: string[]): Promise<number>;
+  permanentlyDeleteMinedoors(ids: string[]): Promise<number>;
   permanentlyDeleteNotes(ids: string[]): Promise<number>;
+  permanentlyDeletePaths(ids: string[]): Promise<number>;
+  permanentlyDeleteRifts(ids: string[]): Promise<number>;
   permanentlyDeleteTowers(ids: string[]): Promise<number>;
   recordAudit(input: DeletedMarkerAuditInput): Promise<void>;
+  restoreCamp(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreDeed(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
+  restoreMinedoor(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreNote(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
+  restorePath(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
+  restoreRift(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreTower(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
 };
 
@@ -132,7 +175,11 @@ export async function listRestorableDeletedMarkers(
   return ok([
     ...deletedMarkers.towers.map(serializeDeletedTower),
     ...deletedMarkers.deeds.map(serializeDeletedDeed),
-    ...deletedMarkers.notes.map(serializeDeletedNote)
+    ...deletedMarkers.notes.map(serializeDeletedNote),
+    ...deletedMarkers.rifts.map(serializeDeletedRift),
+    ...deletedMarkers.camps.map(serializeDeletedCamp),
+    ...deletedMarkers.minedoors.map(serializeDeletedMinedoor),
+    ...deletedMarkers.paths.map(serializeDeletedPath)
   ]);
 }
 
@@ -220,11 +267,43 @@ export async function cleanupExpiredDeletedMarkers(
     dependencies.permanentlyDeleteNotes,
     dependencies
   );
+  const riftCount = await deleteAndAuditExpiredMarkers(
+    "rift",
+    expired.rifts,
+    now,
+    dependencies.permanentlyDeleteRifts,
+    dependencies
+  );
+  const campCount = await deleteAndAuditExpiredMarkers(
+    "camp",
+    expired.camps,
+    now,
+    dependencies.permanentlyDeleteCamps,
+    dependencies
+  );
+  const minedoorCount = await deleteAndAuditExpiredMarkers(
+    "minedoor",
+    expired.minedoors,
+    now,
+    dependencies.permanentlyDeleteMinedoors,
+    dependencies
+  );
+  const pathCounts = await deleteAndAuditExpiredPathMarkers(
+    expired.paths,
+    now,
+    dependencies
+  );
 
   return {
     deletedCounts: {
+      bridge: pathCounts.bridge,
+      camp: campCount,
+      canal: pathCounts.canal,
       deed: deedCount,
+      highway: pathCounts.highway,
+      minedoor: minedoorCount,
       note: noteCount,
+      rift: riftCount,
       tower: towerCount
     }
   };
@@ -248,6 +327,22 @@ function serializeDeletedDeed(marker: DeletedDeedRecord): DeletedMarkerSummary {
 
 function serializeDeletedNote(marker: DeletedNoteRecord): DeletedMarkerSummary {
   return serializeDeletedMarker(marker, "note", marker.text.slice(0, 48));
+}
+
+function serializeDeletedRift(marker: DeletedRiftRecord): DeletedMarkerSummary {
+  return serializeDeletedMarker(marker, "rift", "Rift");
+}
+
+function serializeDeletedCamp(marker: DeletedCampRecord): DeletedMarkerSummary {
+  return serializeDeletedMarker(marker, "camp", `${marker.campType} camp`);
+}
+
+function serializeDeletedMinedoor(marker: DeletedMinedoorRecord): DeletedMarkerSummary {
+  return serializeDeletedMarker(marker, "minedoor", "Minedoor");
+}
+
+function serializeDeletedPath(marker: DeletedPathRecord): DeletedMarkerSummary {
+  return serializeDeletedMarker(marker, marker.pathType, marker.name || getPathTypeTitle(marker.pathType));
 }
 
 function serializeDeletedMarker(
@@ -281,6 +376,22 @@ async function findDeletedMarker(
     return dependencies.findDeletedDeed(markerId);
   }
 
+  if (markerType === "rift") {
+    return dependencies.findDeletedRift(markerId);
+  }
+
+  if (markerType === "camp") {
+    return dependencies.findDeletedCamp(markerId);
+  }
+
+  if (markerType === "minedoor") {
+    return dependencies.findDeletedMinedoor(markerId);
+  }
+
+  if (isPathMarkerType(markerType)) {
+    return dependencies.findDeletedPath(markerId);
+  }
+
   return dependencies.findDeletedNote(markerId);
 }
 
@@ -296,6 +407,22 @@ async function restoreMarker(
 
   if (markerType === "deed") {
     return dependencies.restoreDeed(markerId, input);
+  }
+
+  if (markerType === "rift") {
+    return dependencies.restoreRift(markerId, input);
+  }
+
+  if (markerType === "camp") {
+    return dependencies.restoreCamp(markerId, input);
+  }
+
+  if (markerType === "minedoor") {
+    return dependencies.restoreMinedoor(markerId, input);
+  }
+
+  if (isPathMarkerType(markerType)) {
+    return dependencies.restorePath(markerId, input);
   }
 
   return dependencies.restoreNote(markerId, input);
@@ -331,6 +458,37 @@ async function deleteAndAuditExpiredMarkers(
   return deletedCount;
 }
 
+async function deleteAndAuditExpiredPathMarkers(
+  markers: ExpiredDeletedPathReference[],
+  now: Date,
+  dependencies: DeletedMarkerDependencies
+): Promise<Record<PathMarkerType, number>> {
+  const counts = { bridge: 0, canal: 0, highway: 0 };
+
+  if (markers.length === 0) {
+    return counts;
+  }
+
+  const deletedCount = await dependencies.permanentlyDeletePaths(markers.map((marker) => marker.id));
+
+  for (const marker of markers.slice(0, deletedCount)) {
+    counts[marker.pathType] += 1;
+    await recordAudit(dependencies, {
+      action: "MARKER_CLEANED_UP",
+      actorUserId: null,
+      mapId: marker.mapId,
+      metadata: {
+        cleanedAt: now.toISOString(),
+        markerType: marker.pathType
+      },
+      targetId: marker.id,
+      targetType: "PATH"
+    });
+  }
+
+  return counts;
+}
+
 async function auditAuthorizationFailure(
   dependencies: DeletedMarkerDependencies,
   actor: Actor,
@@ -363,5 +521,37 @@ function getAuditTargetType(markerType: MarkerType): DeletedMarkerAuditTarget {
     return "DEED";
   }
 
+  if (markerType === "rift") {
+    return "RIFT";
+  }
+
+  if (markerType === "camp") {
+    return "CAMP";
+  }
+
+  if (markerType === "minedoor") {
+    return "MINEDOOR";
+  }
+
+  if (isPathMarkerType(markerType)) {
+    return "PATH";
+  }
+
   return "NOTE";
+}
+
+function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType {
+  return markerType === "bridge" || markerType === "canal" || markerType === "highway";
+}
+
+function getPathTypeTitle(markerType: PathMarkerType): string {
+  if (markerType === "bridge") {
+    return "Bridge";
+  }
+
+  if (markerType === "canal") {
+    return "Canal";
+  }
+
+  return "Highway";
 }

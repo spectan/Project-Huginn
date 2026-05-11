@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   formatTowerCreator,
+  validateCampInput,
   validateDeedInput,
+  validateMinedoorInput,
   validateNoteInput,
+  validatePathInput,
+  validateRiftInput,
   validateTowerInput
 } from "./markers";
 
@@ -96,10 +100,12 @@ describe("validateDeedInput", () => {
     expect(
       validateDeedInput(
         {
+          foundingDate: "2026-05-10",
           name: " Oak Harbour ",
           x: 100,
           y: 120,
           north: 5,
+          perimeter: 5,
           west: 6,
           east: 7,
           south: 8,
@@ -110,10 +116,12 @@ describe("validateDeedInput", () => {
     ).toEqual({
       ok: true,
       value: {
+        foundingDate: new Date("2026-05-10T00:00:00.000Z"),
         name: "Oak Harbour",
         x: 100,
         y: 120,
         north: 5,
+        perimeter: 5,
         west: 6,
         east: 7,
         south: 8,
@@ -126,10 +134,12 @@ describe("validateDeedInput", () => {
     expect(
       validateDeedInput(
         {
+          foundingDate: "",
           name: "Oak Harbour",
           x: 3,
           y: 120,
           north: 5,
+          perimeter: 5,
           west: 6,
           east: 7,
           south: 8,
@@ -147,10 +157,12 @@ describe("validateDeedInput", () => {
     expect(
       validateDeedInput(
         {
+          foundingDate: "",
           name: "Oak Harbour",
           x: 100,
           y: 120,
           north: 5,
+          perimeter: 5,
           west: 5,
           east: 5,
           south: 5,
@@ -161,11 +173,82 @@ describe("validateDeedInput", () => {
     ).toMatchObject({
       ok: true,
       value: {
+        foundingDate: null,
         north: 5,
+        perimeter: 5,
         west: 5,
         east: 5,
         south: 5
       }
+    });
+  });
+
+  it("rejects deed perimeters outside the allowed range", () => {
+    expect(
+      validateDeedInput(
+        {
+          foundingDate: "",
+          name: "Oak Harbour",
+          x: 100,
+          y: 120,
+          north: 5,
+          perimeter: 101,
+          west: 5,
+          east: 5,
+          south: 5,
+          founder: "Founder"
+        },
+        bounds
+      )
+    ).toEqual({
+      ok: false,
+      error: "Perimeter must be an integer from 0 to 100"
+    });
+  });
+
+  it("rejects deeds when the expanded perimeter does not fit on the map", () => {
+    expect(
+      validateDeedInput(
+        {
+          foundingDate: "",
+          name: "Oak Harbour",
+          x: 8,
+          y: 120,
+          north: 5,
+          perimeter: 5,
+          west: 5,
+          east: 5,
+          south: 5,
+          founder: "Founder"
+        },
+        bounds
+      )
+    ).toEqual({
+      ok: false,
+      error: "Deed perimeter must fit inside map bounds"
+    });
+  });
+
+  it("rejects invalid deed founding dates", () => {
+    expect(
+      validateDeedInput(
+        {
+          foundingDate: "2026-02-30",
+          name: "Oak Harbour",
+          x: 100,
+          y: 120,
+          north: 5,
+          perimeter: 5,
+          west: 5,
+          east: 5,
+          south: 5,
+          founder: "Founder"
+        },
+        bounds
+      )
+    ).toEqual({
+      ok: false,
+      error: "Founding date must be a valid date in YYYY-MM-DD format"
     });
   });
 });
@@ -215,6 +298,201 @@ describe("validateNoteInput", () => {
     }, bounds)).toEqual({
       ok: false,
       error: "Title is required"
+    });
+  });
+});
+
+describe("validateRiftInput", () => {
+  it("normalizes optional rift dates and notes", () => {
+    expect(validateRiftInput({
+      arrivalDate: "",
+      estimatedRiftTime: "",
+      notes: "  ",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        arrivalDate: null,
+        estimatedRiftTime: null,
+        notes: "",
+        x: 100,
+        y: 120
+      }
+    });
+  });
+
+  it("normalizes supplied rift dates", () => {
+    expect(validateRiftInput({
+      arrivalDate: "2026-05-10",
+      estimatedRiftTime: "2026-05-10T18:30",
+      notes: " Bring cotton ",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        arrivalDate: new Date("2026-05-10T00:00:00.000Z"),
+        estimatedRiftTime: new Date("2026-05-10T18:30:00.000Z"),
+        notes: "Bring cotton",
+        x: 100,
+        y: 120
+      }
+    });
+  });
+
+  it("rejects rifts whose 3 by 3 marker footprint does not fit on the map", () => {
+    expect(validateRiftInput({
+      arrivalDate: "",
+      estimatedRiftTime: "",
+      notes: "",
+      x: 0,
+      y: 120
+    }, bounds)).toEqual({
+      ok: false,
+      error: "Rift marker must fit inside map bounds"
+    });
+  });
+
+  it("rejects invalid rift dates", () => {
+    expect(validateRiftInput({
+      arrivalDate: "2026-02-30",
+      estimatedRiftTime: "",
+      notes: "",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: false,
+      error: "Date of arrival must be a valid date in YYYY-MM-DD format"
+    });
+  });
+});
+
+describe("validateCampInput", () => {
+  it("normalizes a valid camp input", () => {
+    expect(validateCampInput({
+      campType: "Goblin",
+      notes: " Bring friends ",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        campType: "Goblin",
+        notes: "Bring friends",
+        x: 100,
+        y: 120
+      }
+    });
+  });
+
+  it("rejects invalid camp types", () => {
+    expect(validateCampInput({
+      campType: "Dragon",
+      notes: "",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: false,
+      error: "Camp type must be Rift or Goblin"
+    });
+  });
+});
+
+describe("validateMinedoorInput", () => {
+  it("normalizes optional minedoor strength and notes", () => {
+    expect(validateMinedoorInput({
+      notes: "  hidden entrance  ",
+      strength: "  73ql  ",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        notes: "hidden entrance",
+        strength: "73ql",
+        x: 100,
+        y: 120
+      }
+    });
+  });
+});
+
+describe("validatePathInput", () => {
+  it("normalizes bridge, canal, and highway paths with at least two points", () => {
+    expect(validatePathInput({
+      name: "Cedar Bridge",
+      notes: "Two lanes",
+      points: [
+        { x: 10, y: 20 },
+        { x: 12, y: 20 },
+        { x: 12, y: 24 }
+      ],
+      type: "bridge",
+      width: 2
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        name: "Cedar Bridge",
+        notes: "Two lanes",
+        pathType: "bridge",
+        points: [
+          { x: 10, y: 20 },
+          { x: 12, y: 20 },
+          { x: 12, y: 24 }
+        ],
+        width: 2,
+        x: 10,
+        y: 20
+      }
+    });
+  });
+
+  it.each([
+    {
+      error: "Path must have at least two points",
+      input: {
+        name: "",
+        notes: "",
+        points: [{ x: 10, y: 20 }],
+        type: "highway",
+        width: 1
+      }
+    },
+    {
+      error: "Path must have 10 points or fewer",
+      input: {
+        name: "",
+        notes: "",
+        points: Array.from({ length: 11 }, (_, index) => ({ x: index, y: index })),
+        type: "canal",
+        width: 1
+      }
+    },
+    {
+      error: "Path width must be an integer from 1 to 20",
+      input: {
+        name: "",
+        notes: "",
+        points: [{ x: 10, y: 20 }, { x: 11, y: 20 }],
+        type: "bridge",
+        width: 0
+      }
+    },
+    {
+      error: "Path type must be bridge, canal, or highway",
+      input: {
+        name: "",
+        notes: "",
+        points: [{ x: 10, y: 20 }, { x: 11, y: 20 }],
+        type: "tunnel",
+        width: 1
+      }
+    }
+  ])("rejects invalid path input: $error", ({ error, input }) => {
+    expect(validatePathInput(input, bounds)).toEqual({
+      ok: false,
+      error
     });
   });
 });

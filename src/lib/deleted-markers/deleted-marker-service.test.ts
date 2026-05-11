@@ -26,17 +26,29 @@ const expiredAt = new Date("2026-05-10T11:59:59.000Z");
 
 function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependencies {
   return {
+    findDeletedCamp: async () => null,
     findDeletedDeed: async () => null,
+    findDeletedMinedoor: async () => null,
     findDeletedNote: async () => null,
+    findDeletedPath: async () => null,
+    findDeletedRift: async () => null,
     findDeletedTower: async () => null,
     listExpiredDeletedMarkers: async () => ({
+      camps: [],
       deeds: [],
+      minedoors: [],
       notes: [],
+      paths: [],
+      rifts: [],
       towers: []
     }),
     listRestorableDeletedMarkers: async () => ({
+      camps: [],
       deeds: [],
+      minedoors: [],
       notes: [],
+      paths: [],
+      rifts: [],
       towers: [
         {
           deletedAt: new Date("2026-05-10T10:00:00.000Z"),
@@ -53,14 +65,22 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
       ]
     }),
     now: () => now,
+    permanentlyDeleteCamps: async () => 0,
     permanentlyDeleteDeeds: async () => 0,
+    permanentlyDeleteMinedoors: async () => 0,
     permanentlyDeleteNotes: async () => 0,
+    permanentlyDeletePaths: async () => 0,
+    permanentlyDeleteRifts: async () => 0,
     permanentlyDeleteTowers: async () => 0,
     recordAudit: async (event) => {
       auditEvents.push(event);
     },
+    restoreCamp: async () => null,
     restoreDeed: async () => null,
+    restoreMinedoor: async () => null,
     restoreNote: async () => null,
+    restorePath: async () => null,
+    restoreRift: async () => null,
     restoreTower: async () => null
   };
 }
@@ -192,7 +212,9 @@ describe("deleted marker service", () => {
       listExpiredDeletedMarkers: async ({ limit }) => {
         expect(limit).toBe(100);
         return {
+          camps: [],
           deeds: [],
+          minedoors: [],
           notes: [
             {
               deleteExpiresAt: expiredAt,
@@ -200,6 +222,8 @@ describe("deleted marker service", () => {
               mapId: "map-1"
             }
           ],
+          paths: [],
+          rifts: [],
           towers: [
             {
               deleteExpiresAt: expiredAt,
@@ -226,8 +250,14 @@ describe("deleted marker service", () => {
 
     expect(result).toEqual({
       deletedCounts: {
+        bridge: 0,
+        camp: 0,
+        canal: 0,
         deed: 0,
+        highway: 0,
+        minedoor: 0,
         note: 1,
+        rift: 0,
         tower: 1
       }
     });

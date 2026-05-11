@@ -38,7 +38,7 @@ Expected mounted or persistent storage:
 - PostgreSQL data volume.
 - Map image storage directory or Docker volume.
 
-The initial implementation includes the supplied Wurm map as a checked-in static seed asset at `public/maps/wurm-map.png` so the map workspace can render the real map before the admin map-storage workflow exists. Future map management should move map records to database metadata and mounted storage without changing marker coordinates.
+The initial implementation includes checked-in static Celebration map assets under `public/maps/` so the map workspace can render the real map before the admin map-storage workflow exists. Future map management should move map layer records to database metadata and mounted storage without changing marker coordinates.
 
 Production environment variables:
 
@@ -107,24 +107,51 @@ Rules:
 - Pending and rejected users cannot access map data.
 - Admin capability is separate from write capability.
 - Usernames must be normalized consistently for uniqueness.
+- Authenticated users can change their own password from the account dropdown only after providing their current password and confirming a valid new password.
+- Self-service password changes are audited as `USER_PASSWORD_CHANGED` without storing password values in metadata.
+- Self-service password changes must revoke the user's other database sessions while preserving the current session identified by the `wurm_session` cookie token hash.
 
 ### Session
 
-Sessions are stored server-side in the database. The browser receives only an HTTP-only random token cookie; the database stores a SHA-256 hash of that token, the owning user, and the expiration time.
+Sessions are stored server-side in the database. The browser receives only an HTTP-only random token cookie; the database stores a SHA-256 hash of that token, the owning user, and the expiration time. Session cookies are persistent for 90 days, path-scoped to `/`, and same-site `lax` so top-level shared links on the same canonical app host reuse the existing login.
 
 Rules:
 
 - Session cookies must be HTTP-only and same-site.
 - Logout deletes the database session and clears the cookie.
+- Password changes delete any other sessions for the same user so old devices cannot stay authenticated after a credential rotation.
 - Expired sessions must not authenticate a user.
+- Shared links must use the canonical host where the cookie was set; browser cookies do not carry between different hostnames or schemes.
+
+### User Map Settings
+
+User map settings are stored server-side in PostgreSQL as a `UserMapSettings` record scoped by `userId` and `mapId`. The settings payload is JSON, but it must always be validated and merged through the map settings domain module before it reaches the UI or database.
+
+Persisted settings include:
+
+- Marker layer visibility, including camps, minedoors, bridge/canal/highway paths, deed perimeters, and rift overlays.
+- Marker, grid, and tile highlight colors, including camp, minedoor, bridge, canal, and highway marker colors.
+- Marker, grid, and tile highlight opacities.
+- Tile highlight selection.
+- Tile highlighter panel position.
+- Rift overlay visibility and opacity.
+
+Rules:
+
+- Only authenticated users with map read access may read or update their own settings.
+- Settings writes do not create marker records and do not affect shared map data.
+- Settings writes are preference updates, not audited map edits.
+- Invalid or unknown settings fields must fall back to defaults or the current saved value.
 
 ### Map
+
+The current schema uses `Map` as the server/data scope, not only as a visual image. Marker rows, note categories, audit events, and user settings all reference `mapId`, so switching between visual map variants must not create a new `Map` row for the same Wurm server.
 
 Fields:
 
 - `id`.
-- `name`.
-- `imagePath`.
+- `name`, currently the server name shown in the server selector.
+- `imagePath`, retained as the default/fallback visual layer.
 - `widthPx`.
 - `heightPx`.
 - `isActive`.
@@ -134,8 +161,31 @@ Fields:
 Rules:
 
 - Marker coordinates must be within `[0, widthPx - 1]` and `[0, heightPx - 1]`.
-- The first UI can select the active map automatically.
-- Future UIs can expose map selection without changing marker tables.
+- The first UI can select the active server/map data set automatically.
+- Server selection chooses a different `Map` record and therefore a different marker/settings data set.
+- Visual map selection must choose a `MapLayer` under the same `Map` record so all markers persist at the same coordinates.
+
+### MapLayer
+
+Fields:
+
+- `id`.
+- `mapId`.
+- `name`.
+- `imagePath`.
+- `widthPx`.
+- `heightPx`.
+- `sortOrder`.
+- `isDefault`.
+- `createdAt`.
+- `updatedAt`.
+
+Rules:
+
+- `MapLayer` is a visual variant for a server/data-scope `Map`.
+- The layer dropdown can switch `MapLayer` records locally without reloading markers or changing marker API `mapId` values.
+- Layers for the same map should use the same coordinate dimensions unless an explicit coordinate transform feature is added.
+- Celebration is seeded with `Terrain` at `public/maps/wurm-map.png` and `Topographical` at `public/maps/celebration-topo.png`.
 
 ### Tower
 
@@ -174,8 +224,10 @@ Fields:
 - `x`.
 - `y`.
 - `name`.
+- `foundingDate`, an optional date-only value. Marker APIs serialize it as `YYYY-MM-DD` or `null`.
 - `founder` for the stored mayor name. The user-facing label is `Mayor`; the column name can be cleaned up in a later migration.
 - `north`.
+- `perimeter`, a tile count around the deed footprint. Existing deeds default to `5`.
 - `west`.
 - `east`.
 - `south`.
@@ -190,7 +242,10 @@ Fields:
 Rules:
 
 - `north`, `west`, `east`, and `south` must be non-negative integers.
+- `perimeter` must be an integer from `0` to `100`.
+- `foundingDate` is optional, but when supplied it must be a real date in `YYYY-MM-DD` format.
 - The rectangle derived from `x - west`, `y - north`, `x + east`, and `y + south` must fit within the map bounds.
+- The perimeter-expanded rectangle derived by adding `perimeter` tiles around the deed footprint must also fit within the map bounds.
 - The stored `x` and `y` are the deed center pixel.
 - Active deed views exclude rows with `deletedAt` set.
 - Expired deleted rows are permanently deleted after `deleteExpiresAt`.
@@ -221,6 +276,95 @@ Rules:
 - Title, category, and text are validated server-side for every note write.
 - Text has a fixed maximum length.
 - Active note views exclude rows with `deletedAt` set.
+- Expired deleted rows are permanently deleted after `deleteExpiresAt`.
+
+### Rift
+
+Fields:
+
+- `id`.
+- `mapId`.
+- `x`.
+- `y`.
+- `arrivalDate`, optional date-only value serialized as `YYYY-MM-DD` or `null`.
+- `estimatedRiftTime`, optional date-time value serialized as `YYYY-MM-DDTHH:mm` or `null`.
+- `notes`, optional text.
+- `createdByUserId`.
+- `updatedByUserId`.
+- `deletedAt`.
+- `deletedByUserId`.
+- `deleteExpiresAt`.
+- `createdAt`.
+- `updatedAt`.
+
+Rules:
+
+- The stored `x` and `y` are the center of the 3x3 rift marker.
+- The 3x3 marker footprint must fit inside the map bounds.
+- Active rift views exclude rows with `deletedAt` set.
+- Expired deleted rows are permanently deleted after `deleteExpiresAt`.
+
+### Camp
+
+Fields:
+
+- `id`.
+- `mapId`.
+- `x`.
+- `y`.
+- `campType`, constrained by domain validation to `Rift` or `Goblin`.
+- `notes`, optional text.
+- Standard create, update, delete, restore, and expiry fields.
+
+Rules:
+
+- The stored `x` and `y` are the center of the 3x3 camp marker.
+- The 3x3 marker footprint must fit inside the map bounds.
+- Active camp views exclude rows with `deletedAt` set.
+- Expired deleted rows are permanently deleted after `deleteExpiresAt`.
+
+### Minedoor
+
+Fields:
+
+- `id`.
+- `mapId`.
+- `x`.
+- `y`.
+- `strength`, optional text.
+- `notes`, optional text.
+- Standard create, update, delete, restore, and expiry fields.
+
+Rules:
+
+- The stored `x` and `y` are the marked minedoor tile.
+- Active minedoor views exclude rows with `deletedAt` set.
+- Expired deleted rows are permanently deleted after `deleteExpiresAt`.
+
+### PathMarker
+
+Infrastructure paths are stored as first-class marker records for bridges, canals, and highways.
+
+Fields:
+
+- `id`.
+- `mapId`.
+- `pathType`, constrained by domain validation to `bridge`, `canal`, or `highway`.
+- `x`.
+- `y`.
+- `name`, optional text.
+- `width`, an integer tile width.
+- `notes`, optional text.
+- `points`, a JSON array of ordered `{ x, y }` map coordinates.
+- Standard create, update, delete, restore, and expiry fields.
+
+Rules:
+
+- The stored `x` and `y` are copied from the first path point for search, context grouping, and admin deleted-marker summaries.
+- Paths require at least two points and at most ten points.
+- Every point must be inside the map bounds.
+- `width` must be an integer from `1` to `20`.
+- Active path views exclude rows with `deletedAt` set.
 - Expired deleted rows are permanently deleted after `deleteExpiresAt`.
 
 ### NoteCategory
@@ -297,7 +441,28 @@ Deed overlays:
 - Render as low-opacity rectangles.
 - The stored coordinate is the center pixel.
 - Rectangle edges are calculated from north, west, east, and south tile counts.
+- Perimeters render as outline-only edge strips around the rectangle expanded by the deed's perimeter tile count.
 - The visual center pixel is highlighted independently from the area overlay.
+
+Special markers:
+
+- Rifts render as red 3x3-centered triangles.
+- Rifts can optionally render a red 51x51 overlay centered on the rift location. This overlay is controlled by the global overlay toggle plus a dedicated `Rift Overlays` toggle and `Rift Overlay opacity` slider.
+- Camps render as 3x3-centered triangles using the user's camp marker color setting, defaulting to yellow.
+- Minedoors render as a 1x1 marker at the marked tile with a user-colored outline, defaulting to cyan, and white diagonal stripes.
+- Marker buttons rendered directly under the screen-space marker layer must explicitly opt back into pointer events so hover details and context menus work through the layer's non-interactive default.
+- Triangle markers draw the clipped triangle on an inner pseudo-element, not on the interactive button itself, so the button can still render the search pulse outside the triangle bounds.
+- Search text for marker types should include user-facing aliases such as plural forms and spaced variants like `mine door` so users can find markers by how they describe them.
+
+Infrastructure paths:
+
+- Bridges, canals, and highways render as SVG polylines over the map.
+- Default colors follow the WurmMaps convention: bridge magenta, canal blue, highway yellow.
+- Users create and edit paths with click-to-draw points instead of typing every coordinate.
+- Starting a path from the context menu must pin the pre-menu view so coordinate conversion does not shift after the shared-link URL updates.
+- Path search highlighting must pulse the polyline itself, not only point markers.
+- Highways are visible by default but passive by default. Hover details, keyboard focus, and marker context actions are enabled only when the user's `Highway Details` mode is on.
+- Path drawing must only append points from pointer interactions that start on the map viewport; fixed dialogs and controls must not create map points.
 
 Tile highlighting:
 
@@ -305,7 +470,7 @@ Tile highlighting:
 - The UI groups selections into Resources, Roads, Natural Terrain, Infected Terrain, and Other.
 - Highlight masks are transparent image overlays generated from exact RGB matches, with user-configurable highlight color and opacity.
 - The overlay highlights the non-matching tiles surrounding matched tiles, not the matched resource tiles themselves, so resources remain visible while the highlight reads as an outline.
-- Highlighting is local view state and must not create audit events or marker records.
+- Generated highlight masks are local visual overlays and must not create audit events or marker records. The user's selected highlight category, color, opacity, and panel position are persisted as user map settings.
 
 Client pointer conversion must account for zoom, pan, and image scaling. Server validation must only accept stored map coordinates, not screen coordinates.
 
@@ -387,6 +552,8 @@ Operational requirements:
 - Configure secure cookies in production.
 - Use strong session secrets.
 - Do not log passwords, hashes, or session secrets.
+- Do not include `.git` in application deploy or share artifacts; Git metadata can contain author emails, remote URLs, reflogs, and old project names even when the source tree is clean.
+- Personal-information scans must check source files separately from Git metadata, and full Git-history cleanup requires an explicit history rewrite.
 - Provide a health check endpoint.
 - Keep migrations explicit and reversible where practical.
 
@@ -401,6 +568,7 @@ The implementation plan should keep files focused:
 - Permission module owns access checks.
 - Marker validation modules own tower, deed, note, and coordinate validation.
 - Marker data modules own database reads and writes.
+- Map settings modules own user preference validation and persistence.
 - Audit module owns audit event creation.
 - Cleanup command owns expired deleted marker removal.
 - Map workspace components own rendering and interaction only.

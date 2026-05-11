@@ -18,6 +18,9 @@ export function AccountOverlay({ viewer }: AccountOverlayProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
   if (viewer === null) {
     return (
@@ -98,12 +101,62 @@ export function AccountOverlay({ viewer }: AccountOverlayProps) {
               </a>
             </>
           ) : null}
+          <button
+            className="map-account-admin-button"
+            onClick={() => {
+              setIsPasswordFormOpen((current) => !current);
+              setPasswordError(null);
+              setPasswordSuccess(null);
+            }}
+            type="button"
+          >
+            Change password
+          </button>
+          {isPasswordFormOpen ? (
+            <PasswordChangeForm
+              error={passwordError}
+              onSubmit={(event) => void submitPasswordChangeForm(event, setPasswordError, setPasswordSuccess)}
+              success={passwordSuccess}
+            />
+          ) : null}
           <button className="map-account-logout" onClick={() => void logout()} type="button">
             Log out
           </button>
         </section>
       ) : null}
     </div>
+  );
+}
+
+function PasswordChangeForm({
+  error,
+  onSubmit,
+  success
+}: {
+  error: string | null;
+  onSubmit(event: FormEvent<HTMLFormElement>): void;
+  success: string | null;
+}) {
+  return (
+    <form className="map-auth-form map-account-password-form" onSubmit={onSubmit}>
+      <label>
+        <span>Current password</span>
+        <input autoComplete="current-password" name="currentPassword" required type="password" />
+      </label>
+      <label>
+        <span>New password</span>
+        <input autoComplete="new-password" minLength={12} name="newPassword" required type="password" />
+      </label>
+      <label>
+        <span>Confirm new password</span>
+        <input autoComplete="new-password" minLength={12} name="confirmPassword" required type="password" />
+      </label>
+      {error !== null ? <p className="map-auth-error">{error}</p> : null}
+      {success !== null ? <p className="map-auth-success">{success}</p> : null}
+      <button className="map-account-admin-button" type="submit">
+        Save password
+      </button>
+    </form>
   );
 }
 
@@ -199,6 +252,39 @@ async function submitAuthForm(
   }
 
   window.location.reload();
+}
+
+async function submitPasswordChangeForm(
+  event: FormEvent<HTMLFormElement>,
+  setPasswordError: (error: string | null) => void,
+  setPasswordSuccess: (success: string | null) => void
+): Promise<void> {
+  event.preventDefault();
+  setPasswordError(null);
+  setPasswordSuccess(null);
+
+  const form = event.currentTarget;
+  const formData = new FormData(form);
+  const response = await fetch("/api/auth/password", {
+    body: JSON.stringify({
+      confirmPassword: formData.get("confirmPassword"),
+      currentPassword: formData.get("currentPassword"),
+      newPassword: formData.get("newPassword")
+    }),
+    headers: {
+      "content-type": "application/json"
+    },
+    method: "PATCH"
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    setPasswordError(body?.error ?? "Password change failed");
+    return;
+  }
+
+  form.reset();
+  setPasswordSuccess("Password changed");
 }
 
 async function logout(): Promise<void> {

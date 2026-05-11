@@ -36,7 +36,10 @@ await prisma.user.upsert({
 
 const existingMap = await prisma.map.findFirst({
   where: {
-    name: "Wurm Online Map"
+    OR: [
+      { name: "Celebration" },
+      { name: "Wurm Online Map" }
+    ]
   }
 });
 
@@ -46,7 +49,7 @@ const map = existingMap === null
       heightPx: 2048,
       imagePath: "/maps/wurm-map.png",
       isActive: true,
-      name: "Wurm Online Map",
+      name: "Celebration",
       widthPx: 2048
     }
   })
@@ -55,6 +58,7 @@ const map = existingMap === null
       heightPx: 2048,
       imagePath: "/maps/wurm-map.png",
       isActive: true,
+      name: "Celebration",
       widthPx: 2048
     },
     where: {
@@ -76,6 +80,56 @@ await prisma.noteCategory.upsert({
   }
 });
 
+await prisma.mapLayer.upsert({
+  create: {
+    heightPx: 2048,
+    imagePath: "/maps/wurm-map.png",
+    isDefault: true,
+    mapId: map.id,
+    name: "Terrain",
+    sortOrder: 0,
+    widthPx: 2048
+  },
+  update: {
+    heightPx: 2048,
+    imagePath: "/maps/wurm-map.png",
+    isDefault: true,
+    sortOrder: 0,
+    widthPx: 2048
+  },
+  where: {
+    mapId_name: {
+      mapId: map.id,
+      name: "Terrain"
+    }
+  }
+});
+
+await prisma.mapLayer.upsert({
+  create: {
+    heightPx: 2048,
+    imagePath: "/maps/celebration-topo.png",
+    isDefault: false,
+    mapId: map.id,
+    name: "Topographical",
+    sortOrder: 1,
+    widthPx: 2048
+  },
+  update: {
+    heightPx: 2048,
+    imagePath: "/maps/celebration-topo.png",
+    isDefault: false,
+    sortOrder: 1,
+    widthPx: 2048
+  },
+  where: {
+    mapId_name: {
+      mapId: map.id,
+      name: "Topographical"
+    }
+  }
+});
+
 await prisma.$disconnect();
 console.log(`Admin user ready: ${username}`);
-console.log("Initial map ready: Wurm Online Map");
+console.log("Initial map ready: Celebration");

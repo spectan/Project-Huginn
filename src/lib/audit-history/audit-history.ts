@@ -50,6 +50,10 @@ export type AuditHistoryTargetType =
   | "TOWER"
   | "DEED"
   | "NOTE"
+  | "RIFT"
+  | "CAMP"
+  | "MINEDOOR"
+  | "PATH"
   | "SESSION"
   | "SYSTEM";
 

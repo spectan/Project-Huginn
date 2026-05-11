@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_USER_MAP_SETTINGS } from "@/lib/map-settings/map-settings";
 import MapWorkspace from "./map-workspace";
 
 const approvedViewer = {
@@ -22,7 +23,25 @@ const activeMap = {
   heightPx: 2048,
   id: "map-1",
   imageSrc: "/maps/wurm-map.png",
-  name: "Wurm",
+  layers: [
+    {
+      heightPx: 2048,
+      id: "layer-terrain",
+      imageSrc: "/maps/wurm-map.png",
+      isDefault: true,
+      name: "Terrain",
+      widthPx: 2048
+    },
+    {
+      heightPx: 2048,
+      id: "layer-topographical",
+      imageSrc: "/maps/celebration-topo.png",
+      isDefault: false,
+      name: "Topographical",
+      widthPx: 2048
+    }
+  ],
+  name: "Celebration",
   widthPx: 2048
 } as const;
 
@@ -95,6 +114,48 @@ describe("MapPage", () => {
     expect(mapImage.getAttribute("src")).toBe("/maps/wurm-map.png");
     expect(mapImage.getAttribute("width")).toBe("2048");
     expect(mapImage.getAttribute("height")).toBe("2048");
+  });
+
+  it("switches visual map layers without changing the selected server data", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          damage: "0.25",
+          id: "tower-1",
+          makerName: "Mako",
+          makerNumber: "945",
+          ql: "89.50",
+          type: "tower",
+          x: 250,
+          y: 300
+        }
+      ],
+      map: activeMap,
+      servers: [
+        {
+          id: "map-1",
+          name: "Celebration"
+        }
+      ],
+      viewer: approvedViewer
+    }));
+
+    expect(screen.getByRole("combobox", { name: "Server" })).toHaveProperty("value", "map-1");
+    expect(screen.getByRole("option", { name: "Celebration" })).toBeTruthy();
+
+    const mapSelect = screen.getByRole("combobox", { name: "Map" });
+    expect(mapSelect).toHaveProperty("value", "layer-terrain");
+    expect(screen.getByAltText("Wurm Online map").getAttribute("src")).toBe("/maps/wurm-map.png");
+    expect(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" })).toBeTruthy();
+
+    fireEvent.change(mapSelect, {
+      target: {
+        value: "layer-topographical"
+      }
+    });
+
+    expect(screen.getByAltText("Wurm Online map").getAttribute("src")).toBe("/maps/celebration-topo.png");
+    expect(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" })).toBeTruthy();
   });
 
   it("prevents native image dragging so pointer panning owns the interaction", () => {
@@ -333,6 +394,9 @@ describe("MapPage", () => {
     expect(screen.getByRole("menuitem", { name: "Tower" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Deed" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Note" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Rift" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Camp" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Minedoor" })).toBeTruthy();
   });
 
   it("updates the browser URL for read-only map context without copy commands", async () => {
@@ -358,6 +422,9 @@ describe("MapPage", () => {
     expect(screen.queryByRole("menuitem", { name: "Tower" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Deed" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Note" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Rift" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Camp" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Minedoor" })).toBeNull();
   });
 
   it("renders square marker overlays and tower centers", () => {
@@ -375,10 +442,12 @@ describe("MapPage", () => {
         },
         {
           east: 7,
+          foundingDate: "2026-05-10",
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 10,
           south: 8,
           type: "deed",
           west: 6,
@@ -393,6 +462,31 @@ describe("MapPage", () => {
           type: "note",
           x: 700,
           y: 800
+        },
+        {
+          arrivalDate: "2026-05-10",
+          estimatedRiftTime: "2026-05-10T18:30",
+          id: "rift-1",
+          notes: "Bring cotton",
+          type: "rift",
+          x: 900,
+          y: 1000
+        },
+        {
+          campType: "Goblin",
+          id: "camp-1",
+          notes: "",
+          type: "camp",
+          x: 910,
+          y: 1010
+        },
+        {
+          id: "minedoor-1",
+          notes: "Hidden entrance",
+          strength: "73ql",
+          type: "minedoor",
+          x: 920,
+          y: 1020
         }
       ],
       map: activeMap,
@@ -422,6 +516,26 @@ describe("MapPage", () => {
     expect(deedOverlay.style.top).toBe("595px");
     expect(deedOverlay.style.width).toBe("14px");
     expect(deedOverlay.style.height).toBe("14px");
+    const perimeterTop = screen.getByTestId("deed-perimeter-top-deed-1");
+    expect(perimeterTop.style.left).toBe("484px");
+    expect(perimeterTop.style.top).toBe("585px");
+    expect(perimeterTop.style.width).toBe("34px");
+    expect(perimeterTop.style.height).toBe("1px");
+    const perimeterBottom = screen.getByTestId("deed-perimeter-bottom-deed-1");
+    expect(perimeterBottom.style.left).toBe("484px");
+    expect(perimeterBottom.style.top).toBe("618px");
+    expect(perimeterBottom.style.width).toBe("34px");
+    expect(perimeterBottom.style.height).toBe("1px");
+    const perimeterLeft = screen.getByTestId("deed-perimeter-left-deed-1");
+    expect(perimeterLeft.style.left).toBe("484px");
+    expect(perimeterLeft.style.top).toBe("585px");
+    expect(perimeterLeft.style.width).toBe("1px");
+    expect(perimeterLeft.style.height).toBe("34px");
+    const perimeterRight = screen.getByTestId("deed-perimeter-right-deed-1");
+    expect(perimeterRight.style.left).toBe("517px");
+    expect(perimeterRight.style.top).toBe("585px");
+    expect(perimeterRight.style.width).toBe("1px");
+    expect(perimeterRight.style.height).toBe("34px");
     const deedCenter = screen.getByTestId("deed-center-deed-1");
     expect(deedCenter.style.left).toBe("499px");
     expect(deedCenter.style.top).toBe("599px");
@@ -433,6 +547,22 @@ describe("MapPage", () => {
     expect(note.style.width).toBe("3px");
     expect(note.style.height).toBe("3px");
     expect(note.className).toContain("map-marker--note");
+    const rift = screen.getByRole("button", { name: "Rift at 900, 1000" });
+    expect(rift.style.left).toBe("899px");
+    expect(rift.style.top).toBe("999px");
+    expect(rift.style.width).toBe("3px");
+    expect(rift.style.height).toBe("3px");
+    expect(rift.className).toContain("map-marker--rift");
+    const camp = screen.getByRole("button", { name: "Camp Goblin at 910, 1010" });
+    expect(camp.style.left).toBe("909px");
+    expect(camp.style.top).toBe("1009px");
+    expect(camp.className).toContain("map-marker--camp");
+    const minedoor = screen.getByRole("button", { name: "Minedoor at 920, 1020" });
+    expect(minedoor.style.left).toBe("920px");
+    expect(minedoor.style.top).toBe("1020px");
+    expect(minedoor.style.width).toBe("1px");
+    expect(minedoor.style.height).toBe("1px");
+    expect(minedoor.className).toContain("map-marker--minedoor");
   });
 
   it("opens a deed create form with name, mayor, and 5-tile default directional dimensions", async () => {
@@ -455,10 +585,12 @@ describe("MapPage", () => {
     expect(screen.getByRole("dialog", { name: "Add deed" })).toBeTruthy();
     expect(screen.getByLabelText("Name")).toBeTruthy();
     expect(screen.getByLabelText("Mayor")).toBeTruthy();
+    expect(screen.getByLabelText("Founding date")).toHaveProperty("value", "");
     expect(screen.getByLabelText("North")).toHaveProperty("value", "5");
     expect(screen.getByLabelText("West")).toHaveProperty("value", "5");
     expect(screen.getByLabelText("East")).toHaveProperty("value", "5");
     expect(screen.getByLabelText("South")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("Perimeter")).toHaveProperty("value", "5");
   });
 
   it("opens a tower create form with one creator field", async () => {
@@ -509,6 +641,75 @@ describe("MapPage", () => {
     expect(screen.getByRole("option", { name: "General" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Landmarks" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add note category" })).toBeTruthy();
+  });
+
+  it("opens a rift create form with optional date, time, and notes fields", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rift" }));
+
+    expect(screen.getByRole("dialog", { name: "Add rift" })).toBeTruthy();
+    expect(screen.getByLabelText("Date of arrival")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Estimated rift time")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Notes")).toHaveProperty("value", "");
+  });
+
+  it("opens a camp create form with a camp type dropdown and optional notes", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Camp" }));
+
+    expect(screen.getByRole("dialog", { name: "Add camp" })).toBeTruthy();
+    expect(screen.getByLabelText("Type")).toHaveProperty("value", "Rift");
+    expect(screen.getByRole("option", { name: "Rift" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Goblin" })).toBeTruthy();
+    expect(screen.getByLabelText("Notes")).toHaveProperty("value", "");
+  });
+
+  it("opens a minedoor create form with optional strength and notes", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Minedoor" }));
+
+    expect(screen.getByRole("dialog", { name: "Add minedoor" })).toBeTruthy();
+    expect(screen.getByLabelText("Strength")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Notes")).toHaveProperty("value", "");
   });
 
   it("hides note category creation for non-admin writers", async () => {
@@ -592,10 +793,12 @@ describe("MapPage", () => {
         },
         {
           east: 5,
+          foundingDate: "2026-05-10",
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -644,6 +847,8 @@ describe("MapPage", () => {
     expect(screen.getByText("Founder")).toBeTruthy();
     expect(screen.getByText("Dimensions")).toBeTruthy();
     expect(screen.getByText("11x11")).toBeTruthy();
+    expect(screen.getByText("Founding date")).toBeTruthy();
+    expect(screen.getByText("2026-05-10")).toBeTruthy();
   });
 
   it("displays incomplete tower creator numbers as unknown", async () => {
@@ -733,6 +938,67 @@ describe("MapPage", () => {
     expect(screen.getByText("Scout here")).toBeTruthy();
   });
 
+  it("shows hover details for rifts, camps, and minedoors", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          arrivalDate: "2026-05-10",
+          estimatedRiftTime: "2026-05-10T18:30",
+          id: "rift-1",
+          notes: "Bring cotton",
+          type: "rift",
+          x: 900,
+          y: 1000
+        },
+        {
+          campType: "Goblin",
+          id: "camp-1",
+          notes: "Needs scouts",
+          type: "camp",
+          x: 910,
+          y: 1010
+        },
+        {
+          id: "minedoor-1",
+          notes: "Hidden entrance",
+          strength: "73ql",
+          type: "minedoor",
+          x: 920,
+          y: 1020
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.mouseMove(screen.getByRole("button", { name: "Rift at 900, 1000" }), {
+      clientX: 900,
+      clientY: 1000
+    });
+    expect(screen.getByRole("tooltip", { name: "Rift" })).toBeTruthy();
+    expect(screen.getByText("Date of arrival")).toBeTruthy();
+    expect(screen.getByText("2026-05-10")).toBeTruthy();
+    expect(screen.getByText("Estimated rift time")).toBeTruthy();
+    expect(screen.getByText("2026-05-10T18:30")).toBeTruthy();
+    expect(screen.getByText("Bring cotton")).toBeTruthy();
+
+    fireEvent.mouseMove(screen.getByRole("button", { name: "Camp Goblin at 910, 1010" }), {
+      clientX: 910,
+      clientY: 1010
+    });
+    expect(screen.getByRole("tooltip", { name: "Camp: Goblin" })).toBeTruthy();
+    expect(screen.getByText("Needs scouts")).toBeTruthy();
+
+    fireEvent.mouseMove(screen.getByRole("button", { name: "Minedoor at 920, 1020" }), {
+      clientX: 920,
+      clientY: 1020
+    });
+    expect(screen.getByRole("tooltip", { name: "Minedoor" })).toBeTruthy();
+    expect(screen.getByText("Strength")).toBeTruthy();
+    expect(screen.getByText("73ql")).toBeTruthy();
+    expect(screen.getByText("Hidden entrance")).toBeTruthy();
+  });
+
   it("moves compact map layer controls into the settings cog", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
@@ -748,10 +1014,12 @@ describe("MapPage", () => {
         },
         {
           east: 5,
+          foundingDate: null,
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -787,19 +1055,32 @@ describe("MapPage", () => {
     expect(layerControls.getByRole("checkbox", { name: "Towers" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Tower Names" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Deeds" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Deed Perimeters" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Deed Names" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Notes" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Camps" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Minedoors" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Canals" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Highways" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Rift Overlays" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Grid Overlay" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Mission Grid" })).toBeTruthy();
     expect(layerControls.getByLabelText("Towers color")).toBeTruthy();
     expect(layerControls.getByLabelText("Deeds color")).toBeTruthy();
     expect(layerControls.getByLabelText("Notes color")).toBeTruthy();
+    expect(layerControls.getByLabelText("Camps color")).toHaveProperty("value", "#facc15");
+    expect(layerControls.getByLabelText("Minedoors color")).toHaveProperty("value", "#22d3ee");
+    expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#cc00cc");
+    expect(layerControls.getByLabelText("Canals color")).toHaveProperty("value", "#0055cc");
+    expect(layerControls.getByLabelText("Highways color")).toHaveProperty("value", "#cccc00");
     expect(layerControls.getByLabelText("Grid Overlay color")).toBeTruthy();
     expect(layerControls.getByLabelText("Mission Grid color")).toBeTruthy();
     expect(layerControls.getByLabelText("Tile highlight color")).toHaveProperty("value", "#c000ff");
     expect(layerControls.getByRole("slider", { name: "Towers opacity" })).toHaveProperty("value", "100");
     expect(layerControls.getByRole("slider", { name: "Deeds opacity" })).toHaveProperty("value", "100");
     expect(layerControls.getByRole("slider", { name: "Notes opacity" })).toHaveProperty("value", "100");
+    expect(layerControls.getByRole("slider", { name: "Rift Overlay opacity" })).toHaveProperty("value", "100");
     expect(layerControls.getByRole("slider", { name: "Grid Overlay opacity" })).toHaveProperty("value", "100");
     expect(layerControls.getByRole("slider", { name: "Mission Grid opacity" })).toHaveProperty("value", "100");
     expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "75");
@@ -966,6 +1247,136 @@ describe("MapPage", () => {
     expect(tileHighlightPanel.style.top).toBe("45px");
   });
 
+  it("renders saved user map settings from the server", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        markerColors: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerColors,
+          bridges: "#d946ef",
+          camps: "#f59e0b",
+          canals: "#2563eb",
+          highways: "#fde047",
+          minedoors: "#06b6d4",
+          sectorGrid: "#ff8800"
+        },
+        markerOpacities: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerOpacities,
+          riftOverlays: 62,
+          sectorGrid: 45
+        },
+        markerVisibility: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerVisibility,
+          bridges: false,
+          camps: false,
+          canals: false,
+          deedPerimeters: false,
+          highways: false,
+          minedoors: false,
+          riftOverlays: false,
+          sectorGrid: true
+        },
+        tileHighlight: {
+          color: "#00ffaa",
+          opacity: 55,
+          selection: "Clay"
+        },
+        tileHighlightPanelPosition: {
+          left: 72,
+          top: 44
+        }
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const tileHighlightPanel = screen.getByRole("group", { name: "Tile Highlighting" });
+    expect(tileHighlightPanel.className).toContain("is-positioned");
+    expect(tileHighlightPanel.style.left).toBe("72px");
+    expect(tileHighlightPanel.style.top).toBe("44px");
+    expect(within(tileHighlightPanel).getByRole("combobox", { name: "Tile Highlighting" })).toHaveProperty("value", "Clay");
+
+    const sectorGrid = screen.getByTestId("sector-grid-overlay");
+    expect(sectorGrid.style.color).toBe("rgb(255, 136, 0)");
+    expect(sectorGrid.style.opacity).toBe("0.45");
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    expect(layerControls.getByRole("checkbox", { name: "Camps" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("checkbox", { name: "Deed Perimeters" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("checkbox", { name: "Minedoors" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("checkbox", { name: "Canals" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("checkbox", { name: "Highways" })).toHaveProperty("checked", false);
+    expect(layerControls.getByLabelText("Camps color")).toHaveProperty("value", "#f59e0b");
+    expect(layerControls.getByLabelText("Minedoors color")).toHaveProperty("value", "#06b6d4");
+    expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#d946ef");
+    expect(layerControls.getByLabelText("Canals color")).toHaveProperty("value", "#2563eb");
+    expect(layerControls.getByLabelText("Highways color")).toHaveProperty("value", "#fde047");
+    expect(layerControls.getByLabelText("Tile highlight color")).toHaveProperty("value", "#00ffaa");
+    expect(layerControls.getByRole("checkbox", { name: "Rift Overlays" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("slider", { name: "Rift Overlay opacity" })).toHaveProperty("value", "62");
+    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "55");
+  });
+
+  it("saves user map settings when tile highlighter appearance and position change", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    fireEvent.change(layerControls.getByLabelText("Tile highlight color"), {
+      target: { value: "#00ff00" }
+    });
+
+    fireEvent.pointerDown(screen.getByTestId("tile-highlight-drag-handle"), {
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+      pointerId: 11
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 70,
+      clientY: 55,
+      pointerId: 11
+    });
+    fireEvent.pointerUp(window, { pointerId: 11 });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/settings",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+
+    const calls = fetchMock.mock.calls as unknown as Array<[string | URL | Request, RequestInit?]>;
+    const lastCall = calls.at(-1);
+    const requestInit = lastCall?.[1];
+    expect(requestInit).toBeDefined();
+
+    if (requestInit === undefined) {
+      return;
+    }
+
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      tileHighlight: {
+        color: "#00ff00"
+      },
+      tileHighlightPanelPosition: {
+        left: 60,
+        top: 45
+      }
+    });
+  });
+
   it("applies opacity sliders to marker and grid layers", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
@@ -981,10 +1392,12 @@ describe("MapPage", () => {
         },
         {
           east: 5,
+          foundingDate: null,
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -999,6 +1412,23 @@ describe("MapPage", () => {
           type: "note",
           x: 700,
           y: 800
+        },
+        {
+          arrivalDate: null,
+          estimatedRiftTime: null,
+          id: "rift-1",
+          notes: "",
+          type: "rift",
+          x: 900,
+          y: 1000
+        },
+        {
+          campType: "Goblin",
+          id: "camp-1",
+          notes: "",
+          type: "camp",
+          x: 910,
+          y: 1010
         }
       ],
       map: activeMap,
@@ -1019,6 +1449,9 @@ describe("MapPage", () => {
     fireEvent.change(layerControls.getByRole("slider", { name: "Notes opacity" }), {
       target: { value: "65" }
     });
+    fireEvent.change(layerControls.getByRole("slider", { name: "Rift Overlay opacity" }), {
+      target: { value: "45" }
+    });
     fireEvent.change(layerControls.getByRole("slider", { name: "Grid Overlay opacity" }), {
       target: { value: "35" }
     });
@@ -1031,8 +1464,346 @@ describe("MapPage", () => {
     expect(screen.getByTestId("deed-center-deed-1").style.opacity).toBe("0.55");
     expect(screen.getByTestId("deed-overlay-deed-1").style.opacity).toBe("0.55");
     expect(screen.getByTestId("note-center-note-1").style.opacity).toBe("0.65");
+    expect(screen.getByTestId("rift-overlay-rift-1").style.opacity).toBe("0.45");
+    expect(screen.queryByTestId("rift-overlay-camp-1")).toBeNull();
     expect(screen.getByTestId("sector-grid-overlay").style.opacity).toBe("0.35");
     expect(screen.getByTestId("mission-grid-overlay").style.opacity).toBe("0.8");
+  });
+
+  it("toggles and recolors camp and minedoor marker layers", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          campType: "Goblin",
+          id: "camp-1",
+          notes: "",
+          type: "camp",
+          x: 910,
+          y: 1010
+        },
+        {
+          id: "minedoor-1",
+          notes: "",
+          strength: "",
+          type: "minedoor",
+          x: 920,
+          y: 1020
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const camp = screen.getByRole("button", { name: "Camp Goblin at 910, 1010" });
+    const minedoor = screen.getByRole("button", { name: "Minedoor at 920, 1020" });
+    expect(camp.style.getPropertyValue("--map-camp-color")).toBe("#facc15");
+    expect(minedoor.style.getPropertyValue("--map-minedoor-color")).toBe("#22d3ee");
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    fireEvent.change(layerControls.getByLabelText("Camps color"), {
+      target: { value: "#f59e0b" }
+    });
+    fireEvent.change(layerControls.getByLabelText("Minedoors color"), {
+      target: { value: "#06b6d4" }
+    });
+
+    expect(screen.getByRole("button", { name: "Camp Goblin at 910, 1010" }).style.getPropertyValue("--map-camp-color")).toBe("#f59e0b");
+    expect(screen.getByRole("button", { name: "Minedoor at 920, 1020" }).style.getPropertyValue("--map-minedoor-color")).toBe("#06b6d4");
+
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Camps" }));
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Minedoors" }));
+
+    expect(screen.queryByRole("button", { name: "Camp Goblin at 910, 1010" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Minedoor at 920, 1020" })).toBeNull();
+  });
+
+  it("renders a toggleable 51x51 overlay for rifts only", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          arrivalDate: null,
+          estimatedRiftTime: null,
+          id: "rift-1",
+          notes: "",
+          type: "rift",
+          x: 900,
+          y: 1000
+        },
+        {
+          campType: "Goblin",
+          id: "camp-1",
+          notes: "",
+          type: "camp",
+          x: 910,
+          y: 1010
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const overlay = screen.getByTestId("rift-overlay-rift-1");
+    expect(overlay.style.left).toBe("875px");
+    expect(overlay.style.top).toBe("975px");
+    expect(overlay.style.width).toBe("51px");
+    expect(overlay.style.height).toBe("51px");
+    expect(screen.queryByTestId("rift-overlay-camp-1")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Rift Overlays" }));
+
+    expect(screen.queryByTestId("rift-overlay-rift-1")).toBeNull();
+    expect(screen.getByRole("button", { name: "Rift at 900, 1000" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Camp Goblin at 910, 1010" })).toBeTruthy();
+  });
+
+  it("toggles deed perimeters independently from deed overlays", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    expect(screen.getByTestId("deed-overlay-deed-1")).toBeTruthy();
+    expect(screen.getByTestId("deed-perimeter-top-deed-1")).toBeTruthy();
+    expect(screen.getByTestId("deed-center-deed-1")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Deed Perimeters" }));
+
+    expect(screen.getByTestId("deed-overlay-deed-1")).toBeTruthy();
+    expect(screen.queryByTestId("deed-perimeter-top-deed-1")).toBeNull();
+    expect(screen.queryByTestId("deed-perimeter-bottom-deed-1")).toBeNull();
+    expect(screen.queryByTestId("deed-perimeter-left-deed-1")).toBeNull();
+    expect(screen.queryByTestId("deed-perimeter-right-deed-1")).toBeNull();
+    expect(screen.getByTestId("deed-center-deed-1")).toBeTruthy();
+  });
+
+  it("renders toggleable and recolorable infrastructure paths", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "path-1",
+          name: "Cedar Bridge",
+          notes: "Two lanes",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const bridge = screen.getByTestId("path-marker-path-1");
+    expect(bridge.getAttribute("stroke")).toBe("#cc00cc");
+    expect(bridge.getAttribute("stroke-width")).toBe("2");
+    expect(bridge.getAttribute("points")).toBe("100.5,120.5 140.5,120.5");
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    fireEvent.change(layerControls.getByLabelText("Bridges color"), {
+      target: { value: "#d946ef" }
+    });
+
+    expect(screen.getByTestId("path-marker-path-1").getAttribute("stroke")).toBe("#d946ef");
+
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Bridges" }));
+
+    expect(screen.queryByTestId("path-marker-path-1")).toBeNull();
+  });
+
+  it("draws a bridge path by clicking map points and saves it", async () => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({
+        marker: {
+          id: "path-1",
+          name: "Cedar Bridge",
+          notes: "Two lanes",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        }
+      }),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const viewport = screen.getByLabelText("Map image area");
+    fireEvent.contextMenu(viewport, {
+      clientX: 100,
+      clientY: 120
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bridge" }));
+
+    const drawDialog = screen.getByRole("dialog", { name: "Draw Bridge" });
+    expect(within(drawDialog).getByText("1 point")).toBeTruthy();
+
+    fireEvent.pointerDown(viewport, {
+      button: 0,
+      clientX: 140,
+      clientY: 120,
+      pointerId: 44
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 140,
+      clientY: 120,
+      pointerId: 44
+    });
+
+    expect(within(drawDialog).getByText("2 points")).toBeTruthy();
+    fireEvent.change(within(drawDialog).getByLabelText("Name"), {
+      target: { value: "Cedar Bridge" }
+    });
+    fireEvent.change(within(drawDialog).getByLabelText("Width"), {
+      target: { value: "2" }
+    });
+    fireEvent.change(within(drawDialog).getByLabelText("Notes"), {
+      target: { value: "Two lanes" }
+    });
+    fireEvent.click(within(drawDialog).getByRole("button", { name: "Save path" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/markers",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      })
+    ));
+
+    const requestInit = (fetchMock.mock.calls[0] as [unknown, RequestInit | undefined] | undefined)?.[1];
+    expect(requestInit).toBeDefined();
+
+    if (requestInit === undefined) {
+      return;
+    }
+
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      name: "Cedar Bridge",
+      notes: "Two lanes",
+      points: [
+        { x: 100, y: 120 },
+        { x: 140, y: 120 }
+      ],
+      type: "bridge",
+      width: 2
+    });
+    expect(screen.getByTestId("path-marker-path-1")).toBeTruthy();
+  });
+
+  it("does not add path points from pointer events outside the map viewport", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const viewport = screen.getByLabelText("Map image area");
+    fireEvent.contextMenu(viewport, {
+      clientX: 100,
+      clientY: 120
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bridge" }));
+
+    const drawDialog = screen.getByRole("dialog", { name: "Draw Bridge" });
+    expect(within(drawDialog).getByText("1 point")).toBeTruthy();
+
+    fireEvent.pointerUp(window, {
+      clientX: 240,
+      clientY: 260,
+      pointerId: 77
+    });
+
+    expect(within(drawDialog).getByText("1 point")).toBeTruthy();
+    expect(within(drawDialog).queryByText("2 points")).toBeNull();
+  });
+
+  it("requires highway details mode before highways show hover details or marker actions", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "highway-1",
+          name: "East Road",
+          notes: "Main route",
+          points: [
+            { x: 120, y: 130 },
+            { x: 180, y: 130 }
+          ],
+          type: "highway",
+          width: 2,
+          x: 120,
+          y: 130
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const highway = screen.getByTestId("path-marker-highway-1");
+
+    fireEvent.mouseMove(highway, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.queryByRole("tooltip", { name: "Highway: East Road" })).toBeNull();
+
+    fireEvent.contextMenu(highway, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.queryByRole("menu", { name: "Marker actions" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    const highwayDetails = layerControls.getByRole("checkbox", { name: "Highway Details" });
+    expect(highwayDetails).toHaveProperty("checked", false);
+    fireEvent.click(highwayDetails);
+
+    fireEvent.mouseMove(highway, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.getByRole("tooltip", { name: "Highway: East Road" })).toBeTruthy();
+
+    fireEvent.contextMenu(highway, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.getByRole("menu", { name: "Marker actions" })).toBeTruthy();
   });
 
   it("shows tower name labels until the tower is hovered for details", () => {
@@ -1080,10 +1851,12 @@ describe("MapPage", () => {
       initialMarkers: [
         {
           east: 5,
+          foundingDate: null,
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -1177,10 +1950,12 @@ describe("MapPage", () => {
         },
         {
           east: 5,
+          foundingDate: null,
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -1212,15 +1987,69 @@ describe("MapPage", () => {
     expect(screen.getByTestId("note-center-note-1").className).toContain("map-search-match");
   });
 
+  it("searches rifts, camps, and minedoors by type aliases and details", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          arrivalDate: "2026-05-10",
+          estimatedRiftTime: "2026-05-10T18:30",
+          id: "rift-1",
+          notes: "Bring cotton",
+          type: "rift",
+          x: 900,
+          y: 1000
+        },
+        {
+          campType: "Goblin",
+          id: "camp-1",
+          notes: "Needs scouts",
+          type: "camp",
+          x: 910,
+          y: 1010
+        },
+        {
+          id: "minedoor-1",
+          notes: "Hidden entrance",
+          strength: "73ql",
+          type: "minedoor",
+          x: 920,
+          y: 1020
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const searchbox = screen.getByRole("searchbox", { name: "Search map" });
+
+    fireEvent.change(searchbox, { target: { value: "rifts" } });
+    expect(screen.getByRole("button", { name: "Rift at 900, 1000" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Camp Goblin at 910, 1010" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Minedoor at 920, 1020" })).toBeNull();
+
+    fireEvent.change(searchbox, { target: { value: "camps" } });
+    expect(screen.queryByRole("button", { name: "Rift at 900, 1000" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Camp Goblin at 910, 1010" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Minedoor at 920, 1020" })).toBeNull();
+
+    fireEvent.change(searchbox, { target: { value: "mine doors" } });
+    expect(screen.queryByRole("button", { name: "Rift at 900, 1000" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Camp Goblin at 910, 1010" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Minedoor at 920, 1020" })).toBeTruthy();
+    expect(screen.getByTestId("minedoor-marker-minedoor-1").className).toContain("map-search-match");
+  });
+
   it("keeps deed centers visible when overlays are hidden", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
           east: 5,
+          foundingDate: null,
           founder: "Founder",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -1326,10 +2155,12 @@ describe("MapPage", () => {
         },
         {
           east: 5,
+          foundingDate: "2026-05-10",
           founder: "Mayor",
           id: "deed-1",
           name: "Oak Harbour",
           north: 5,
+          perimeter: 5,
           south: 5,
           type: "deed",
           west: 5,
@@ -1375,6 +2206,7 @@ describe("MapPage", () => {
 
     expect(screen.getByRole("dialog", { name: "Edit Deed" })).toBeTruthy();
     expect(screen.getByLabelText("Name")).toHaveProperty("value", "Oak Harbour");
+    expect(screen.getByLabelText("Founding date")).toHaveProperty("value", "2026-05-10");
   });
 
   it("can add another marker at an occupied coordinate from the marker context menu", () => {

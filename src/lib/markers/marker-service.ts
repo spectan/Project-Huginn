@@ -5,11 +5,20 @@ import {
 } from "@/lib/domain/constants";
 import { getDeleteExpiresAt } from "@/lib/domain/deletion";
 import {
+  validateCampInput,
   validateDeedInput,
+  validateMinedoorInput,
   validateNoteInput,
+  validatePathInput,
+  validateRiftInput,
   validateTowerInput,
+  type CampMarkerInput,
   type DeedMarkerInput,
+  type MinedoorMarkerInput,
   type NoteMarkerInput,
+  type PathMarkerInput,
+  type PathType,
+  type RiftMarkerInput,
   type TowerMarkerInput
 } from "@/lib/domain/markers";
 import { formatHundredths } from "@/lib/domain/number-fields";
@@ -20,9 +29,13 @@ import {
 } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
 import type {
+  CampWorkspaceMarker,
   DeedWorkspaceMarker,
   MarkerType,
+  MinedoorWorkspaceMarker,
   NoteWorkspaceMarker,
+  PathWorkspaceMarker,
+  RiftWorkspaceMarker,
   TowerWorkspaceMarker,
   WorkspaceMap,
   WorkspaceMarker
@@ -36,6 +49,16 @@ type MapRecord = {
   heightPx: number;
   id: string;
   imagePath: string;
+  layers?: MapLayerRecord[];
+  name: string;
+  widthPx: number;
+};
+
+type MapLayerRecord = {
+  heightPx: number;
+  id: string;
+  imagePath: string;
+  isDefault: boolean;
   name: string;
   widthPx: number;
 };
@@ -55,6 +78,28 @@ type NoteRecord = NoteMarkerInput & {
   mapId: string;
 };
 
+type RiftRecord = RiftMarkerInput & {
+  id: string;
+  mapId: string;
+};
+
+type CampRecord = Omit<CampMarkerInput, "campType"> & {
+  campType: string;
+  id: string;
+  mapId: string;
+};
+
+type MinedoorRecord = MinedoorMarkerInput & {
+  id: string;
+  mapId: string;
+};
+
+type PathRecord = Omit<PathMarkerInput, "pathType"> & {
+  id: string;
+  mapId: string;
+  pathType: string;
+};
+
 type MarkerWithMap<T> = T & {
   map: MapRecord;
 };
@@ -66,7 +111,7 @@ type MarkerAuditAction =
   | "MARKER_DELETED"
   | "MARKER_LIST_VIEW";
 
-type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "MAP";
+type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "PATH" | "MAP";
 
 type MarkerAuditInput = {
   action: MarkerAuditAction;
@@ -78,35 +123,74 @@ type MarkerAuditInput = {
 };
 
 export type MarkerServiceDependencies = {
+  createCamp(input: CampMarkerInput & { createdByUserId: string; mapId: string }): Promise<CampRecord>;
   createDeed(input: DeedMarkerInput & { createdByUserId: string; mapId: string }): Promise<DeedRecord>;
+  createMinedoor(input: MinedoorMarkerInput & { createdByUserId: string; mapId: string }): Promise<MinedoorRecord>;
   createNote(input: NoteMarkerInput & { createdByUserId: string; mapId: string }): Promise<NoteRecord>;
+  createPath(input: PathMarkerInput & { createdByUserId: string; mapId: string }): Promise<PathRecord>;
+  createRift(input: RiftMarkerInput & { createdByUserId: string; mapId: string }): Promise<RiftRecord>;
   createTower(input: TowerMarkerInput & { createdByUserId: string; mapId: string }): Promise<TowerRecord>;
+  findCamp(id: string): Promise<MarkerWithMap<CampRecord> | null>;
   findDeed(id: string): Promise<MarkerWithMap<DeedRecord> | null>;
   findMap(mapId: string): Promise<MapRecord | null>;
+  findMinedoor(id: string): Promise<MarkerWithMap<MinedoorRecord> | null>;
   findNote(id: string): Promise<MarkerWithMap<NoteRecord> | null>;
+  findPath(id: string): Promise<MarkerWithMap<PathRecord> | null>;
+  findRift(id: string): Promise<MarkerWithMap<RiftRecord> | null>;
   findTower(id: string): Promise<MarkerWithMap<TowerRecord> | null>;
   listActiveMarkers(mapId: string): Promise<{
+    camps: CampRecord[];
     deeds: DeedRecord[];
+    minedoors: MinedoorRecord[];
     notes: NoteRecord[];
+    paths: PathRecord[];
+    rifts: RiftRecord[];
     towers: TowerRecord[];
   }>;
   now(): Date;
   recordAudit(input: MarkerAuditInput): Promise<void>;
+  softDeleteCamp(
+    id: string,
+    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
+  ): Promise<CampRecord | null>;
   softDeleteDeed(
     id: string,
     input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
   ): Promise<DeedRecord | null>;
+  softDeleteMinedoor(
+    id: string,
+    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
+  ): Promise<MinedoorRecord | null>;
   softDeleteNote(
     id: string,
     input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
   ): Promise<NoteRecord | null>;
+  softDeletePath(
+    id: string,
+    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
+  ): Promise<PathRecord | null>;
+  softDeleteRift(
+    id: string,
+    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
+  ): Promise<RiftRecord | null>;
   softDeleteTower(
     id: string,
     input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
   ): Promise<TowerRecord | null>;
+  updateCamp(id: string, input: CampMarkerInput & { updatedByUserId: string }): Promise<CampRecord | null>;
   updateDeed(id: string, input: DeedMarkerInput & { updatedByUserId: string }): Promise<DeedRecord | null>;
+  updateMinedoor(id: string, input: MinedoorMarkerInput & { updatedByUserId: string }): Promise<MinedoorRecord | null>;
   updateNote(id: string, input: NoteMarkerInput & { updatedByUserId: string }): Promise<NoteRecord | null>;
+  updatePath(id: string, input: PathMarkerInput & { updatedByUserId: string }): Promise<PathRecord | null>;
+  updateRift(id: string, input: RiftMarkerInput & { updatedByUserId: string }): Promise<RiftRecord | null>;
   updateTower(id: string, input: TowerMarkerInput & { updatedByUserId: string }): Promise<TowerRecord | null>;
+};
+
+type PathCreateMarkerInput = { type: PathType } & {
+  name: string;
+  notes: string;
+  points: Array<{ x: number; y: number }>;
+  width: number;
 };
 
 export type CreateMarkerInput =
@@ -120,9 +204,11 @@ export type CreateMarkerInput =
     })
   | ({ type: "deed" } & {
       east: number;
+      foundingDate: string;
       founder: string;
       name: string;
       north: number;
+      perimeter: number;
       south: number;
       west: number;
       x: number;
@@ -134,7 +220,27 @@ export type CreateMarkerInput =
       title: string;
       x: number;
       y: number;
-    });
+    })
+  | ({ type: "rift" } & {
+      arrivalDate: string;
+      estimatedRiftTime: string;
+      notes: string;
+      x: number;
+      y: number;
+    })
+  | ({ type: "camp" } & {
+      campType: string;
+      notes: string;
+      x: number;
+      y: number;
+    })
+  | ({ type: "minedoor" } & {
+      notes: string;
+      strength: string;
+      x: number;
+      y: number;
+    })
+  | PathCreateMarkerInput;
 
 export async function listMarkers(
   input: { actor: Actor; mapId: string },
@@ -157,7 +263,16 @@ export async function listMarkers(
     action: "MARKER_LIST_VIEW",
     actorUserId: input.actor.id,
     mapId: map.id,
-    metadata: { markerCount: markers.towers.length + markers.deeds.length + markers.notes.length },
+    metadata: {
+      markerCount:
+        markers.towers.length +
+        markers.deeds.length +
+        markers.notes.length +
+        markers.rifts.length +
+        markers.camps.length +
+        markers.minedoors.length +
+        markers.paths.length
+    },
     targetId: map.id,
     targetType: "MAP"
   });
@@ -167,7 +282,11 @@ export async function listMarkers(
     markers: [
       ...markers.towers.map(serializeTower),
       ...markers.deeds.map(serializeDeed),
-      ...markers.notes.map(serializeNote)
+      ...markers.notes.map(serializeNote),
+      ...markers.rifts.map(serializeRift),
+      ...markers.camps.map(serializeCamp),
+      ...markers.minedoors.map(serializeMinedoor),
+      ...markers.paths.map(serializePath)
     ]
   });
 }
@@ -226,6 +345,78 @@ export async function createMarker(
     const marker = serializeDeed(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
     return ok(marker);
+  }
+
+  if (markerInput.value.type === "rift") {
+    const rift = validateRiftInput(markerInput.value, bounds);
+
+    if (!rift.ok) {
+      return rift;
+    }
+
+    const created = await dependencies.createRift({
+      ...rift.value,
+      createdByUserId: input.actor.id,
+      mapId: map.id
+    });
+    const marker = serializeRift(created);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    return ok(marker);
+  }
+
+  if (markerInput.value.type === "camp") {
+    const camp = validateCampInput(markerInput.value, bounds);
+
+    if (!camp.ok) {
+      return camp;
+    }
+
+    const created = await dependencies.createCamp({
+      ...camp.value,
+      createdByUserId: input.actor.id,
+      mapId: map.id
+    });
+    const marker = serializeCamp(created);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    return ok(marker);
+  }
+
+  if (markerInput.value.type === "minedoor") {
+    const minedoor = validateMinedoorInput(markerInput.value, bounds);
+
+    if (!minedoor.ok) {
+      return minedoor;
+    }
+
+    const created = await dependencies.createMinedoor({
+      ...minedoor.value,
+      createdByUserId: input.actor.id,
+      mapId: map.id
+    });
+    const marker = serializeMinedoor(created);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    return ok(marker);
+  }
+
+  if (isPathCreateMarkerInput(markerInput.value)) {
+    const path = validatePathInput(markerInput.value, bounds);
+
+    if (!path.ok) {
+      return path;
+    }
+
+    const created = await dependencies.createPath({
+      ...path.value,
+      createdByUserId: input.actor.id,
+      mapId: map.id
+    });
+    const marker = serializePath(created);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    return ok(marker);
+  }
+
+  if (markerInput.value.type !== "note") {
+    return err("Marker type is invalid");
   }
 
   const note = validateNoteInput(markerInput.value, bounds);
@@ -320,6 +511,110 @@ export async function updateMarker(
     return ok(marker);
   }
 
+  if (input.markerType === "rift") {
+    const existing = await dependencies.findRift(input.markerId);
+
+    if (existing === null || markerInput.value.type !== "rift") {
+      return err("Marker was not found");
+    }
+
+    const validated = validateRiftInput(markerInput.value, existing.map);
+    if (!validated.ok) {
+      return validated;
+    }
+
+    const updated = await dependencies.updateRift(input.markerId, {
+      ...validated.value,
+      updatedByUserId: input.actor.id
+    });
+
+    if (updated === null) {
+      return err("Marker was not found");
+    }
+
+    const marker = serializeRift(updated);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    return ok(marker);
+  }
+
+  if (input.markerType === "camp") {
+    const existing = await dependencies.findCamp(input.markerId);
+
+    if (existing === null || markerInput.value.type !== "camp") {
+      return err("Marker was not found");
+    }
+
+    const validated = validateCampInput(markerInput.value, existing.map);
+    if (!validated.ok) {
+      return validated;
+    }
+
+    const updated = await dependencies.updateCamp(input.markerId, {
+      ...validated.value,
+      updatedByUserId: input.actor.id
+    });
+
+    if (updated === null) {
+      return err("Marker was not found");
+    }
+
+    const marker = serializeCamp(updated);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    return ok(marker);
+  }
+
+  if (input.markerType === "minedoor") {
+    const existing = await dependencies.findMinedoor(input.markerId);
+
+    if (existing === null || markerInput.value.type !== "minedoor") {
+      return err("Marker was not found");
+    }
+
+    const validated = validateMinedoorInput(markerInput.value, existing.map);
+    if (!validated.ok) {
+      return validated;
+    }
+
+    const updated = await dependencies.updateMinedoor(input.markerId, {
+      ...validated.value,
+      updatedByUserId: input.actor.id
+    });
+
+    if (updated === null) {
+      return err("Marker was not found");
+    }
+
+    const marker = serializeMinedoor(updated);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    return ok(marker);
+  }
+
+  if (isPathMarkerType(input.markerType)) {
+    const existing = await dependencies.findPath(input.markerId);
+
+    if (existing === null || !isPathCreateMarkerInput(markerInput.value) || existing.pathType !== input.markerType) {
+      return err("Marker was not found");
+    }
+
+    const validated = validatePathInput(markerInput.value, existing.map);
+    if (!validated.ok) {
+      return validated;
+    }
+
+    const updated = await dependencies.updatePath(input.markerId, {
+      ...validated.value,
+      updatedByUserId: input.actor.id
+    });
+
+    if (updated === null) {
+      return err("Marker was not found");
+    }
+
+    const marker = serializePath(updated);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    return ok(marker);
+  }
+
   const existing = await dependencies.findNote(input.markerId);
 
   if (existing === null || markerInput.value.type !== "note") {
@@ -365,9 +660,11 @@ function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
   if (input.type === "deed") {
     return ok({
       east: getNumber(input, "east"),
+      foundingDate: getString(input, "foundingDate"),
       founder: getString(input, "founder"),
       name: getString(input, "name"),
       north: getNumber(input, "north"),
+      perimeter: getNumber(input, "perimeter"),
       south: getNumber(input, "south"),
       type: "deed",
       west: getNumber(input, "west"),
@@ -384,6 +681,47 @@ function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
       type: "note",
       x: getNumber(input, "x"),
       y: getNumber(input, "y")
+    });
+  }
+
+  if (input.type === "rift") {
+    return ok({
+      arrivalDate: getString(input, "arrivalDate"),
+      estimatedRiftTime: getString(input, "estimatedRiftTime"),
+      notes: getString(input, "notes"),
+      type: "rift",
+      x: getNumber(input, "x"),
+      y: getNumber(input, "y")
+    });
+  }
+
+  if (input.type === "camp") {
+    return ok({
+      campType: getString(input, "campType"),
+      notes: getString(input, "notes"),
+      type: "camp",
+      x: getNumber(input, "x"),
+      y: getNumber(input, "y")
+    });
+  }
+
+  if (input.type === "minedoor") {
+    return ok({
+      notes: getString(input, "notes"),
+      strength: getString(input, "strength"),
+      type: "minedoor",
+      x: getNumber(input, "x"),
+      y: getNumber(input, "y")
+    });
+  }
+
+  if (input.type === "bridge" || input.type === "canal" || input.type === "highway") {
+    return ok({
+      name: getString(input, "name"),
+      notes: getString(input, "notes"),
+      points: getPathPoints(input, "points"),
+      type: input.type,
+      width: getNumber(input, "width")
     });
   }
 
@@ -457,9 +795,34 @@ function serializeMap(map: MapRecord): WorkspaceMap {
     heightPx: map.heightPx,
     id: map.id,
     imageSrc: map.imagePath,
+    layers: serializeMapLayers(map),
     name: map.name,
     widthPx: map.widthPx
   };
+}
+
+function serializeMapLayers(map: MapRecord): WorkspaceMap["layers"] {
+  if (map.layers !== undefined && map.layers.length > 0) {
+    return map.layers.map((layer) => ({
+      heightPx: layer.heightPx,
+      id: layer.id,
+      imageSrc: layer.imagePath,
+      isDefault: layer.isDefault,
+      name: layer.name,
+      widthPx: layer.widthPx
+    }));
+  }
+
+  return [
+    {
+      heightPx: map.heightPx,
+      id: `${map.id}:default`,
+      imageSrc: map.imagePath,
+      isDefault: true,
+      name: "Terrain",
+      widthPx: map.widthPx
+    }
+  ];
 }
 
 function serializeTower(tower: TowerRecord): TowerWorkspaceMarker {
@@ -478,16 +841,45 @@ function serializeTower(tower: TowerRecord): TowerWorkspaceMarker {
 function serializeDeed(deed: DeedRecord): DeedWorkspaceMarker {
   return {
     east: deed.east,
+    foundingDate: formatOptionalDate(deed.foundingDate),
     founder: deed.founder,
     id: deed.id,
     name: deed.name,
     north: deed.north,
+    perimeter: deed.perimeter,
     south: deed.south,
     type: "deed",
     west: deed.west,
     x: deed.x,
     y: deed.y
   };
+}
+
+function getPathPoints(input: object, key: string): Array<{ x: number; y: number }> {
+  if (!(key in input)) {
+    return [];
+  }
+
+  const value = (input as Record<string, unknown>)[key];
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((point) => {
+    if (typeof point !== "object" || point === null) {
+      return { x: Number.NaN, y: Number.NaN };
+    }
+
+    return {
+      x: getNumber(point, "x"),
+      y: getNumber(point, "y")
+    };
+  });
+}
+
+function formatOptionalDate(value: Date | null): string | null {
+  return value === null ? null : value.toISOString().slice(0, 10);
 }
 
 function serializeNote(note: NoteRecord): NoteWorkspaceMarker {
@@ -502,17 +894,92 @@ function serializeNote(note: NoteRecord): NoteWorkspaceMarker {
   };
 }
 
+function serializeRift(rift: RiftRecord): RiftWorkspaceMarker {
+  return {
+    arrivalDate: formatOptionalDate(rift.arrivalDate),
+    estimatedRiftTime: formatOptionalDateTime(rift.estimatedRiftTime),
+    id: rift.id,
+    notes: rift.notes,
+    type: "rift",
+    x: rift.x,
+    y: rift.y
+  };
+}
+
+function serializeCamp(camp: CampRecord): CampWorkspaceMarker {
+  return {
+    campType: camp.campType === "Goblin" ? "Goblin" : "Rift",
+    id: camp.id,
+    notes: camp.notes,
+    type: "camp",
+    x: camp.x,
+    y: camp.y
+  };
+}
+
+function serializeMinedoor(minedoor: MinedoorRecord): MinedoorWorkspaceMarker {
+  return {
+    id: minedoor.id,
+    notes: minedoor.notes,
+    strength: minedoor.strength,
+    type: "minedoor",
+    x: minedoor.x,
+    y: minedoor.y
+  };
+}
+
+function serializePath(path: PathRecord): PathWorkspaceMarker {
+  return {
+    id: path.id,
+    name: path.name,
+    notes: path.notes,
+    points: path.points,
+    type: normalizeStoredPathType(path.pathType),
+    width: path.width,
+    x: path.x,
+    y: path.y
+  };
+}
+
+function normalizeStoredPathType(pathType: string): "bridge" | "canal" | "highway" {
+  if (pathType === "canal" || pathType === "highway") {
+    return pathType;
+  }
+
+  return "bridge";
+}
+
+function formatOptionalDateTime(value: Date | null): string | null {
+  return value === null ? null : value.toISOString().slice(0, 16);
+}
+
 async function softDeleteMarker(
   input: { markerId: string; markerType: MarkerType },
   softDeleteInput: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date },
   dependencies: MarkerServiceDependencies
-): Promise<(TowerRecord | DeedRecord | NoteRecord) | null> {
+): Promise<(TowerRecord | DeedRecord | NoteRecord | RiftRecord | CampRecord | MinedoorRecord | PathRecord) | null> {
   if (input.markerType === "tower") {
     return dependencies.softDeleteTower(input.markerId, softDeleteInput);
   }
 
   if (input.markerType === "deed") {
     return dependencies.softDeleteDeed(input.markerId, softDeleteInput);
+  }
+
+  if (input.markerType === "rift") {
+    return dependencies.softDeleteRift(input.markerId, softDeleteInput);
+  }
+
+  if (input.markerType === "camp") {
+    return dependencies.softDeleteCamp(input.markerId, softDeleteInput);
+  }
+
+  if (input.markerType === "minedoor") {
+    return dependencies.softDeleteMinedoor(input.markerId, softDeleteInput);
+  }
+
+  if (isPathMarkerType(input.markerType)) {
+    return dependencies.softDeletePath(input.markerId, softDeleteInput);
   }
 
   return dependencies.softDeleteNote(input.markerId, softDeleteInput);
@@ -565,7 +1032,31 @@ function getAuditTargetType(markerType: MarkerType): MarkerAuditTarget {
     return "DEED";
   }
 
+  if (markerType === "rift") {
+    return "RIFT";
+  }
+
+  if (markerType === "camp") {
+    return "CAMP";
+  }
+
+  if (markerType === "minedoor") {
+    return "MINEDOOR";
+  }
+
+  if (isPathMarkerType(markerType)) {
+    return "PATH";
+  }
+
   return "NOTE";
+}
+
+function isPathMarkerType(markerType: MarkerType): markerType is "bridge" | "canal" | "highway" {
+  return markerType === "bridge" || markerType === "canal" || markerType === "highway";
+}
+
+function isPathCreateMarkerInput(input: CreateMarkerInput): input is PathCreateMarkerInput {
+  return isPathMarkerType(input.type);
 }
 
 async function recordAudit(

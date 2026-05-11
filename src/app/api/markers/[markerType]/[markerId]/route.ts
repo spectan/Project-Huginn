@@ -71,5 +71,15 @@ async function readJson(request: Request): Promise<unknown> {
 }
 
 function isMarkerType(value: string): value is MarkerType {
-  return value === "tower" || value === "deed" || value === "note";
+  return (
+    value === "tower" ||
+    value === "deed" ||
+    value === "note" ||
+    value === "rift" ||
+    value === "camp" ||
+    value === "minedoor" ||
+    value === "bridge" ||
+    value === "canal" ||
+    value === "highway"
+  );
 }

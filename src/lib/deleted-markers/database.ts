@@ -9,6 +9,22 @@ type DeletedRecordDates = {
 
 export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
   return {
+    findDeletedCamp: async (id) => {
+      const camp = await prisma.camp.findFirst({
+        select: {
+          deletedAt: true,
+          deleteExpiresAt: true,
+          id: true,
+          mapId: true
+        },
+        where: {
+          deletedAt: { not: null },
+          id
+        }
+      });
+
+      return camp === null ? null : requireDeletedReference(camp);
+    },
     findDeletedDeed: async (id) => {
       const deed = await prisma.deed.findFirst({
         select: {
@@ -25,6 +41,22 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
 
       return deed === null ? null : requireDeletedReference(deed);
     },
+    findDeletedMinedoor: async (id) => {
+      const minedoor = await prisma.minedoor.findFirst({
+        select: {
+          deletedAt: true,
+          deleteExpiresAt: true,
+          id: true,
+          mapId: true
+        },
+        where: {
+          deletedAt: { not: null },
+          id
+        }
+      });
+
+      return minedoor === null ? null : requireDeletedReference(minedoor);
+    },
     findDeletedNote: async (id) => {
       const note = await prisma.note.findFirst({
         select: {
@@ -40,6 +72,38 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
       });
 
       return note === null ? null : requireDeletedReference(note);
+    },
+    findDeletedPath: async (id) => {
+      const path = await prisma.pathMarker.findFirst({
+        select: {
+          deletedAt: true,
+          deleteExpiresAt: true,
+          id: true,
+          mapId: true
+        },
+        where: {
+          deletedAt: { not: null },
+          id
+        }
+      });
+
+      return path === null ? null : requireDeletedReference(path);
+    },
+    findDeletedRift: async (id) => {
+      const rift = await prisma.rift.findFirst({
+        select: {
+          deletedAt: true,
+          deleteExpiresAt: true,
+          id: true,
+          mapId: true
+        },
+        where: {
+          deletedAt: { not: null },
+          id
+        }
+      });
+
+      return rift === null ? null : requireDeletedReference(rift);
     },
     findDeletedTower: async (id) => {
       const tower = await prisma.tower.findFirst({
@@ -58,7 +122,7 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
       return tower === null ? null : requireDeletedReference(tower);
     },
     listExpiredDeletedMarkers: async ({ limit, now }) => {
-      const [towers, deeds, notes] = await Promise.all([
+      const [towers, deeds, notes, rifts, camps, minedoors, paths] = await Promise.all([
         prisma.tower.findMany({
           orderBy: { deleteExpiresAt: "asc" },
           select: {
@@ -97,17 +161,77 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
             deletedAt: { not: null },
             deleteExpiresAt: { lte: now }
           }
+        }),
+        prisma.rift.findMany({
+          orderBy: { deleteExpiresAt: "asc" },
+          select: {
+            deleteExpiresAt: true,
+            id: true,
+            mapId: true
+          },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { lte: now }
+          }
+        }),
+        prisma.camp.findMany({
+          orderBy: { deleteExpiresAt: "asc" },
+          select: {
+            deleteExpiresAt: true,
+            id: true,
+            mapId: true
+          },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { lte: now }
+          }
+        }),
+        prisma.minedoor.findMany({
+          orderBy: { deleteExpiresAt: "asc" },
+          select: {
+            deleteExpiresAt: true,
+            id: true,
+            mapId: true
+          },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { lte: now }
+          }
+        }),
+        prisma.pathMarker.findMany({
+          orderBy: { deleteExpiresAt: "asc" },
+          select: {
+            deleteExpiresAt: true,
+            id: true,
+            mapId: true,
+            pathType: true
+          },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { lte: now }
+          }
         })
       ]);
 
       return {
+        camps: camps.map(requireExpiredReference),
         deeds: deeds.map(requireExpiredReference),
+        minedoors: minedoors.map(requireExpiredReference),
         notes: notes.map(requireExpiredReference),
+        paths: paths.map((path) => ({
+          ...requireExpiredReference(path),
+          pathType: requirePathType(path.pathType)
+        })),
+        rifts: rifts.map(requireExpiredReference),
         towers: towers.map(requireExpiredReference)
       };
     },
     listRestorableDeletedMarkers: async ({ limit, now }) => {
-      const [towers, deeds, notes] = await Promise.all([
+      const [towers, deeds, notes, rifts, camps, minedoors, paths] = await Promise.all([
         prisma.tower.findMany({
           include: deletedMarkerIncludes(),
           orderBy: { deletedAt: "desc" },
@@ -134,19 +258,76 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
             deletedAt: { not: null },
             deleteExpiresAt: { gt: now }
           }
+        }),
+        prisma.rift.findMany({
+          include: deletedMarkerIncludes(),
+          orderBy: { deletedAt: "desc" },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { gt: now }
+          }
+        }),
+        prisma.camp.findMany({
+          include: deletedMarkerIncludes(),
+          orderBy: { deletedAt: "desc" },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { gt: now }
+          }
+        }),
+        prisma.minedoor.findMany({
+          include: deletedMarkerIncludes(),
+          orderBy: { deletedAt: "desc" },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { gt: now }
+          }
+        }),
+        prisma.pathMarker.findMany({
+          include: deletedMarkerIncludes(),
+          orderBy: { deletedAt: "desc" },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { gt: now }
+          }
         })
       ]);
 
       return {
+        camps: camps.map((camp) => ({
+          ...camp,
+          deletedAt: requireDate(camp.deletedAt),
+          deleteExpiresAt: requireDate(camp.deleteExpiresAt)
+        })),
         deeds: deeds.map((deed) => ({
           ...deed,
           deletedAt: requireDate(deed.deletedAt),
           deleteExpiresAt: requireDate(deed.deleteExpiresAt)
         })),
+        minedoors: minedoors.map((minedoor) => ({
+          ...minedoor,
+          deletedAt: requireDate(minedoor.deletedAt),
+          deleteExpiresAt: requireDate(minedoor.deleteExpiresAt)
+        })),
         notes: notes.map((note) => ({
           ...note,
           deletedAt: requireDate(note.deletedAt),
           deleteExpiresAt: requireDate(note.deleteExpiresAt)
+        })),
+        paths: paths.map((path) => ({
+          ...path,
+          deletedAt: requireDate(path.deletedAt),
+          deleteExpiresAt: requireDate(path.deleteExpiresAt),
+          pathType: requirePathType(path.pathType)
+        })),
+        rifts: rifts.map((rift) => ({
+          ...rift,
+          deletedAt: requireDate(rift.deletedAt),
+          deleteExpiresAt: requireDate(rift.deleteExpiresAt)
         })),
         towers: towers.map((tower) => ({
           ...tower,
@@ -156,6 +337,15 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
       };
     },
     now: () => new Date(),
+    permanentlyDeleteCamps: async (ids) => {
+      const result = await prisma.camp.deleteMany({
+        where: {
+          id: { in: ids }
+        }
+      });
+
+      return result.count;
+    },
     permanentlyDeleteDeeds: async (ids) => {
       const result = await prisma.deed.deleteMany({
         where: {
@@ -165,8 +355,35 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
 
       return result.count;
     },
+    permanentlyDeleteMinedoors: async (ids) => {
+      const result = await prisma.minedoor.deleteMany({
+        where: {
+          id: { in: ids }
+        }
+      });
+
+      return result.count;
+    },
     permanentlyDeleteNotes: async (ids) => {
       const result = await prisma.note.deleteMany({
+        where: {
+          id: { in: ids }
+        }
+      });
+
+      return result.count;
+    },
+    permanentlyDeletePaths: async (ids) => {
+      const result = await prisma.pathMarker.deleteMany({
+        where: {
+          id: { in: ids }
+        }
+      });
+
+      return result.count;
+    },
+    permanentlyDeleteRifts: async (ids) => {
+      const result = await prisma.rift.deleteMany({
         where: {
           id: { in: ids }
         }
@@ -195,8 +412,12 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
         }
       });
     },
+    restoreCamp: async (id, input) => restoreDeletedRecord("camp", id, input.updatedByUserId),
     restoreDeed: async (id, input) => restoreDeletedRecord("deed", id, input.updatedByUserId),
+    restoreMinedoor: async (id, input) => restoreDeletedRecord("minedoor", id, input.updatedByUserId),
     restoreNote: async (id, input) => restoreDeletedRecord("note", id, input.updatedByUserId),
+    restorePath: async (id, input) => restoreDeletedRecord("path", id, input.updatedByUserId),
+    restoreRift: async (id, input) => restoreDeletedRecord("rift", id, input.updatedByUserId),
     restoreTower: async (id, input) => restoreDeletedRecord("tower", id, input.updatedByUserId)
   };
 }
@@ -245,8 +466,16 @@ function requireDate(value: Date | null): Date {
   return value;
 }
 
+function requirePathType(value: string): "bridge" | "canal" | "highway" {
+  if (value === "bridge" || value === "canal" || value === "highway") {
+    return value;
+  }
+
+  throw new Error("Path marker type was unexpectedly invalid");
+}
+
 async function restoreDeletedRecord(
-  model: "deed" | "note" | "tower",
+  model: "camp" | "deed" | "minedoor" | "note" | "path" | "rift" | "tower",
   id: string,
   updatedByUserId: string
 ): Promise<{ id: string; mapId: string } | null> {
@@ -269,6 +498,70 @@ async function restoreDeletedRecord(
 
     if (model === "deed") {
       return await prisma.deed.update({
+        data: {
+          deletedAt: null,
+          deletedByUserId: null,
+          deleteExpiresAt: null,
+          updatedByUserId
+        },
+        select: {
+          id: true,
+          mapId: true
+        },
+        where: { id }
+      });
+    }
+
+    if (model === "rift") {
+      return await prisma.rift.update({
+        data: {
+          deletedAt: null,
+          deletedByUserId: null,
+          deleteExpiresAt: null,
+          updatedByUserId
+        },
+        select: {
+          id: true,
+          mapId: true
+        },
+        where: { id }
+      });
+    }
+
+    if (model === "camp") {
+      return await prisma.camp.update({
+        data: {
+          deletedAt: null,
+          deletedByUserId: null,
+          deleteExpiresAt: null,
+          updatedByUserId
+        },
+        select: {
+          id: true,
+          mapId: true
+        },
+        where: { id }
+      });
+    }
+
+    if (model === "minedoor") {
+      return await prisma.minedoor.update({
+        data: {
+          deletedAt: null,
+          deletedByUserId: null,
+          deleteExpiresAt: null,
+          updatedByUserId
+        },
+        select: {
+          id: true,
+          mapId: true
+        },
+        where: { id }
+      });
+    }
+
+    if (model === "path") {
+      return await prisma.pathMarker.update({
         data: {
           deletedAt: null,
           deletedByUserId: null,

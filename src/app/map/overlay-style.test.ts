@@ -8,7 +8,8 @@ describe("map overlay styles", () => {
   it.each([
     ".map-tower-zone--protection",
     ".map-tower-zone--placement",
-    ".map-deed-overlay"
+    ".map-deed-overlay",
+    ".map-rift-overlay"
   ])("%s uses fill-only rendering so zoomed overlays stay crisp", (selector) => {
     const block = getCssBlock(selector);
 
@@ -23,6 +24,12 @@ describe("map overlay styles", () => {
 
     expect(block).toContain("background: rgba(15, 23, 42");
     expect(block).toContain("color: #e5e7eb");
+  });
+
+  it("allows direct marker buttons to receive hover and context menu events", () => {
+    const block = getStandaloneCssBlock(".map-marker-layer > .map-marker");
+
+    expect(block).toContain("pointer-events: auto");
   });
 
   it("renders deed name labels with dark map UI styling", () => {
@@ -50,6 +57,16 @@ describe("map overlay styles", () => {
     const block = getCssBlock(".map-search-match");
 
     expect(block).toContain("animation:");
+  });
+
+  it("draws triangle markers inside unclipped buttons so search pulses radiate", () => {
+    const riftColorBlock = getStandaloneCssBlock(".map-marker--rift::before");
+    const campColorBlock = getStandaloneCssBlock(".map-marker--camp::before");
+
+    expect(globalsCss).not.toMatch(/\.map-marker--rift,\s*\.map-marker--camp\s*\{[^}]*clip-path/s);
+    expect(globalsCss).toMatch(/\.map-marker--rift::before,\s*\.map-marker--camp::before\s*\{[^}]*clip-path: polygon\(50% 0, 0 100%, 100% 100%\)/s);
+    expect(riftColorBlock).toContain("background: #ef4444");
+    expect(campColorBlock).toContain("background: var(--map-camp-color, #facc15)");
   });
 
   it("keeps marker dialogs inside the viewport with scrollable content", () => {

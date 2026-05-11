@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountOverlay } from "./account-overlay";
@@ -79,5 +79,57 @@ describe("AccountOverlay", () => {
     );
     expect(screen.queryByText("Manage accounts")).toBeNull();
     expect(screen.queryByLabelText("Access for Mako")).toBeNull();
+  });
+
+  it("lets authenticated users change their own password from the account dropdown", async () => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({ ok: true }),
+      ok: true
+    })) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      React.createElement(AccountOverlay, {
+        viewer: {
+          approvalStatus: "APPROVED",
+          isAdmin: false,
+          pendingApprovalCount: 0,
+          permissions: "WRITE",
+          username: "Mako"
+        }
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Mako" }));
+    fireEvent.click(screen.getByRole("button", { name: "Change password" }));
+    fireEvent.change(screen.getByLabelText("Current password"), {
+      target: { value: "correct horse battery staple" }
+    });
+    fireEvent.change(screen.getByLabelText("New password"), {
+      target: { value: "new secure password" }
+    });
+    fireEvent.change(screen.getByLabelText("Confirm new password"), {
+      target: { value: "new secure password" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save password" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/auth/password",
+      {
+        body: JSON.stringify({
+          confirmPassword: "new secure password",
+          currentPassword: "correct horse battery staple",
+          newPassword: "new secure password"
+        }),
+        headers: {
+          "content-type": "application/json"
+        },
+        method: "PATCH"
+      }
+    ));
+    expect(await screen.findByText("Password changed")).toBeTruthy();
+    expect(screen.getByLabelText("Current password")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("New password")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Confirm new password")).toHaveProperty("value", "");
   });
 });
