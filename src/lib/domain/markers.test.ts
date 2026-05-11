@@ -68,7 +68,7 @@ describe("validateTowerInput", () => {
     });
   });
 
-  it("rejects creator numbers that are not blank or exactly three digits", () => {
+  it.each(["0", "1", "42", "999"])("allows creator number %s", (makerNumber) => {
     expect(
       validateTowerInput(
         {
@@ -77,13 +77,38 @@ describe("validateTowerInput", () => {
           ql: "89.50",
           damage: "0.25",
           makerName: "Mako",
-          makerNumber: "94A"
+          makerNumber
+        },
+        bounds
+      )
+    ).toMatchObject({
+      ok: true,
+      value: {
+        makerNumber
+      }
+    });
+  });
+
+  it.each([
+    ["94A", "Creator number must be blank or a whole number from 0 to 999"],
+    ["1000", "Creator number must be blank or a whole number from 0 to 999"],
+    ["-1", "Creator number must be blank or a whole number from 0 to 999"]
+  ])("rejects creator number %s", (makerNumber, error) => {
+    expect(
+      validateTowerInput(
+        {
+          x: 25,
+          y: 30,
+          ql: "89.50",
+          damage: "0.25",
+          makerName: "Mako",
+          makerNumber
         },
         bounds
       )
     ).toEqual({
       ok: false,
-      error: "Creator number must be blank or exactly three digits"
+      error
     });
   });
 });
@@ -91,6 +116,8 @@ describe("validateTowerInput", () => {
 describe("formatTowerCreator", () => {
   it("shows unknown numbers for incomplete tower creator identities", () => {
     expect(formatTowerCreator({ makerName: "Mako", makerNumber: "" })).toBe("Mako - ???");
+    expect(formatTowerCreator({ makerName: "Kichi", makerNumber: "1" })).toBe("Kichi 1");
+    expect(formatTowerCreator({ makerName: "Kichi", makerNumber: "42" })).toBe("Kichi 42");
     expect(formatTowerCreator({ makerName: "Mako", makerNumber: "945" })).toBe("Mako 945");
   });
 });

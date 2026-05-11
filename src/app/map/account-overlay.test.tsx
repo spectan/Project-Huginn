@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AccountOverlay } from "./account-overlay";
+import { AccountOverlay, type AccountViewer } from "./account-overlay";
 
 describe("AccountOverlay", () => {
   beforeEach(() => {
@@ -9,7 +9,7 @@ describe("AccountOverlay", () => {
   });
 
   it("shows a subdued login control when no user is authenticated", () => {
-    render(React.createElement(AccountOverlay, { viewer: null }));
+    renderAccountOverlay(null);
 
     const loginButton = screen.getByRole("button", { name: "Log in" });
 
@@ -18,7 +18,7 @@ describe("AccountOverlay", () => {
   });
 
   it("opens the login dialog from the logged-out control", () => {
-    render(React.createElement(AccountOverlay, { viewer: null }));
+    renderAccountOverlay(null);
 
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
@@ -29,17 +29,13 @@ describe("AccountOverlay", () => {
   });
 
   it("opens account settings with privileges for an authenticated user", () => {
-    render(
-      React.createElement(AccountOverlay, {
-        viewer: {
-          approvalStatus: "APPROVED",
-          isAdmin: false,
-          pendingApprovalCount: 0,
-          permissions: "WRITE",
-          username: "Mako"
-        }
-      })
-    );
+    renderAccountOverlay({
+      approvalStatus: "APPROVED",
+      isAdmin: false,
+      pendingApprovalCount: 0,
+      permissions: "WRITE",
+      username: "Mako"
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Mako" }));
 
@@ -54,17 +50,13 @@ describe("AccountOverlay", () => {
   });
 
   it("links admins to the dedicated account management pages", () => {
-    render(
-      React.createElement(AccountOverlay, {
-        viewer: {
-          approvalStatus: "APPROVED",
-          isAdmin: true,
-          pendingApprovalCount: 3,
-          permissions: "WRITE",
-          username: "Admin"
-        }
-      })
-    );
+    renderAccountOverlay({
+      approvalStatus: "APPROVED",
+      isAdmin: true,
+      pendingApprovalCount: 3,
+      permissions: "WRITE",
+      username: "Admin"
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
 
@@ -88,17 +80,13 @@ describe("AccountOverlay", () => {
     })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    render(
-      React.createElement(AccountOverlay, {
-        viewer: {
-          approvalStatus: "APPROVED",
-          isAdmin: false,
-          pendingApprovalCount: 0,
-          permissions: "WRITE",
-          username: "Mako"
-        }
-      })
-    );
+    renderAccountOverlay({
+      approvalStatus: "APPROVED",
+      isAdmin: false,
+      pendingApprovalCount: 0,
+      permissions: "WRITE",
+      username: "Mako"
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Mako" }));
     fireEvent.click(screen.getByRole("button", { name: "Change password" }));
@@ -133,3 +121,19 @@ describe("AccountOverlay", () => {
     expect(screen.getByLabelText("Confirm new password")).toHaveProperty("value", "");
   });
 });
+
+function renderAccountOverlay(viewer: AccountViewer | null) {
+  function ControlledAccountOverlay() {
+    const [isOpen, setIsOpen] = React.useState(false);
+
+    return (
+      <AccountOverlay
+        isOpen={isOpen}
+        onOpenChange={setIsOpen}
+        viewer={viewer}
+      />
+    );
+  }
+
+  return render(React.createElement(ControlledAccountOverlay));
+}

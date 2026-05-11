@@ -176,8 +176,8 @@ export function validateTowerInput(
   }
 
   const makerNumber = input.makerNumber.trim();
-  if (makerNumber !== "" && !/^\d{3}$/.test(makerNumber)) {
-    return err("Creator number must be blank or exactly three digits");
+  if (makerNumber !== "" && !/^\d{1,3}$/.test(makerNumber)) {
+    return err("Creator number must be blank or a whole number from 0 to 999");
   }
 
   return ok({

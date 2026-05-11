@@ -80,6 +80,8 @@ The client owns:
 - Read-only versus writable control visibility.
 - Client-side marker search, filtering, and visual match highlighting for the currently loaded map data.
 - Client-side tile-type highlighting by exact RGB matching against the loaded map image. The source map image remains the coordinate source: one pixel equals one tile, and generated highlight masks are local visual overlays only.
+- Top-right account and map settings dropdowns use shared open-panel state so only one dropdown can be open at a time.
+- The top-right map preferences dropdown is labeled `Settings`; its `Default` action resets the full user map settings payload back to the shared defaults.
 
 Client code must treat server responses as authoritative. Client-calculated coordinates must be validated again on the server against the target map dimensions.
 
@@ -130,10 +132,11 @@ User map settings are stored server-side in PostgreSQL as a `UserMapSettings` re
 Persisted settings include:
 
 - Marker layer visibility, including camps, minedoors, bridge/canal/highway paths, deed perimeters, and rift overlays.
-- Marker, grid, and tile highlight colors, including camp, minedoor, bridge, canal, and highway marker colors.
-- Marker, grid, and tile highlight opacities.
+- Marker, grid, and tile highlight colors, including rift, camp, minedoor, bridge, canal, and highway marker colors.
+- Marker, grid, roadway, and tile highlight opacities.
 - Tile highlight selection.
 - Tile highlighter panel position.
+- Roadway edit mode panel position.
 - Rift overlay visibility and opacity.
 
 Rules:
@@ -142,6 +145,8 @@ Rules:
 - Settings writes do not create marker records and do not affect shared map data.
 - Settings writes are preference updates, not audited map edits.
 - Invalid or unknown settings fields must fall back to defaults or the current saved value.
+- Default opacity slider values are `50`. Slider values are literal percentages: `0` is invisible and `100` is fully opaque.
+- Slider-controlled overlay fills must use solid colors and CSS opacity only; do not bake alpha into the color value or `100` will still be translucent.
 
 ### Map
 
@@ -211,7 +216,7 @@ Rules:
 
 - `qlHundredths` is between `0` and `10000`.
 - `damageHundredths` is between `0` and `9999`.
-- `makerNumber` is exactly three digits.
+- `makerNumber` may be blank when unknown, or one to three digits representing a whole number from `0` through `999`.
 - Active tower views exclude rows with `deletedAt` set.
 - Expired deleted rows are permanently deleted after `deleteExpiresAt`.
 
@@ -360,7 +365,7 @@ Fields:
 
 Rules:
 
-- The stored `x` and `y` are copied from the first path point for search, context grouping, and admin deleted-marker summaries.
+- The stored `x` and `y` are copied from the first path point for context grouping and admin deleted-marker summaries.
 - Paths require at least two points and at most ten points.
 - Every point must be inside the map bounds.
 - `width` must be an integer from `1` to `20`.
@@ -433,12 +438,12 @@ Tower overlays:
 
 - Protection distance is 25 pixels in each direction from the tower center.
 - Placement distance is 50 pixels in each direction from the tower center.
-- Render as low-opacity squares centered on the tower position.
+- Render as opacity-controlled squares centered on the tower position.
 - The center pixel renders as a bright white square.
 
 Deed overlays:
 
-- Render as low-opacity rectangles.
+- Render as opacity-controlled rectangles.
 - The stored coordinate is the center pixel.
 - Rectangle edges are calculated from north, west, east, and south tile counts.
 - Perimeters render as outline-only edge strips around the rectangle expanded by the deed's perimeter tile count.
@@ -446,13 +451,14 @@ Deed overlays:
 
 Special markers:
 
-- Rifts render as red 3x3-centered triangles.
-- Rifts can optionally render a red 51x51 overlay centered on the rift location. This overlay is controlled by the global overlay toggle plus a dedicated `Rift Overlays` toggle and `Rift Overlay opacity` slider.
+- Notes render as 3x3 centered circles using the user's note marker color setting. The circle must remain on the interactive marker button so the normal search pulse can radiate from the same element.
+- Rifts render as 3x3-centered triangles using the user's rift marker color setting, defaulting to red.
+- Rifts can optionally render a same-colored 51x51 overlay centered on the rift location. This overlay is controlled by the global overlay toggle plus a dedicated `Rifts` toggle, `Rifts color` selector, and `Rifts opacity` slider.
 - Camps render as 3x3-centered triangles using the user's camp marker color setting, defaulting to yellow.
 - Minedoors render as a 1x1 marker at the marked tile with a user-colored outline, defaulting to cyan, and white diagonal stripes.
 - Marker buttons rendered directly under the screen-space marker layer must explicitly opt back into pointer events so hover details and context menus work through the layer's non-interactive default.
 - Triangle markers draw the clipped triangle on an inner pseudo-element, not on the interactive button itself, so the button can still render the search pulse outside the triangle bounds.
-- Search text for marker types should include user-facing aliases such as plural forms and spaced variants like `mine door` so users can find markers by how they describe them.
+- Search text for searchable marker types should include user-facing aliases such as plural forms and spaced variants like `mine door` so users can find markers by how they describe them.
 
 Infrastructure paths:
 
@@ -460,19 +466,46 @@ Infrastructure paths:
 - Default colors follow the WurmMaps convention: bridge magenta, canal blue, highway yellow.
 - Users create and edit paths with click-to-draw points instead of typing every coordinate.
 - Starting a path from the context menu must pin the pre-menu view so coordinate conversion does not shift after the shared-link URL updates.
-- Path search highlighting must pulse the polyline itself, not only point markers.
-- Highways are visible by default but passive by default. Hover details, keyboard focus, and marker context actions are enabled only when the user's `Highway Details` mode is on.
+- Bridges, canals, and highways are not searchable. Search filtering must not match path type, name, notes, width, points, or coordinates.
+- Bridges, canals, and highways are visible by default but passive by default. Hover details, keyboard focus, and marker context actions are enabled only when local `Roadway Edit Mode` is on.
+- `Roadway Edit Mode` is a draggable bottom-right map control. Its enabled state is local and defaults off; its screen position is persisted in user map settings.
 - Path drawing must only append points from pointer interactions that start on the map viewport; fixed dialogs and controls must not create map points.
+- Path creation from a marker/overlay context menu must use the clicked tile coordinate for the first point, even when the context row still includes the overlay marker that received the right-click.
+
+Route planner:
+
+- The route planner is a local, unsaved map tool controlled by a compact bottom-left icon button.
+- The bottom-left tool stack renders the legend button above the route planner button.
+- Only one planned route can exist at a time.
+- When the planner is enabled, double-clicking an empty planner starts a route at that map tile. Double-clicking while a route exists clears that route.
+- After a route starts, primary left clicks on the map append route points.
+- Route planner interactions must work over map marker overlays such as deed areas; fixed dialogs and controls still must not create route points.
+- Route length is the sum of straight-line segment distances in tile coordinates. The meter value is `tiles * 4`.
+- Planned routes are visual overlays only; they do not create marker rows, audit events, or user map settings.
+
+Legend:
+
+- The bottom-left map tools include a legend button next to the route planner.
+- The legend popup lists map marker and path symbols for towers, deeds, notes, rifts, camps, minedoors, bridges, canals, and highways.
+- Legend symbol colors come from the current user map settings so changing layer colors updates the legend without separate state.
 
 Tile highlighting:
 
 - Tile highlight selections use the same color-detected terrain categories as WurmMaps for the active map image.
 - The UI groups selections into Resources, Roads, Natural Terrain, Infected Terrain, and Other.
+- The default lower-right tool stack renders the tile highlighting selector above Roadway Edit Mode. Dragged panel positions are saved as user map settings and override this default stack.
 - Highlight masks are transparent image overlays generated from exact RGB matches, with user-configurable highlight color and opacity.
 - The overlay highlights the non-matching tiles surrounding matched tiles, not the matched resource tiles themselves, so resources remain visible while the highlight reads as an outline.
 - Generated highlight masks are local visual overlays and must not create audit events or marker records. The user's selected highlight category, color, opacity, and panel position are persisted as user map settings.
+- Map settings layer rows are ordered as toggle, color selector, label, and opacity slider so visibility and styling controls scan consistently. The settings dropdown is intentionally compact because it contains many layer controls.
 
 Client pointer conversion must account for zoom, pan, and image scaling. Server validation must only accept stored map coordinates, not screen coordinates.
+
+Context menus:
+
+- Right-click map and marker context menus show a copyable coordinate row at the top.
+- The coordinate row is one button with the coordinate label and copy icon inside it, so either the visible text or icon writes the same shared link for that coordinate to the browser clipboard.
+- Coordinate copy links use the current URL with `x` and `y` search parameters updated, preserving other relevant search parameters.
 
 ## Deleted Marker Cleanup
 
@@ -526,7 +559,7 @@ Important test cases:
 
 - QL rejects values below `0.00` and above `100.00`.
 - Damage rejects values below `0.00` and above `99.99`.
-- Tower maker number rejects non-three-digit input.
+- Tower maker number rejects non-numeric values and values outside `0` through `999`.
 - Coordinates outside map bounds are rejected.
 - Read-only users cannot write through direct server calls.
 - Pending users cannot fetch map data.

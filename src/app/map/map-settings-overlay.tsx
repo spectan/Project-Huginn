@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import type { ChangeEvent } from "react";
 import type {
   MarkerColors,
   MarkerOpacities,
@@ -9,6 +9,7 @@ import type {
 } from "@/lib/markers/marker-types";
 
 type MapSettingsOverlayProps = {
+  isOpen: boolean;
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
@@ -16,10 +17,13 @@ type MapSettingsOverlayProps = {
   onMarkerColorsChange(colors: MarkerColors): void;
   onMarkerOpacitiesChange(opacities: MarkerOpacities): void;
   onMarkerVisibilityChange(visibility: MarkerVisibility): void;
+  onOpenChange(isOpen: boolean): void;
+  onResetSettings(): void;
   onTileHighlightChange(settings: TileHighlightSettings): void;
 };
 
 export function MapSettingsOverlay({
+  isOpen,
   markerColors,
   markerOpacities,
   markerVisibility,
@@ -27,30 +31,30 @@ export function MapSettingsOverlay({
   onMarkerColorsChange,
   onMarkerOpacitiesChange,
   onMarkerVisibilityChange,
+  onOpenChange,
+  onResetSettings,
   onTileHighlightChange
 }: MapSettingsOverlayProps) {
-  const [isOpen, setIsOpen] = useState(false);
-
   return (
     <div className="map-settings">
       <button
         aria-expanded={isOpen}
         aria-haspopup="dialog"
-        aria-label="Map settings"
+        aria-label="Settings"
         className="map-settings-button"
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => onOpenChange(!isOpen)}
         type="button"
       >
         <span aria-hidden="true">⚙</span>
       </button>
       {isOpen ? (
-        <section className="map-settings-panel" role="dialog" aria-label="Map settings">
+        <section className="map-settings-panel" role="dialog" aria-label="Settings">
           <div className="map-account-panel-header">
-            <strong>Map settings</strong>
+            <strong>Settings</strong>
             <button
-              aria-label="Close map settings"
+              aria-label="Close settings"
               className="map-account-close"
-              onClick={() => setIsOpen(false)}
+              onClick={() => onOpenChange(false)}
               type="button"
             >
               x
@@ -159,7 +163,10 @@ export function MapSettingsOverlay({
               colorLabel="Bridges color"
               colorValue={markerColors.bridges}
               label="Bridges"
+              opacityLabel="Bridges opacity"
+              opacityValue={markerOpacities.bridges}
               onColorChange={(value) => onMarkerColorsChange({ ...markerColors, bridges: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, bridges: value })}
               onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 bridges: !markerVisibility.bridges
@@ -170,7 +177,10 @@ export function MapSettingsOverlay({
               colorLabel="Canals color"
               colorValue={markerColors.canals}
               label="Canals"
+              opacityLabel="Canals opacity"
+              opacityValue={markerOpacities.canals}
               onColorChange={(value) => onMarkerColorsChange({ ...markerColors, canals: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, canals: value })}
               onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 canals: !markerVisibility.canals
@@ -181,25 +191,23 @@ export function MapSettingsOverlay({
               colorLabel="Highways color"
               colorValue={markerColors.highways}
               label="Highways"
+              opacityLabel="Highways opacity"
+              opacityValue={markerOpacities.highways}
               onColorChange={(value) => onMarkerColorsChange({ ...markerColors, highways: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, highways: value })}
               onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
                 highways: !markerVisibility.highways
               })}
             />
             <LayerControlRow
-              checked={markerVisibility.highwayDetails}
-              label="Highway Details"
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                highwayDetails: !markerVisibility.highwayDetails
-              })}
-            />
-            <LayerControlRow
               checked={markerVisibility.riftOverlays}
-              label="Rift Overlays"
-              opacityLabel="Rift Overlay opacity"
+              colorLabel="Rifts color"
+              colorValue={markerColors.rifts}
+              label="Rifts"
+              opacityLabel="Rifts opacity"
               opacityValue={markerOpacities.riftOverlays}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, rifts: value })}
               onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, riftOverlays: value })}
               onToggle={() => onMarkerVisibilityChange({
                 ...markerVisibility,
@@ -244,6 +252,11 @@ export function MapSettingsOverlay({
               onOpacityChange={(value) => onTileHighlightChange({ ...tileHighlight, opacity: value })}
             />
           </fieldset>
+          <div className="map-settings-actions">
+            <button className="map-settings-default" onClick={onResetSettings} type="button">
+              Default
+            </button>
+          </div>
         </section>
       ) : null}
     </div>
@@ -278,7 +291,6 @@ function LayerControlRow({
       ) : (
         <span aria-hidden="true" className="map-layer-checkbox-spacer" />
       )}
-      <span>{label}</span>
       {colorValue !== undefined && colorLabel !== undefined && onColorChange !== undefined ? (
         <input
           aria-label={colorLabel}
@@ -290,6 +302,7 @@ function LayerControlRow({
       ) : (
         <span aria-hidden="true" className="map-layer-color-spacer" />
       )}
+      <span>{label}</span>
       {opacityValue !== undefined && opacityLabel !== undefined && onOpacityChange !== undefined ? (
         <input
           aria-label={opacityLabel}

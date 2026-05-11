@@ -56,6 +56,7 @@ const SECTOR_GRID_LEFT_OFFSET_PX = -16;
 const SECTOR_GRID_TOP_OFFSET_PX = 18;
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
+const TILE_SIZE_METERS = 4;
 const DEFAULT_NOTE_CATEGORIES: NoteCategory[] = [
   { id: "default-category-general", name: "General" }
 ];
@@ -142,6 +143,8 @@ type PathPointDragState = {
   pointerId: number;
 };
 
+type TopPanelState = "account" | "settings" | null;
+
 type MapWorkspaceProps = {
   initialMarkers: WorkspaceMarker[];
   initialNoteCategories?: readonly NoteCategory[];
@@ -199,12 +202,19 @@ export default function MapWorkspace({
   const [markerVisibility, setMarkerVisibility] = useState<MarkerVisibility>(initialSettings.markerVisibility);
   const [markerColors, setMarkerColors] = useState<MarkerColors>(initialSettings.markerColors);
   const [markerOpacities, setMarkerOpacities] = useState<MarkerOpacities>(initialSettings.markerOpacities);
+  const [topPanel, setTopPanel] = useState<TopPanelState>(null);
+  const [roadwayEditMode, setRoadwayEditMode] = useState(false);
+  const [roadwayEditPanelPosition, setRoadwayEditPanelPosition] =
+    useState<TileHighlightPanelPosition | null>(initialSettings.roadwayEditPanelPosition);
   const [tileHighlight, setTileHighlight] = useState<TileHighlightSettings>(initialSettings.tileHighlight);
   const [tileHighlightPanelPosition, setTileHighlightPanelPosition] =
     useState<TileHighlightPanelPosition | null>(initialSettings.tileHighlightPanelPosition);
   const [hoveredMarker, setHoveredMarker] = useState<HoveredMarkerState | null>(null);
   const [pathDraft, setPathDraft] = useState<PathDraftState | null>(null);
   const pathDraftRef = useRef<PathDraftState | null>(pathDraft);
+  const [routePlannerEnabled, setRoutePlannerEnabled] = useState(false);
+  const [routePlannerPoints, setRoutePlannerPoints] = useState<MapCoordinate[] | null>(null);
+  const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [noteCategories, setNoteCategories] = useState<NoteCategory[]>(
     Array.from(initialNoteCategories.length === 0 ? DEFAULT_NOTE_CATEGORIES : initialNoteCategories)
   );
@@ -242,9 +252,10 @@ export default function MapWorkspace({
     markerColors,
     markerOpacities,
     markerVisibility,
+    roadwayEditPanelPosition,
     tileHighlight,
     tileHighlightPanelPosition
-  }), [markerColors, markerOpacities, markerVisibility, tileHighlight, tileHighlightPanelPosition]);
+  }), [markerColors, markerOpacities, markerVisibility, roadwayEditPanelPosition, tileHighlight, tileHighlightPanelPosition]);
 
   const updateMarkers = useCallback(
     (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => {
@@ -252,9 +263,27 @@ export default function MapWorkspace({
     },
     [initialMarkers]
   );
+  const resetUserMapSettings = useCallback(() => {
+    setMarkerColors(DEFAULT_USER_MAP_SETTINGS.markerColors);
+    setMarkerOpacities(DEFAULT_USER_MAP_SETTINGS.markerOpacities);
+    setMarkerVisibility(DEFAULT_USER_MAP_SETTINGS.markerVisibility);
+    setRoadwayEditPanelPosition(DEFAULT_USER_MAP_SETTINGS.roadwayEditPanelPosition);
+    setTileHighlight(DEFAULT_USER_MAP_SETTINGS.tileHighlight);
+    setTileHighlightPanelPosition(DEFAULT_USER_MAP_SETTINGS.tileHighlightPanelPosition);
+  }, []);
   useLayoutEffect(() => {
     pathDraftRef.current = pathDraft;
   }, [pathDraft]);
+
+  const toggleRoutePlanner = useCallback(() => {
+    setRoutePlannerEnabled((current) => {
+      if (current) {
+        setRoutePlannerPoints(null);
+      }
+
+      return !current;
+    });
+  }, []);
 
   const createNoteCategory = useCallback(async (name: string): Promise<NoteCategory | null> => {
     if (map === null) {
@@ -370,7 +399,7 @@ export default function MapWorkspace({
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
-      if (!isPrimaryPointerButton(event.button) || isInteractivePanTarget(event.target)) {
+      if (!isPrimaryPointerButton(event.button) || (!routePlannerEnabled && isInteractivePanTarget(event.target))) {
         return;
       }
 
@@ -388,7 +417,7 @@ export default function MapWorkspace({
       };
       setIsDragging(true);
     },
-    [view.x, view.y, view.zoom]
+    [routePlannerEnabled, view.x, view.y, view.zoom]
   );
 
   const handleContextMenu = useCallback(
@@ -417,26 +446,66 @@ export default function MapWorkspace({
     [canViewMap, selectCoordinate, view, visualMap]
   );
 
+  const handleDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLElement>) => {
+      if (!routePlannerEnabled || !canViewMap || visualMap === null) {
+        return;
+      }
+
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+
+      if (!isInsideMap(coordinate, visualMap)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu(null);
+      setRoutePlannerPoints((current) => current === null ? [coordinate] : null);
+    },
+    [canViewMap, routePlannerEnabled, view, visualMap]
+  );
+
   const handleMarkerContextMenu = useCallback(
     (marker: WorkspaceMarker, event: React.MouseEvent<Element>) => {
       if (!canWriteMapMarkers) {
         return;
       }
 
+      if (isPathMarker(marker) && !roadwayEditMode) {
+        return;
+      }
+
       event.preventDefault();
       event.stopPropagation();
-      selectCoordinate({ x: marker.x, y: marker.y });
+      const eventCoordinate = getMapCoordinate(event.clientX, event.clientY, view);
+      const mapCoordinate = isOverlayContextTarget(event.currentTarget) &&
+        visualMap !== null &&
+        isInsideMap(eventCoordinate, visualMap)
+        ? eventCoordinate
+        : { x: marker.x, y: marker.y };
+
+      selectCoordinate(mapCoordinate);
       setContextMenu({
-        mapX: marker.x,
-        mapY: marker.y,
-        markers: getVisibleMarkersAtCoordinate(displayedMarkers, markerVisibility, marker.x, marker.y),
+        mapX: mapCoordinate.x,
+        mapY: mapCoordinate.y,
+        markers: getUniqueMarkers([
+          marker,
+          ...getVisibleMarkersAtCoordinate(
+            displayedMarkers,
+            markerVisibility,
+            roadwayEditMode,
+            mapCoordinate.x,
+            mapCoordinate.y
+          )
+        ]),
         mode: "marker",
         screenX: event.clientX,
         screenY: event.clientY,
         view
       });
     },
-    [canWriteMapMarkers, displayedMarkers, markerVisibility, selectCoordinate, view]
+    [canWriteMapMarkers, displayedMarkers, markerVisibility, roadwayEditMode, selectCoordinate, view, visualMap]
   );
 
   const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; pointerId: number }) => {
@@ -466,6 +535,11 @@ export default function MapWorkspace({
     });
 
     if (isInsideMap(coordinate, visualMap)) {
+      if (routePlannerEnabled) {
+        setRoutePlannerPoints((current) => current === null ? current : appendRoutePlannerPoint(current, coordinate));
+        return;
+      }
+
       if (pathDraftRef.current !== null) {
         setPathDraft((current) => current === null
           ? current
@@ -478,11 +552,11 @@ export default function MapWorkspace({
 
       selectCoordinate(coordinate);
     }
-  }, [canViewMap, selectCoordinate, visualMap]);
+  }, [canViewMap, routePlannerEnabled, selectCoordinate, visualMap]);
 
   useEffect(() => {
     function handleNativePointerDown(event: PointerEvent) {
-      if (!isPrimaryPointerButton(event.button) || isInteractivePanTarget(event.target)) {
+      if (!isPrimaryPointerButton(event.button) || (!routePlannerEnabled && isInteractivePanTarget(event.target))) {
         return;
       }
 
@@ -509,7 +583,7 @@ export default function MapWorkspace({
     return () => {
       window.removeEventListener("pointerdown", handleNativePointerDown);
     };
-  }, [view.x, view.y, view.zoom]);
+  }, [routePlannerEnabled, view.x, view.y, view.zoom]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -641,6 +715,7 @@ export default function MapWorkspace({
           className={isDragging ? "map-viewport is-dragging" : "map-viewport"}
           onDragStart={preventNativeDrag}
           onContextMenu={handleContextMenu}
+          onDoubleClick={handleDoubleClick}
           onPointerDown={handlePointerDown}
           onWheel={handleWheel}
         >
@@ -692,6 +767,7 @@ export default function MapWorkspace({
                 screenY: event.clientY
               });
             }}
+            roadwayEditMode={roadwayEditMode}
             view={view}
             visibility={markerVisibility}
           />
@@ -699,6 +775,12 @@ export default function MapWorkspace({
             <PathDraftLayer
               draft={pathDraft}
               onPointPointerDown={handlePathPointPointerDown}
+              view={view}
+            />
+          ) : null}
+          {routePlannerPoints !== null ? (
+            <RoutePlannerLayer
+              points={routePlannerPoints}
               view={view}
             />
           ) : null}
@@ -784,7 +866,7 @@ export default function MapWorkspace({
           })}
         />
       ) : null}
-      {hoveredMarker !== null && canUseMarkerDetails(hoveredMarker.marker, markerVisibility) ? (
+      {hoveredMarker !== null && canUseMarkerDetails(hoveredMarker.marker, roadwayEditMode) ? (
         <MarkerHoverDetails hoveredMarker={hoveredMarker} />
       ) : null}
       {dialog !== null && map !== null ? (
@@ -803,17 +885,14 @@ export default function MapWorkspace({
         />
       ) : null}
       <div className="map-top-controls">
-        {canViewMap ? (
-          <TileHighlightControl
-            onTileHighlightChange={setTileHighlight}
-            onTileHighlightPanelPositionChange={setTileHighlightPanelPosition}
-            position={tileHighlightPanelPosition}
-            tileHighlight={tileHighlight}
-          />
-        ) : null}
-        <AccountOverlay viewer={viewer} />
+        <AccountOverlay
+          isOpen={topPanel === "account"}
+          onOpenChange={(isOpen) => setTopPanel(isOpen ? "account" : null)}
+          viewer={viewer}
+        />
         {canViewMap ? (
           <MapSettingsOverlay
+            isOpen={topPanel === "settings"}
             markerColors={markerColors}
             markerOpacities={markerOpacities}
             markerVisibility={markerVisibility}
@@ -821,10 +900,42 @@ export default function MapWorkspace({
             onMarkerColorsChange={setMarkerColors}
             onMarkerOpacitiesChange={setMarkerOpacities}
             onMarkerVisibilityChange={setMarkerVisibility}
+            onOpenChange={(isOpen) => setTopPanel(isOpen ? "settings" : null)}
+            onResetSettings={resetUserMapSettings}
             onTileHighlightChange={setTileHighlight}
           />
         ) : null}
       </div>
+      {canViewMap ? (
+        <div className="map-right-side-controls">
+          <TileHighlightControl
+            onTileHighlightChange={setTileHighlight}
+            onTileHighlightPanelPositionChange={setTileHighlightPanelPosition}
+            position={tileHighlightPanelPosition}
+            tileHighlight={tileHighlight}
+          />
+          <RoadwayEditModeControl
+            enabled={roadwayEditMode}
+            onEnabledChange={setRoadwayEditMode}
+            onPositionChange={setRoadwayEditPanelPosition}
+            position={roadwayEditPanelPosition}
+          />
+        </div>
+      ) : null}
+      {canViewMap ? (
+        <div className="map-bottom-left-controls">
+          <MapLegendControl
+            isOpen={isLegendOpen}
+            markerColors={markerColors}
+            onOpenChange={setIsLegendOpen}
+          />
+          <RoutePlannerControl
+            enabled={routePlannerEnabled}
+            onToggle={toggleRoutePlanner}
+            routeDistance={routePlannerPoints === null ? null : getRouteDistanceTiles(routePlannerPoints)}
+          />
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -845,7 +956,10 @@ function MapContextMenu({
       role="menu"
       style={{ left: `${contextMenu.screenX}px`, top: `${contextMenu.screenY}px` }}
     >
-      <p>{contextMenu.mapX}, {contextMenu.mapY}</p>
+      <CoordinateCopyRow
+        coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
+        label={`${contextMenu.mapX}, ${contextMenu.mapY}`}
+      />
       {canWrite ? (
         <>
           <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
@@ -1038,6 +1152,209 @@ function TileHighlightControl({
       </label>
     </fieldset>
   );
+}
+
+function RoadwayEditModeControl({
+  enabled,
+  onEnabledChange,
+  onPositionChange,
+  position
+}: {
+  enabled: boolean;
+  onEnabledChange(enabled: boolean): void;
+  onPositionChange(position: TileHighlightPanelPosition): void;
+  position: TileHighlightPanelPosition | null;
+}) {
+  const panelRef = useRef<HTMLFieldSetElement | null>(null);
+  const dragRef = useRef<FloatingPanelDragState | null>(null);
+
+  const handleDragStart = useCallback((event: React.PointerEvent<HTMLLegendElement>) => {
+    if (!isPrimaryPointerButton(event.button)) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const panelRect = panelRef.current?.getBoundingClientRect();
+    dragRef.current = {
+      height: panelRect?.height && panelRect.height > 0 ? panelRect.height : 58,
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startLeft: panelRect?.left ?? 0,
+      startTop: panelRect?.top ?? 0,
+      width: panelRect?.width && panelRect.width > 0 ? panelRect.width : 220
+    };
+  }, []);
+
+  useEffect(() => {
+    function handlePanelDrag(event: PointerEvent) {
+      const drag = dragRef.current;
+
+      if (drag === null || event.pointerId !== drag.pointerId) {
+        return;
+      }
+
+      onPositionChange(clampFloatingPanelPosition(
+        drag.startLeft + event.clientX - drag.startClientX,
+        drag.startTop + event.clientY - drag.startClientY,
+        drag.width,
+        drag.height
+      ));
+    }
+
+    function endPanelDrag(event: PointerEvent) {
+      const drag = dragRef.current;
+
+      if (drag !== null && event.pointerId === drag.pointerId) {
+        dragRef.current = null;
+      }
+    }
+
+    window.addEventListener("pointermove", handlePanelDrag);
+    window.addEventListener("pointerup", endPanelDrag);
+    window.addEventListener("pointercancel", endPanelDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePanelDrag);
+      window.removeEventListener("pointerup", endPanelDrag);
+      window.removeEventListener("pointercancel", endPanelDrag);
+    };
+  }, [onPositionChange]);
+
+  return (
+    <fieldset
+      aria-label="Roadway Edit Mode"
+      className={position === null ? "map-roadway-edit-control" : "map-roadway-edit-control is-positioned"}
+      ref={panelRef}
+      style={getFloatingPanelStyle(position)}
+    >
+      <legend
+        className="map-roadway-edit-title"
+        data-testid="roadway-edit-drag-handle"
+        onPointerDown={handleDragStart}
+      >
+        Roadway Edit Mode
+      </legend>
+      <label className="map-roadway-edit-toggle">
+        <input
+          aria-label="Roadway Edit Mode"
+          checked={enabled}
+          onChange={(event) => onEnabledChange(event.target.checked)}
+          type="checkbox"
+        />
+        <span>{enabled ? "Enabled" : "Disabled"}</span>
+      </label>
+    </fieldset>
+  );
+}
+
+function RoutePlannerControl({
+  enabled,
+  onToggle,
+  routeDistance
+}: {
+  enabled: boolean;
+  onToggle(): void;
+  routeDistance: number | null;
+}) {
+  return (
+    <div className="map-route-planner-control">
+      <button
+        aria-label="Route planner"
+        aria-pressed={enabled}
+        className={enabled ? "map-route-planner-button is-active" : "map-route-planner-button"}
+        onClick={onToggle}
+        title="Route planner"
+        type="button"
+      >
+        <span aria-hidden="true" className="map-route-planner-icon" />
+      </button>
+      {routeDistance === null ? null : (
+        <div aria-label="Route distance" className="map-route-planner-stats">
+          <span>{formatRouteDistance(routeDistance)} tiles</span>
+          <span>{formatRouteDistance(routeDistance * TILE_SIZE_METERS)} meters</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MapLegendControl({
+  isOpen,
+  markerColors,
+  onOpenChange
+}: {
+  isOpen: boolean;
+  markerColors: MarkerColors;
+  onOpenChange(isOpen: boolean): void;
+}) {
+  const items = getLegendItems(markerColors);
+
+  return (
+    <div className="map-legend-control">
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label="Map legend"
+        className={isOpen ? "map-legend-button is-active" : "map-legend-button"}
+        onClick={() => onOpenChange(!isOpen)}
+        title="Map legend"
+        type="button"
+      >
+        <span aria-hidden="true" className="map-legend-button-icon" />
+      </button>
+      {isOpen ? (
+        <section aria-label="Map legend" className="map-legend-panel" role="dialog">
+          <strong>Legend</strong>
+          <ul>
+            {items.map((item) => (
+              <li key={item.id}>
+                <span
+                  aria-hidden="true"
+                  className={`map-legend-symbol map-legend-symbol--${item.variant}`}
+                  data-testid={`legend-symbol-${item.id}`}
+                  style={getLegendSymbolStyle(item.color)}
+                />
+                <span>{item.label}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+type LegendItem = {
+  color: string;
+  id: string;
+  label: string;
+  variant: "circle" | "line" | "minedoor" | "square" | "triangle";
+};
+
+type LegendSymbolStyle = CSSProperties & {
+  "--map-legend-color": string;
+};
+
+function getLegendItems(markerColors: MarkerColors): LegendItem[] {
+  return [
+    { color: markerColors.towers, id: "tower", label: "Tower", variant: "square" },
+    { color: markerColors.deeds, id: "deed", label: "Deed", variant: "square" },
+    { color: markerColors.notes, id: "note", label: "Note", variant: "circle" },
+    { color: markerColors.rifts, id: "rift", label: "Rift", variant: "triangle" },
+    { color: markerColors.camps, id: "camp", label: "Camp", variant: "triangle" },
+    { color: markerColors.minedoors, id: "minedoor", label: "Minedoor", variant: "minedoor" },
+    { color: markerColors.bridges, id: "bridge", label: "Bridge", variant: "line" },
+    { color: markerColors.canals, id: "canal", label: "Canal", variant: "line" },
+    { color: markerColors.highways, id: "highway", label: "Highway", variant: "line" }
+  ];
+}
+
+function getLegendSymbolStyle(color: string): LegendSymbolStyle {
+  return {
+    "--map-legend-color": color
+  };
 }
 
 function SectorGridOverlay({
@@ -1359,6 +1676,7 @@ function MarkerContextMenu({
     >
       {contextMenu.markers.length > 0 ? (
         <MarkerContextRows
+          coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
           markerColors={markerColors}
           markers={contextMenu.markers}
           onDelete={onDelete}
@@ -1382,11 +1700,13 @@ function MarkerContextMenu({
 }
 
 function MarkerContextRows({
+  coordinate,
   markerColors,
   markers,
   onDelete,
   onEdit
 }: {
+  coordinate: MapCoordinate;
   markerColors: MarkerColors;
   markers: WorkspaceMarker[];
   onDelete(marker: WorkspaceMarker): void;
@@ -1400,9 +1720,10 @@ function MarkerContextRows({
 
   return (
     <>
-      <p>
-        {markers.length} {markers.length === 1 ? "item" : "items"} at {firstMarker.x}, {firstMarker.y}
-      </p>
+      <CoordinateCopyRow
+        coordinate={coordinate}
+        label={`${markers.length} ${markers.length === 1 ? "item" : "items"} at ${coordinate.x}, ${coordinate.y}`}
+      />
       <div className="map-context-marker-list">
         {markers.map((marker) => (
           <MarkerContextRow
@@ -1415,6 +1736,64 @@ function MarkerContextRows({
         ))}
       </div>
     </>
+  );
+}
+
+function RoutePlannerLayer({
+  points,
+  view
+}: {
+  points: MapCoordinate[];
+  view: ViewState;
+}) {
+  return (
+    <div aria-label="Route planner path" className="map-route-planner-layer" data-testid="route-planner-layer">
+      <svg aria-hidden="true" className="map-route-planner-svg">
+        <polyline
+          className="map-route-planner-line"
+          data-testid="route-planner-line"
+          fill="none"
+          points={getPathDraftSvgPoints(points, view)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      {points.map((point, index) => (
+        <span
+          aria-hidden="true"
+          className="map-route-planner-point"
+          key={`${point.x}-${point.y}-${index}`}
+          style={getScreenCoordinateStyle(point, view)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function CoordinateCopyRow({
+  coordinate,
+  label
+}: {
+  coordinate: MapCoordinate;
+  label: string;
+}) {
+  const coordinateLabel = `${coordinate.x}, ${coordinate.y}`;
+  const copyLink = () => copyCoordinateLink(coordinate);
+
+  return (
+    <div className="map-context-coordinate-row">
+      <button
+        aria-label={`Copy link to ${coordinateLabel}`}
+        className="map-context-coordinate-button"
+        onClick={copyLink}
+        role="menuitem"
+        title="Copy link"
+        type="button"
+      >
+        <span className="map-context-coordinate-value">{label}</span>
+        <span aria-hidden="true" className="map-context-coordinate-icon" />
+      </button>
+    </div>
   );
 }
 
@@ -2011,7 +2390,7 @@ function parseCreatorInput(value: string): { makerName: string; makerNumber: str
     };
   }
 
-  const match = /^(.*\S)\s+(\d{3})$/.exec(trimmed);
+  const match = /^(.*\S)\s+(\d{1,3})$/.exec(trimmed);
 
   if (match === null) {
     return {
@@ -2239,6 +2618,35 @@ function appendPathDraftPoint(points: MapCoordinate[], coordinate: MapCoordinate
   return [...points, coordinate];
 }
 
+function appendRoutePlannerPoint(points: MapCoordinate[], coordinate: MapCoordinate): MapCoordinate[] {
+  const lastPoint = points[points.length - 1];
+
+  if (lastPoint?.x === coordinate.x && lastPoint.y === coordinate.y) {
+    return points;
+  }
+
+  return [...points, coordinate];
+}
+
+function getRouteDistanceTiles(points: MapCoordinate[]): number {
+  let distance = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+
+    if (previous !== undefined && current !== undefined) {
+      distance += Math.hypot(current.x - previous.x, current.y - previous.y);
+    }
+  }
+
+  return distance;
+}
+
+function formatRouteDistance(value: number): string {
+  return Number.isInteger(value) ? String(value) : Number(value.toFixed(1)).toString();
+}
+
 function formatSvgNumber(value: number): string {
   return Number(value.toFixed(3)).toString();
 }
@@ -2431,6 +2839,7 @@ function isInsideMap(coordinate: MapCoordinate, map: WorkspaceMap): boolean {
 function getVisibleMarkersAtCoordinate(
   markers: WorkspaceMarker[],
   visibility: MarkerVisibility,
+  roadwayEditMode: boolean,
   x: number,
   y: number
 ): WorkspaceMarker[] {
@@ -2438,8 +2847,25 @@ function getVisibleMarkersAtCoordinate(
     marker.x === x &&
     marker.y === y &&
     isMarkerVisible(marker, visibility) &&
-    canUseMarkerDetails(marker, visibility)
+    canUseMarkerDetails(marker, roadwayEditMode)
   ));
+}
+
+function isOverlayContextTarget(target: Element): boolean {
+  return target.classList.contains("map-deed-overlay");
+}
+
+function getUniqueMarkers(markers: WorkspaceMarker[]): WorkspaceMarker[] {
+  const seenIds = new Set<string>();
+
+  return markers.filter((marker) => {
+    if (seenIds.has(marker.id)) {
+      return false;
+    }
+
+    seenIds.add(marker.id);
+    return true;
+  });
 }
 
 function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility): boolean {
@@ -2478,8 +2904,8 @@ function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility):
   return visibility.notes;
 }
 
-function canUseMarkerDetails(marker: WorkspaceMarker, visibility: MarkerVisibility): boolean {
-  return marker.type !== "highway" || visibility.highwayDetails;
+function canUseMarkerDetails(marker: WorkspaceMarker, roadwayEditMode: boolean): boolean {
+  return !isPathMarker(marker) || roadwayEditMode;
 }
 
 function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: PathMarkerType }> {
@@ -2491,6 +2917,10 @@ function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType 
 }
 
 function markerMatchesSearch(marker: WorkspaceMarker, searchTerm: string): boolean {
+  if (isPathMarker(marker)) {
+    return false;
+  }
+
   return getMarkerSearchText(marker).toLowerCase().includes(searchTerm);
 }
 
@@ -2554,17 +2984,7 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
   }
 
   if (isPathMarker(marker)) {
-    return [
-      marker.type,
-      `${marker.type}s`,
-      getPathTypeTitle(marker.type),
-      marker.name,
-      marker.notes,
-      `${marker.width} wide`,
-      ...marker.points.flatMap((point) => [point.x, point.y]),
-      marker.x,
-      marker.y
-    ].join(" ");
+    return "";
   }
 
   return [
@@ -2599,6 +3019,14 @@ function getCoordinateUrl(coordinate: MapCoordinate): URL {
   url.searchParams.set("x", String(coordinate.x));
   url.searchParams.set("y", String(coordinate.y));
   return url;
+}
+
+function copyCoordinateLink(coordinate: MapCoordinate): void {
+  if (typeof navigator === "undefined" || navigator.clipboard === undefined) {
+    return;
+  }
+
+  void navigator.clipboard.writeText(getCoordinateUrl(coordinate).toString());
 }
 
 function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
@@ -2785,7 +3213,7 @@ function getMarkerContextColor(marker: WorkspaceMarker, markerColors: MarkerColo
   }
 
   if (marker.type === "rift") {
-    return "#ef4444";
+    return markerColors.rifts;
   }
 
   if (marker.type === "camp") {

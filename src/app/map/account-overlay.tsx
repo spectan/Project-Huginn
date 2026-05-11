@@ -11,11 +11,12 @@ export type AccountViewer = {
 };
 
 type AccountOverlayProps = {
+  isOpen: boolean;
+  onOpenChange(isOpen: boolean): void;
   viewer: AccountViewer | null;
 };
 
-export function AccountOverlay({ viewer }: AccountOverlayProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function AccountOverlay({ isOpen, onOpenChange, viewer }: AccountOverlayProps) {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [authError, setAuthError] = useState<string | null>(null);
   const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
@@ -25,14 +26,14 @@ export function AccountOverlay({ viewer }: AccountOverlayProps) {
   if (viewer === null) {
     return (
       <div className="map-account">
-        <button className="map-account-button" onClick={() => setIsOpen(true)} type="button">
+        <button className="map-account-button" onClick={() => onOpenChange(true)} type="button">
           Log in
         </button>
         {isOpen ? (
           <AuthDialog
             error={authError}
             mode={authMode}
-            onClose={() => setIsOpen(false)}
+            onClose={() => onOpenChange(false)}
             onModeChange={setAuthMode}
             onSubmit={(event) => void submitAuthForm(event, authMode, setAuthError)}
           />
@@ -47,7 +48,7 @@ export function AccountOverlay({ viewer }: AccountOverlayProps) {
         aria-expanded={isOpen}
         aria-haspopup="dialog"
         className="map-account-button"
-        onClick={() => setIsOpen((current) => !current)}
+        onClick={() => onOpenChange(!isOpen)}
         type="button"
       >
         {viewer.username}
@@ -59,7 +60,7 @@ export function AccountOverlay({ viewer }: AccountOverlayProps) {
             <button
               aria-label="Close account settings"
               className="map-account-close"
-              onClick={() => setIsOpen(false)}
+              onClick={() => onOpenChange(false)}
               type="button"
             >
               x

@@ -15,6 +15,7 @@ export type UserMapSettings = {
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
+  roadwayEditPanelPosition: TileHighlightPanelPosition | null;
   tileHighlight: TileHighlightSettings;
   tileHighlightPanelPosition: TileHighlightPanelPosition | null;
 };
@@ -26,7 +27,6 @@ export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
   deeds: true,
   deedNames: false,
   deedPerimeters: true,
-  highwayDetails: false,
   highways: true,
   minedoors: true,
   missionGrid: false,
@@ -47,22 +47,26 @@ export const DEFAULT_MARKER_COLORS: MarkerColors = {
   minedoors: "#22d3ee",
   missionGrid: "#22c55e",
   notes: "#ff2bd6",
+  rifts: "#ef4444",
   sectorGrid: "#ffffff",
   towers: "#ffffff"
 };
 
 export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
-  deeds: 100,
-  missionGrid: 100,
-  notes: 100,
-  riftOverlays: 100,
-  sectorGrid: 100,
-  towers: 100
+  bridges: 50,
+  canals: 50,
+  deeds: 50,
+  highways: 50,
+  missionGrid: 50,
+  notes: 50,
+  riftOverlays: 50,
+  sectorGrid: 50,
+  towers: 50
 };
 
 export const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
   color: "#c000ff",
-  opacity: 75,
+  opacity: 50,
   selection: ""
 };
 
@@ -70,6 +74,7 @@ export const DEFAULT_USER_MAP_SETTINGS: UserMapSettings = {
   markerColors: DEFAULT_MARKER_COLORS,
   markerOpacities: DEFAULT_MARKER_OPACITIES,
   markerVisibility: DEFAULT_MARKER_VISIBILITY,
+  roadwayEditPanelPosition: null,
   tileHighlight: DEFAULT_TILE_HIGHLIGHT,
   tileHighlightPanelPosition: null
 };
@@ -81,7 +86,6 @@ const MARKER_VISIBILITY_KEYS = [
   "deeds",
   "deedNames",
   "deedPerimeters",
-  "highwayDetails",
   "highways",
   "minedoors",
   "missionGrid",
@@ -102,12 +106,16 @@ const MARKER_COLOR_KEYS = [
   "minedoors",
   "missionGrid",
   "notes",
+  "rifts",
   "sectorGrid",
   "towers"
 ] as const;
 
 const MARKER_OPACITY_KEYS = [
+  "bridges",
+  "canals",
   "deeds",
+  "highways",
   "missionGrid",
   "notes",
   "riftOverlays",
@@ -138,6 +146,10 @@ function parseUserMapSettingsWithFallback(
     markerColors: parseMarkerColors(source.markerColors, fallback.markerColors),
     markerOpacities: parseMarkerOpacities(source.markerOpacities, fallback.markerOpacities),
     markerVisibility: parseMarkerVisibility(source.markerVisibility, fallback.markerVisibility),
+    roadwayEditPanelPosition: parsePanelPosition(
+      source.roadwayEditPanelPosition,
+      fallback.roadwayEditPanelPosition
+    ),
     tileHighlight: parseTileHighlight(source.tileHighlight, fallback.tileHighlight),
     tileHighlightPanelPosition: parsePanelPosition(
       source.tileHighlightPanelPosition,

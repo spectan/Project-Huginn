@@ -19,6 +19,7 @@ describe("user map settings", () => {
         canals: "#0055cc",
         highways: "#cccc00",
         minedoors: "#00ffff",
+        rifts: "#ff0000",
         towers: "#00ff00"
       },
       markerVisibility: {
@@ -28,9 +29,12 @@ describe("user map settings", () => {
         deedPerimeters: false,
         deedNames: true,
         highways: false,
-        highwayDetails: true,
         minedoors: false,
         riftOverlays: false
+      },
+      roadwayEditPanelPosition: {
+        left: 300.2,
+        top: 500.8
       },
       tileHighlight: {
         selection: "Clay"
@@ -44,6 +48,7 @@ describe("user map settings", () => {
         canals: "#0055cc",
         highways: "#cccc00",
         minedoors: "#00ffff",
+        rifts: "#ff0000",
         towers: "#00ff00"
       },
       markerVisibility: {
@@ -54,9 +59,12 @@ describe("user map settings", () => {
         deedPerimeters: false,
         deedNames: true,
         highways: false,
-        highwayDetails: true,
         minedoors: false,
         riftOverlays: false
+      },
+      roadwayEditPanelPosition: {
+        left: 300,
+        top: 501
       },
       tileHighlight: {
         ...DEFAULT_USER_MAP_SETTINGS.tileHighlight,
@@ -74,10 +82,14 @@ describe("user map settings", () => {
         deeds: "gold",
         highways: "yellow",
         minedoors: "cyan",
-        notes: "#ABCDEF"
+        notes: "#ABCDEF",
+        rifts: "#DC2626"
       },
       markerOpacities: {
+        bridges: 22.8,
+        canals: 50.2,
         deeds: -10,
+        highways: 101,
         notes: 150,
         riftOverlays: 37.2,
         towers: 44.6
@@ -95,10 +107,14 @@ describe("user map settings", () => {
         deeds: DEFAULT_USER_MAP_SETTINGS.markerColors.deeds,
         highways: DEFAULT_USER_MAP_SETTINGS.markerColors.highways,
         minedoors: DEFAULT_USER_MAP_SETTINGS.markerColors.minedoors,
-        notes: "#abcdef"
+        notes: "#abcdef",
+        rifts: "#dc2626"
       },
       markerOpacities: {
+        bridges: 23,
+        canals: 50,
         deeds: 0,
+        highways: 100,
         notes: 100,
         riftOverlays: 37,
         towers: 45
@@ -113,6 +129,26 @@ describe("user map settings", () => {
 
   it("keeps valid tile highlight panel positions and rejects invalid ones", () => {
     expect(parseUserMapSettings({
+      roadwayEditPanelPosition: {
+        left: 222.4,
+        top: 99.6
+      },
+      tileHighlightPanelPosition: {
+        left: 120.4,
+        top: 88.7
+      }
+    })).toMatchObject({
+      roadwayEditPanelPosition: {
+        left: 222,
+        top: 100
+      },
+      tileHighlightPanelPosition: {
+        left: 120,
+        top: 89
+      }
+    });
+
+    expect(parseUserMapSettings({
       tileHighlightPanelPosition: {
         left: 120.4,
         top: 88.7
@@ -123,17 +159,28 @@ describe("user map settings", () => {
     });
 
     expect(parseUserMapSettings({
+      roadwayEditPanelPosition: {
+        left: 22,
+        top: Number.NaN
+      },
       tileHighlightPanelPosition: {
         left: Number.NaN,
         top: 88
       }
-    }).tileHighlightPanelPosition).toBeNull();
+    })).toMatchObject({
+      roadwayEditPanelPosition: null,
+      tileHighlightPanelPosition: null
+    });
   });
 
   it("merges incoming partial settings into current settings", () => {
     const current = parseUserMapSettings({
       markerColors: {
         towers: "#00ff00"
+      },
+      roadwayEditPanelPosition: {
+        left: 30,
+        top: 40
       },
       tileHighlightPanelPosition: {
         left: 10,
@@ -145,12 +192,20 @@ describe("user map settings", () => {
       markerOpacities: {
         towers: 35
       },
+      roadwayEditPanelPosition: {
+        left: 75,
+        top: 90
+      },
       tileHighlightPanelPosition: null
     })).toEqual({
       ...current,
       markerOpacities: {
         ...DEFAULT_USER_MAP_SETTINGS.markerOpacities,
         towers: 35
+      },
+      roadwayEditPanelPosition: {
+        left: 75,
+        top: 90
       },
       tileHighlightPanelPosition: null
     });

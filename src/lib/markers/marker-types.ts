@@ -114,7 +114,6 @@ export type MarkerVisibility = {
   deeds: boolean;
   deedNames: boolean;
   deedPerimeters: boolean;
-  highwayDetails: boolean;
   highways: boolean;
   minedoors: boolean;
   missionGrid: boolean;
@@ -135,12 +134,16 @@ export type MarkerColors = {
   minedoors: string;
   missionGrid: string;
   notes: string;
+  rifts: string;
   sectorGrid: string;
   towers: string;
 };
 
 export type MarkerOpacities = {
+  bridges: number;
+  canals: number;
   deeds: number;
+  highways: number;
   missionGrid: number;
   notes: number;
   riftOverlays: number;

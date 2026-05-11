@@ -50,6 +50,17 @@ const noteCategories = [
   { id: "category-landmarks", name: "Landmarks" }
 ] as const;
 
+function mockClipboardWrite() {
+  const writeText = vi.fn(async () => undefined);
+
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText }
+  });
+
+  return writeText;
+}
+
 describe("MapPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -87,7 +98,7 @@ describe("MapPage", () => {
     expect(screen.queryByRole("button", { name: "Add note" })).toBeNull();
     expect(screen.queryByText(/^Zoom /)).toBeNull();
     expect(screen.getByRole("button", { name: "Admin" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Map settings" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeTruthy();
     expect(screen.getByRole("searchbox", { name: "Search map" })).toBeTruthy();
   });
 
@@ -371,6 +382,8 @@ describe("MapPage", () => {
   });
 
   it("opens a right-click add menu for write users", async () => {
+    const clipboardWrite = mockClipboardWrite();
+
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
       map: activeMap,
@@ -390,7 +403,12 @@ describe("MapPage", () => {
     expect(menu.className).toContain("map-context-menu");
     expect(screen.getByText("125, 140")).toBeTruthy();
     expect(window.location.href).toBe(`${window.location.origin}/map?x=125&y=140`);
-    expect(screen.queryByRole("menuitem", { name: "Copy Link" })).toBeNull();
+    const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
+    expect(screen.getByText("125, 140").closest("button")).toBe(coordinateCopyButton);
+    expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
+    fireEvent.click(coordinateCopyButton);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140`);
     expect(screen.getByRole("menuitem", { name: "Tower" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Deed" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Note" })).toBeTruthy();
@@ -399,7 +417,9 @@ describe("MapPage", () => {
     expect(screen.getByRole("menuitem", { name: "Minedoor" })).toBeTruthy();
   });
 
-  it("updates the browser URL for read-only map context without copy commands", async () => {
+  it("updates the browser URL for read-only map context with coordinate copying only", async () => {
+    const clipboardWrite = mockClipboardWrite();
+
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
       map: activeMap,
@@ -418,7 +438,12 @@ describe("MapPage", () => {
     expect(screen.getByRole("menu", { name: "Map actions" })).toBeTruthy();
     expect(screen.getByText("125, 140")).toBeTruthy();
     expect(window.location.href).toBe(`${window.location.origin}/map?x=125&y=140`);
-    expect(screen.queryByRole("menuitem", { name: "Copy Link" })).toBeNull();
+    const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
+    expect(screen.getByText("125, 140").closest("button")).toBe(coordinateCopyButton);
+    expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
+    fireEvent.click(coordinateCopyButton);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140`);
     expect(screen.queryByRole("menuitem", { name: "Tower" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Deed" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Note" })).toBeNull();
@@ -909,6 +934,56 @@ describe("MapPage", () => {
     ));
   });
 
+  it("preserves single digit tower creator numbers from the combined creator field", async () => {
+    const savedTower = {
+      damage: "1.25",
+      id: "tower-1",
+      makerName: "Kichi",
+      makerNumber: "1",
+      ql: "88.50",
+      type: "tower",
+      x: 250,
+      y: 300
+    } as const;
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({ marker: savedTower }),
+      ok: true
+    })) as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [savedTower],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Kichi 1 at 250, 300" }), {
+      clientX: 250,
+      clientY: 300
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Tower Kichi 1" }));
+
+    expect(screen.getByLabelText("Creator")).toHaveProperty("value", "Kichi 1");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/markers/tower/tower-1",
+      {
+        body: JSON.stringify({
+          type: "tower",
+          x: 250,
+          y: 300,
+          damage: "1.25",
+          makerName: "Kichi",
+          makerNumber: "1",
+          ql: "88.50"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      }
+    ));
+  });
+
   it("shows note hover details as category and title with note text underneath", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
@@ -1044,8 +1119,15 @@ describe("MapPage", () => {
     expect(screen.getByRole("dialog", { name: "Account settings" })).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Overlays" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
-    expect(screen.getByRole("dialog", { name: "Map settings" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Account settings" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+    expect(screen.getByRole("dialog", { name: "Account settings" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Account settings" })).toBeNull();
     expect(screen.getByRole("checkbox", { name: "Deed Names" })).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "Mission Grid" })).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Map visibility" })).toBeNull();
@@ -1063,7 +1145,7 @@ describe("MapPage", () => {
     expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Canals" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Highways" })).toBeTruthy();
-    expect(layerControls.getByRole("checkbox", { name: "Rift Overlays" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Rifts" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Grid Overlay" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Mission Grid" })).toBeTruthy();
     expect(layerControls.getByLabelText("Towers color")).toBeTruthy();
@@ -1071,19 +1153,28 @@ describe("MapPage", () => {
     expect(layerControls.getByLabelText("Notes color")).toBeTruthy();
     expect(layerControls.getByLabelText("Camps color")).toHaveProperty("value", "#facc15");
     expect(layerControls.getByLabelText("Minedoors color")).toHaveProperty("value", "#22d3ee");
+    expect(layerControls.getByLabelText("Rifts color")).toHaveProperty("value", "#ef4444");
     expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#cc00cc");
     expect(layerControls.getByLabelText("Canals color")).toHaveProperty("value", "#0055cc");
     expect(layerControls.getByLabelText("Highways color")).toHaveProperty("value", "#cccc00");
     expect(layerControls.getByLabelText("Grid Overlay color")).toBeTruthy();
     expect(layerControls.getByLabelText("Mission Grid color")).toBeTruthy();
     expect(layerControls.getByLabelText("Tile highlight color")).toHaveProperty("value", "#c000ff");
-    expect(layerControls.getByRole("slider", { name: "Towers opacity" })).toHaveProperty("value", "100");
-    expect(layerControls.getByRole("slider", { name: "Deeds opacity" })).toHaveProperty("value", "100");
-    expect(layerControls.getByRole("slider", { name: "Notes opacity" })).toHaveProperty("value", "100");
-    expect(layerControls.getByRole("slider", { name: "Rift Overlay opacity" })).toHaveProperty("value", "100");
-    expect(layerControls.getByRole("slider", { name: "Grid Overlay opacity" })).toHaveProperty("value", "100");
-    expect(layerControls.getByRole("slider", { name: "Mission Grid opacity" })).toHaveProperty("value", "100");
-    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "75");
+    const bridgeRow = layerControls.getByRole("checkbox", { name: "Bridges" }).closest(".map-layer-row");
+    expect(bridgeRow).not.toBeNull();
+    expect(Array.from(bridgeRow?.children ?? [])).toEqual([
+      layerControls.getByRole("checkbox", { name: "Bridges" }),
+      layerControls.getByLabelText("Bridges color"),
+      expect.objectContaining({ textContent: "Bridges" }),
+      layerControls.getByRole("slider", { name: "Bridges opacity" })
+    ]);
+    expect(layerControls.getByRole("slider", { name: "Towers opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Deeds opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Notes opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Rifts opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Grid Overlay opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Mission Grid opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "50");
     expect(layerControls.queryByText("Tower color")).toBeNull();
     expect(layerControls.queryByText("Deed color")).toBeNull();
     expect(layerControls.queryByText("Note color")).toBeNull();
@@ -1126,7 +1217,7 @@ describe("MapPage", () => {
     expect(screen.queryByTestId("sector-grid-overlay")).toBeNull();
     expect(screen.queryByTestId("mission-grid-overlay")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Grid Overlay" }));
 
     const sectorGrid = screen.getByTestId("sector-grid-overlay");
@@ -1171,14 +1262,14 @@ describe("MapPage", () => {
     expect(within(tileHighlightPanel).queryByLabelText("Tile highlight color")).toBeNull();
     expect(within(tileHighlightPanel).queryByRole("slider", { name: "Tile highlight opacity" })).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
-    const settings = screen.getByRole("dialog", { name: "Map settings" });
+    const settings = screen.getByRole("dialog", { name: "Settings" });
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
 
     expect(within(settings).queryByRole("group", { name: "Tile Highlighting" })).toBeNull();
     expect(layerControls.getByLabelText("Tile highlight color")).toHaveProperty("value", "#c000ff");
-    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "75");
+    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "50");
     [
       "Cave Entrance",
       "Clay",
@@ -1259,10 +1350,14 @@ describe("MapPage", () => {
           canals: "#2563eb",
           highways: "#fde047",
           minedoors: "#06b6d4",
+          rifts: "#dc2626",
           sectorGrid: "#ff8800"
         },
         markerOpacities: {
           ...DEFAULT_USER_MAP_SETTINGS.markerOpacities,
+          bridges: 58,
+          canals: 67,
+          highways: 76,
           riftOverlays: 62,
           sectorGrid: 45
         },
@@ -1282,6 +1377,10 @@ describe("MapPage", () => {
           opacity: 55,
           selection: "Clay"
         },
+        roadwayEditPanelPosition: {
+          left: 320,
+          top: 500
+        },
         tileHighlightPanelPosition: {
           left: 72,
           top: 44
@@ -1296,12 +1395,16 @@ describe("MapPage", () => {
     expect(tileHighlightPanel.style.left).toBe("72px");
     expect(tileHighlightPanel.style.top).toBe("44px");
     expect(within(tileHighlightPanel).getByRole("combobox", { name: "Tile Highlighting" })).toHaveProperty("value", "Clay");
+    const roadwayPanel = screen.getByRole("group", { name: "Roadway Edit Mode" });
+    expect(roadwayPanel.className).toContain("is-positioned");
+    expect(roadwayPanel.style.left).toBe("320px");
+    expect(roadwayPanel.style.top).toBe("500px");
 
     const sectorGrid = screen.getByTestId("sector-grid-overlay");
     expect(sectorGrid.style.color).toBe("rgb(255, 136, 0)");
     expect(sectorGrid.style.opacity).toBe("0.45");
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
     expect(layerControls.getByRole("checkbox", { name: "Camps" })).toHaveProperty("checked", false);
     expect(layerControls.getByRole("checkbox", { name: "Deed Perimeters" })).toHaveProperty("checked", false);
@@ -1311,16 +1414,98 @@ describe("MapPage", () => {
     expect(layerControls.getByRole("checkbox", { name: "Highways" })).toHaveProperty("checked", false);
     expect(layerControls.getByLabelText("Camps color")).toHaveProperty("value", "#f59e0b");
     expect(layerControls.getByLabelText("Minedoors color")).toHaveProperty("value", "#06b6d4");
+    expect(layerControls.getByLabelText("Rifts color")).toHaveProperty("value", "#dc2626");
     expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#d946ef");
     expect(layerControls.getByLabelText("Canals color")).toHaveProperty("value", "#2563eb");
     expect(layerControls.getByLabelText("Highways color")).toHaveProperty("value", "#fde047");
+    expect(layerControls.getByRole("slider", { name: "Bridges opacity" })).toHaveProperty("value", "58");
+    expect(layerControls.getByRole("slider", { name: "Canals opacity" })).toHaveProperty("value", "67");
+    expect(layerControls.getByRole("slider", { name: "Highways opacity" })).toHaveProperty("value", "76");
     expect(layerControls.getByLabelText("Tile highlight color")).toHaveProperty("value", "#00ffaa");
-    expect(layerControls.getByRole("checkbox", { name: "Rift Overlays" })).toHaveProperty("checked", false);
-    expect(layerControls.getByRole("slider", { name: "Rift Overlay opacity" })).toHaveProperty("value", "62");
+    expect(layerControls.queryByRole("checkbox", { name: "Highway Details" })).toBeNull();
+    expect(layerControls.getByRole("checkbox", { name: "Rifts" })).toHaveProperty("checked", false);
+    expect(layerControls.getByRole("slider", { name: "Rifts opacity" })).toHaveProperty("value", "62");
     expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "55");
   });
 
-  it("saves user map settings when tile highlighter appearance and position change", async () => {
+  it("resets user map settings to defaults from the settings menu", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        markerColors: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerColors,
+          bridges: "#d946ef",
+          camps: "#f59e0b",
+          rifts: "#dc2626",
+          sectorGrid: "#ff8800"
+        },
+        markerOpacities: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerOpacities,
+          bridges: 91,
+          riftOverlays: 12,
+          sectorGrid: 25
+        },
+        markerVisibility: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerVisibility,
+          bridges: false,
+          camps: false,
+          riftOverlays: false,
+          sectorGrid: true
+        },
+        roadwayEditPanelPosition: {
+          left: 320,
+          top: 500
+        },
+        tileHighlight: {
+          color: "#00ffaa",
+          opacity: 87,
+          selection: "Clay"
+        },
+        tileHighlightPanelPosition: {
+          left: 72,
+          top: 44
+        }
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const tileHighlightPanel = screen.getByRole("group", { name: "Tile Highlighting" });
+    const roadwayPanel = screen.getByRole("group", { name: "Roadway Edit Mode" });
+    expect(tileHighlightPanel.className).toContain("is-positioned");
+    expect(roadwayPanel.className).toContain("is-positioned");
+    expect(within(tileHighlightPanel).getByRole("combobox", { name: "Tile Highlighting" })).toHaveProperty("value", "Clay");
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const settings = screen.getByRole("dialog", { name: "Settings" });
+    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
+    expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", false);
+    expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#d946ef");
+    expect(layerControls.getByLabelText("Rifts color")).toHaveProperty("value", "#dc2626");
+    expect(layerControls.getByRole("slider", { name: "Bridges opacity" })).toHaveProperty("value", "91");
+    expect(layerControls.getByRole("slider", { name: "Rifts opacity" })).toHaveProperty("value", "12");
+    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "87");
+
+    fireEvent.click(within(settings).getByRole("button", { name: "Default" }));
+
+    expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", true);
+    expect(layerControls.getByRole("checkbox", { name: "Camps" })).toHaveProperty("checked", true);
+    expect(layerControls.getByRole("checkbox", { name: "Rifts" })).toHaveProperty("checked", true);
+    expect(layerControls.getByRole("checkbox", { name: "Grid Overlay" })).toHaveProperty("checked", false);
+    expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", DEFAULT_USER_MAP_SETTINGS.markerColors.bridges);
+    expect(layerControls.getByLabelText("Camps color")).toHaveProperty("value", DEFAULT_USER_MAP_SETTINGS.markerColors.camps);
+    expect(layerControls.getByLabelText("Rifts color")).toHaveProperty("value", DEFAULT_USER_MAP_SETTINGS.markerColors.rifts);
+    expect(layerControls.getByLabelText("Grid Overlay color")).toHaveProperty("value", DEFAULT_USER_MAP_SETTINGS.markerColors.sectorGrid);
+    expect(layerControls.getByRole("slider", { name: "Bridges opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Rifts opacity" })).toHaveProperty("value", "50");
+    expect(layerControls.getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "50");
+    expect(within(tileHighlightPanel).getByRole("combobox", { name: "Tile Highlighting" })).toHaveProperty("value", "");
+    expect(tileHighlightPanel.className).not.toContain("is-positioned");
+    expect(roadwayPanel.className).not.toContain("is-positioned");
+  });
+
+  it("saves user map settings when floating map controls move", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1330,7 +1515,7 @@ describe("MapPage", () => {
       viewer: approvedViewer
     }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
     fireEvent.change(layerControls.getByLabelText("Tile highlight color"), {
       target: { value: "#00ff00" }
@@ -1348,6 +1533,19 @@ describe("MapPage", () => {
       pointerId: 11
     });
     fireEvent.pointerUp(window, { pointerId: 11 });
+
+    fireEvent.pointerDown(screen.getByTestId("roadway-edit-drag-handle"), {
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+      pointerId: 12
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 90,
+      clientY: 70,
+      pointerId: 12
+    });
+    fireEvent.pointerUp(window, { pointerId: 12 });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/maps/map-1/settings",
@@ -1367,6 +1565,10 @@ describe("MapPage", () => {
     }
 
     expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      roadwayEditPanelPosition: {
+        left: 70,
+        top: 50
+      },
       tileHighlight: {
         color: "#00ff00"
       },
@@ -1435,39 +1637,41 @@ describe("MapPage", () => {
       viewer: approvedViewer
     }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Grid Overlay" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Mission Grid" }));
 
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
     fireEvent.change(layerControls.getByRole("slider", { name: "Towers opacity" }), {
-      target: { value: "40" }
+      target: { value: "0" }
     });
     fireEvent.change(layerControls.getByRole("slider", { name: "Deeds opacity" }), {
-      target: { value: "55" }
+      target: { value: "100" }
     });
     fireEvent.change(layerControls.getByRole("slider", { name: "Notes opacity" }), {
       target: { value: "65" }
     });
-    fireEvent.change(layerControls.getByRole("slider", { name: "Rift Overlay opacity" }), {
-      target: { value: "45" }
+    fireEvent.change(layerControls.getByRole("slider", { name: "Rifts opacity" }), {
+      target: { value: "100" }
     });
     fireEvent.change(layerControls.getByRole("slider", { name: "Grid Overlay opacity" }), {
       target: { value: "35" }
     });
     fireEvent.change(layerControls.getByRole("slider", { name: "Mission Grid opacity" }), {
-      target: { value: "80" }
+      target: { value: "100" }
     });
 
-    expect(screen.getByTestId("tower-center-tower-1").style.opacity).toBe("0.4");
-    expect(screen.getByTestId("tower-protection-tower-1").style.opacity).toBe("0.4");
-    expect(screen.getByTestId("deed-center-deed-1").style.opacity).toBe("0.55");
-    expect(screen.getByTestId("deed-overlay-deed-1").style.opacity).toBe("0.55");
+    expect(screen.getByTestId("tower-center-tower-1").style.opacity).toBe("0");
+    expect(screen.getByTestId("tower-protection-tower-1").style.opacity).toBe("0");
+    expect(screen.getByTestId("deed-center-deed-1").style.opacity).toBe("1");
+    expect(screen.getByTestId("deed-overlay-deed-1").style.backgroundColor).toBe("rgb(250, 204, 21)");
+    expect(screen.getByTestId("deed-overlay-deed-1").style.opacity).toBe("1");
     expect(screen.getByTestId("note-center-note-1").style.opacity).toBe("0.65");
-    expect(screen.getByTestId("rift-overlay-rift-1").style.opacity).toBe("0.45");
+    expect(screen.getByTestId("rift-overlay-rift-1").style.backgroundColor).toBe("rgb(239, 68, 68)");
+    expect(screen.getByTestId("rift-overlay-rift-1").style.opacity).toBe("1");
     expect(screen.queryByTestId("rift-overlay-camp-1")).toBeNull();
     expect(screen.getByTestId("sector-grid-overlay").style.opacity).toBe("0.35");
-    expect(screen.getByTestId("mission-grid-overlay").style.opacity).toBe("0.8");
+    expect(screen.getByTestId("mission-grid-overlay").style.opacity).toBe("1");
   });
 
   it("toggles and recolors camp and minedoor marker layers", () => {
@@ -1499,7 +1703,7 @@ describe("MapPage", () => {
     expect(camp.style.getPropertyValue("--map-camp-color")).toBe("#facc15");
     expect(minedoor.style.getPropertyValue("--map-minedoor-color")).toBe("#22d3ee");
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
     fireEvent.change(layerControls.getByLabelText("Camps color"), {
       target: { value: "#f59e0b" }
@@ -1518,7 +1722,7 @@ describe("MapPage", () => {
     expect(screen.queryByRole("button", { name: "Minedoor at 920, 1020" })).toBeNull();
   });
 
-  it("renders a toggleable 51x51 overlay for rifts only", () => {
+  it("renders a toggleable and recolorable 51x51 overlay for rifts only", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -1548,11 +1752,20 @@ describe("MapPage", () => {
     expect(overlay.style.top).toBe("975px");
     expect(overlay.style.width).toBe("51px");
     expect(overlay.style.height).toBe("51px");
+    expect(overlay.style.backgroundColor).toBe("rgb(239, 68, 68)");
+    expect(screen.getByRole("button", { name: "Rift at 900, 1000" }).style.getPropertyValue("--map-rift-color")).toBe("#ef4444");
     expect(screen.queryByTestId("rift-overlay-camp-1")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
-    fireEvent.click(layerControls.getByRole("checkbox", { name: "Rift Overlays" }));
+    fireEvent.change(layerControls.getByLabelText("Rifts color"), {
+      target: { value: "#dc2626" }
+    });
+
+    expect(screen.getByTestId("rift-overlay-rift-1").style.backgroundColor).toBe("rgb(220, 38, 38)");
+    expect(screen.getByRole("button", { name: "Rift at 900, 1000" }).style.getPropertyValue("--map-rift-color")).toBe("#dc2626");
+
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Rifts" }));
 
     expect(screen.queryByTestId("rift-overlay-rift-1")).toBeNull();
     expect(screen.getByRole("button", { name: "Rift at 900, 1000" })).toBeTruthy();
@@ -1585,7 +1798,7 @@ describe("MapPage", () => {
     expect(screen.getByTestId("deed-perimeter-top-deed-1")).toBeTruthy();
     expect(screen.getByTestId("deed-center-deed-1")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
     fireEvent.click(layerControls.getByRole("checkbox", { name: "Deed Perimeters" }));
 
@@ -1620,16 +1833,21 @@ describe("MapPage", () => {
 
     const bridge = screen.getByTestId("path-marker-path-1");
     expect(bridge.getAttribute("stroke")).toBe("#cc00cc");
+    expect(bridge.getAttribute("opacity")).toBe("0.5");
     expect(bridge.getAttribute("stroke-width")).toBe("2");
     expect(bridge.getAttribute("points")).toBe("100.5,120.5 140.5,120.5");
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
     fireEvent.change(layerControls.getByLabelText("Bridges color"), {
       target: { value: "#d946ef" }
     });
+    fireEvent.change(layerControls.getByRole("slider", { name: "Bridges opacity" }), {
+      target: { value: "42" }
+    });
 
     expect(screen.getByTestId("path-marker-path-1").getAttribute("stroke")).toBe("#d946ef");
+    expect(screen.getByTestId("path-marker-path-1").getAttribute("opacity")).toBe("0.42");
 
     fireEvent.click(layerControls.getByRole("checkbox", { name: "Bridges" }));
 
@@ -1752,9 +1970,70 @@ describe("MapPage", () => {
     expect(within(drawDialog).queryByText("2 points")).toBeNull();
   });
 
-  it("requires highway details mode before highways show hover details or marker actions", () => {
+  it("starts roadway paths at the clicked coordinate when a deed overlay is under the cursor", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
+      clientX: 503,
+      clientY: 604
+    });
+
+    expect(screen.getByText("Add at 503, 604")).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bridge" }));
+
+    const drawDialog = screen.getByRole("dialog", { name: "Draw Bridge" });
+    expect(within(drawDialog).getByText("1: 503, 604")).toBeTruthy();
+    expect(within(drawDialog).queryByText("1: 500, 600")).toBeNull();
+  });
+
+  it("uses roadway edit mode before paths show hover details or marker actions", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "bridge-1",
+          name: "Cedar Bridge",
+          notes: "River crossing",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        },
+        {
+          id: "canal-1",
+          name: "West Canal",
+          notes: "Boat route",
+          points: [
+            { x: 110, y: 150 },
+            { x: 150, y: 150 }
+          ],
+          type: "canal",
+          width: 2,
+          x: 110,
+          y: 150
+        },
         {
           id: "highway-1",
           name: "East Road",
@@ -1773,32 +2052,65 @@ describe("MapPage", () => {
       viewer: approvedViewer
     }));
 
+    expect(screen.queryByRole("checkbox", { name: "Highway Details" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(within(screen.getByRole("group", { name: "Map layers" })).queryByRole("checkbox", { name: "Highway Details" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const bridge = screen.getByTestId("path-marker-bridge-1");
+    const canal = screen.getByTestId("path-marker-canal-1");
     const highway = screen.getByTestId("path-marker-highway-1");
 
-    fireEvent.mouseMove(highway, {
-      clientX: 150,
-      clientY: 130
-    });
+    for (const path of [bridge, canal, highway]) {
+      fireEvent.mouseMove(path, {
+        clientX: 150,
+        clientY: 130
+      });
+    }
+    expect(screen.queryByRole("tooltip", { name: "Bridge: Cedar Bridge" })).toBeNull();
+    expect(screen.queryByRole("tooltip", { name: "Canal: West Canal" })).toBeNull();
     expect(screen.queryByRole("tooltip", { name: "Highway: East Road" })).toBeNull();
 
-    fireEvent.contextMenu(highway, {
+    for (const path of [bridge, canal, highway]) {
+      fireEvent.contextMenu(path, {
+        clientX: 150,
+        clientY: 130
+      });
+    }
+    expect(screen.queryByRole("menu", { name: "Marker actions" })).toBeNull();
+
+    const roadwayEditPanel = screen.getByRole("group", { name: "Roadway Edit Mode" });
+    const roadwayEditToggle = within(roadwayEditPanel).getByRole("checkbox", { name: "Roadway Edit Mode" });
+    expect(roadwayEditToggle).toHaveProperty("checked", false);
+    fireEvent.click(roadwayEditToggle);
+    expect(roadwayEditToggle).toHaveProperty("checked", true);
+
+    fireEvent.mouseMove(bridge, {
       clientX: 150,
       clientY: 130
     });
-    expect(screen.queryByRole("menu", { name: "Marker actions" })).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
-    const layerControls = within(screen.getByRole("group", { name: "Map layers" }));
-    const highwayDetails = layerControls.getByRole("checkbox", { name: "Highway Details" });
-    expect(highwayDetails).toHaveProperty("checked", false);
-    fireEvent.click(highwayDetails);
-
+    expect(screen.getByRole("tooltip", { name: "Bridge: Cedar Bridge" })).toBeTruthy();
+    fireEvent.mouseMove(canal, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.getByRole("tooltip", { name: "Canal: West Canal" })).toBeTruthy();
     fireEvent.mouseMove(highway, {
       clientX: 150,
       clientY: 130
     });
     expect(screen.getByRole("tooltip", { name: "Highway: East Road" })).toBeTruthy();
 
+    fireEvent.contextMenu(bridge, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.getByRole("menu", { name: "Marker actions" })).toBeTruthy();
+    fireEvent.contextMenu(canal, {
+      clientX: 150,
+      clientY: 130
+    });
+    expect(screen.getByRole("menu", { name: "Marker actions" })).toBeTruthy();
     fireEvent.contextMenu(highway, {
       clientX: 150,
       clientY: 130
@@ -1826,7 +2138,7 @@ describe("MapPage", () => {
 
     expect(screen.queryByTestId("tower-name-label-tower-1")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Tower Names" }));
 
     const label = screen.getByTestId("tower-name-label-tower-1");
@@ -1870,7 +2182,7 @@ describe("MapPage", () => {
 
     expect(screen.queryByTestId("deed-name-label-deed-1")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Deed Names" }));
 
     const label = screen.getByTestId("deed-name-label-deed-1");
@@ -1933,6 +2245,210 @@ describe("MapPage", () => {
     const reticule = screen.getByTestId("selected-coordinate-reticule");
     expect(reticule.getAttribute("aria-label")).toBe("Selected coordinate 125, 140");
     expect(window.location.href).toBe(`${window.location.origin}/map?x=125&y=140`);
+  });
+
+  it("plans one temporary route with tile and meter distance", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    const routeButton = screen.getByRole("button", { name: "Route planner" });
+    expect(routeButton.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(routeButton);
+    expect(routeButton.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.doubleClick(stage, {
+      clientX: 100,
+      clientY: 100
+    });
+
+    expect(screen.getByTestId("route-planner-layer")).toBeTruthy();
+    expect(screen.getByText("0 tiles")).toBeTruthy();
+    expect(screen.getByText("0 meters")).toBeTruthy();
+
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 103,
+      clientY: 104,
+      pointerId: 11
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 103,
+      clientY: 104,
+      pointerId: 11
+    });
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 106,
+      clientY: 108,
+      pointerId: 12
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 106,
+      clientY: 108,
+      pointerId: 12
+    });
+
+    expect(screen.getByTestId("route-planner-line").getAttribute("points")).toBe("100.5,100.5 103.5,104.5 106.5,108.5");
+    expect(screen.getByText("10 tiles")).toBeTruthy();
+    expect(screen.getByText("40 meters")).toBeTruthy();
+
+    fireEvent.doubleClick(stage, {
+      clientX: 150,
+      clientY: 160
+    });
+
+    expect(screen.queryByTestId("route-planner-layer")).toBeNull();
+    expect(screen.queryByText("10 tiles")).toBeNull();
+  });
+
+  it("plans routes over map marker overlays", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Route planner" }));
+    const deedOverlay = screen.getByTestId("deed-overlay-deed-1");
+
+    fireEvent.doubleClick(deedOverlay, {
+      clientX: 500,
+      clientY: 600
+    });
+    fireEvent.pointerDown(deedOverlay, {
+      button: 0,
+      clientX: 503,
+      clientY: 604,
+      pointerId: 21
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 503,
+      clientY: 604,
+      pointerId: 21
+    });
+
+    expect(screen.getByTestId("route-planner-line").getAttribute("points")).toBe("500.5,600.5 503.5,604.5");
+    expect(screen.getByText("5 tiles")).toBeTruthy();
+    expect(screen.getByText("20 meters")).toBeTruthy();
+  });
+
+  it("clears the planned route when the planner is toggled off", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    const routeButton = screen.getByRole("button", { name: "Route planner" });
+    fireEvent.click(routeButton);
+    fireEvent.doubleClick(stage, {
+      clientX: 100,
+      clientY: 100
+    });
+
+    expect(screen.getByTestId("route-planner-layer")).toBeTruthy();
+
+    fireEvent.click(routeButton);
+
+    expect(routeButton.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByTestId("route-planner-layer")).toBeNull();
+  });
+
+  it("shows a map legend with the current marker colors", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        markerColors: {
+          ...DEFAULT_USER_MAP_SETTINGS.markerColors,
+          bridges: "#d946ef",
+          camps: "#f59e0b",
+          canals: "#2563eb",
+          deeds: "#facc15",
+          highways: "#fde047",
+          minedoors: "#06b6d4",
+          notes: "#ff2bd6",
+          rifts: "#dc2626",
+          towers: "#ffffff"
+        }
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const legendButton = screen.getByRole("button", { name: "Map legend" });
+    expect(legendButton.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(legendButton);
+
+    expect(legendButton.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("dialog", { name: "Map legend" })).toBeTruthy();
+    expect(screen.getByText("Tower")).toBeTruthy();
+    expect(screen.getByText("Deed")).toBeTruthy();
+    expect(screen.getByText("Note")).toBeTruthy();
+    expect(screen.getByText("Rift")).toBeTruthy();
+    expect(screen.getByText("Camp")).toBeTruthy();
+    expect(screen.getByText("Minedoor")).toBeTruthy();
+    expect(screen.getByText("Bridge")).toBeTruthy();
+    expect(screen.getByText("Canal")).toBeTruthy();
+    expect(screen.getByText("Highway")).toBeTruthy();
+    expect(screen.getByTestId("legend-symbol-rift").style.getPropertyValue("--map-legend-color")).toBe("#dc2626");
+    expect(screen.getByTestId("legend-symbol-camp").style.getPropertyValue("--map-legend-color")).toBe("#f59e0b");
+    expect(screen.getByTestId("legend-symbol-minedoor").style.getPropertyValue("--map-legend-color")).toBe("#06b6d4");
+    expect(screen.getByTestId("legend-symbol-bridge").style.getPropertyValue("--map-legend-color")).toBe("#d946ef");
+    expect(screen.getByTestId("legend-symbol-canal").style.getPropertyValue("--map-legend-color")).toBe("#2563eb");
+    expect(screen.getByTestId("legend-symbol-highway").style.getPropertyValue("--map-legend-color")).toBe("#fde047");
+  });
+
+  it("renders default draggable map tools in the requested stack order", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const rightControls = document.querySelector(".map-right-side-controls");
+    expect(Array.from(rightControls?.children ?? []).map((child) => child.getAttribute("aria-label"))).toEqual([
+      "Tile Highlighting",
+      "Roadway Edit Mode"
+    ]);
+
+    const bottomLeftControls = document.querySelector(".map-bottom-left-controls");
+    expect(Array.from(bottomLeftControls?.children ?? []).map((child) => child.className)).toEqual([
+      "map-legend-control",
+      "map-route-planner-control"
+    ]);
   });
 
   it("filters markers by search and highlights matching centers", () => {
@@ -2039,6 +2555,77 @@ describe("MapPage", () => {
     expect(screen.getByTestId("minedoor-marker-minedoor-1").className).toContain("map-search-match");
   });
 
+  it("does not search infrastructure paths by type, name, notes, or coordinates", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "bridge-1",
+          name: "Cedar Bridge",
+          notes: "River crossing 777",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        },
+        {
+          id: "canal-1",
+          name: "West Canal",
+          notes: "Boat route",
+          points: [
+            { x: 110, y: 150 },
+            { x: 150, y: 150 }
+          ],
+          type: "canal",
+          width: 2,
+          x: 110,
+          y: 150
+        },
+        {
+          id: "highway-1",
+          name: "East Road",
+          notes: "Main route",
+          points: [
+            { x: 120, y: 130 },
+            { x: 180, y: 130 }
+          ],
+          type: "highway",
+          width: 2,
+          x: 120,
+          y: 130
+        },
+        {
+          category: "General",
+          id: "note-1",
+          text: "Cedar Bridge reminder",
+          title: "Roadway note",
+          type: "note",
+          x: 700,
+          y: 800
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const searchbox = screen.getByRole("searchbox", { name: "Search map" });
+
+    fireEvent.change(searchbox, { target: { value: "bridge" } });
+    expect(screen.getByRole("button", { name: "Note General - Roadway note at 700, 800" })).toBeTruthy();
+    expect(screen.queryByTestId("path-marker-bridge-1")).toBeNull();
+    expect(screen.queryByTestId("path-marker-canal-1")).toBeNull();
+    expect(screen.queryByTestId("path-marker-highway-1")).toBeNull();
+
+    fireEvent.change(searchbox, { target: { value: "Boat route" } });
+    expect(screen.queryByTestId("path-marker-canal-1")).toBeNull();
+
+    fireEvent.change(searchbox, { target: { value: "120" } });
+    expect(screen.queryByTestId("path-marker-highway-1")).toBeNull();
+  });
+
   it("keeps deed centers visible when overlays are hidden", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
@@ -2061,7 +2648,7 @@ describe("MapPage", () => {
       viewer: approvedViewer
     }));
 
-    fireEvent.click(screen.getByRole("button", { name: "Map settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Overlays" }));
 
     const deed = screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" });
@@ -2104,6 +2691,8 @@ describe("MapPage", () => {
   });
 
   it("opens edit and delete commands from an existing marker context menu", () => {
+    const clipboardWrite = mockClipboardWrite();
+
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -2129,6 +2718,12 @@ describe("MapPage", () => {
     const menu = screen.getByRole("menu", { name: "Marker actions" });
     expect(menu).toBeTruthy();
     expect(screen.getByText("1 item at 250, 300")).toBeTruthy();
+    const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 250, 300" });
+    expect(screen.getByText("1 item at 250, 300").closest("button")).toBe(coordinateCopyButton);
+    expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "Copy coordinates 250, 300" })).toBeNull();
+    fireEvent.click(coordinateCopyButton);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=250&y=300`);
     expect(screen.getByTestId("context-marker-row-tower-1")).toBeTruthy();
     expect(screen.getByText("Mako 945")).toBeTruthy();
     expect(screen.getByText("Tower | QL 89.50 | DMG 0.25")).toBeTruthy();

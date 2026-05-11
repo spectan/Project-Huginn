@@ -50,6 +50,16 @@ Prevention:
 
 Keep tower overlay constants named as distances rather than radii. UI code should calculate square dimensions as `distance * 2 + 1` so the center tile is included.
 
+### Tower Creator Numbers
+
+Decision:
+
+Tower creator numbers are optional, but when present they are a whole number from `0` through `999`. The UI's combined Creator field must parse `Kichi 1`, `Kichi 42`, and `Kichi 999` as the same creator name with different maker numbers.
+
+Prevention:
+
+Do not reintroduce an exact three-digit tower-number requirement. Keep tests for domain validation and the combined Creator form parser so saved one- and two-digit tower numbers round-trip without becoming part of the creator name.
+
 ### Server-Side Permission Enforcement
 
 Decision:
@@ -138,11 +148,33 @@ Overlay visuals are not marker data, but they are durable per-user display prefe
 
 Decision:
 
-Render rift overlays as non-interactive 51x51 fill-only squares centered on the rift. Gate them behind both the global `Overlays` setting and a dedicated `Rift Overlays` setting, with independent `Rift Overlay opacity`. Camps remain marker-only.
+Render rift overlays as non-interactive 51x51 fill-only squares centered on the rift. Gate them behind both the global `Overlays` setting and a dedicated `Rifts` setting, with independent `Rifts color` and `Rifts opacity`. The rift triangle and overlay use the same persisted rift color, defaulting to red. Camps remain marker-only.
 
 Prevention:
 
-When adding overlay behavior, update marker geometry tests, map settings defaults and parsers, settings UI controls, persisted settings tests, architecture docs, and this file together.
+When adding overlay behavior, update marker geometry tests, map settings defaults and parsers, settings UI controls, persisted settings tests, architecture docs, and this file together. If the marker has a fixed visual color, decide explicitly whether that color should become a persisted user setting.
+
+### Overlay Context Menus Must Preserve Click Coordinates
+
+Context:
+
+Right-clicking an existing overlay should still allow users to create a bridge, canal, or highway starting exactly where they clicked.
+
+What happened:
+
+The marker context menu used the overlay marker's stored center coordinate for all context actions, so starting a path on top of a deed overlay used the deed center instead of the clicked tile.
+
+Root cause:
+
+The marker context path conflated "which marker received the context click" with "which map coordinate the user clicked".
+
+Decision:
+
+Marker and overlay context menus compute the clicked map coordinate from the event and view, use that coordinate for `Add at ...` actions, and still include the clicked marker in the context rows for edit/delete actions.
+
+Prevention:
+
+When context menus support both marker actions and coordinate-based creation, test a click away from the marker center inside an overlay. Keep the target marker identity separate from the clicked coordinate.
 
 ### Special Marker Display Settings
 
@@ -166,6 +198,30 @@ Prevention:
 
 When a marker type gains a display preference, update defaults, parsers, settings service tests, settings UI, marker-layer styles, workspace visibility helpers, context-row colors, and saved-setting load tests together.
 
+### Opacity Settings Use Percent Values
+
+Context:
+
+Layer opacity controls need to be predictable across marker overlays, paths, grids, and tile highlighting.
+
+What happened:
+
+Some controls defaulted to fully opaque and tile highlighting defaulted to a different value, which made the settings panel inconsistent.
+
+Root cause:
+
+Opacity defaults had grown feature-by-feature instead of being treated as one shared settings contract.
+
+Decision:
+
+All opacity sliders default to `50`. Slider values are interpreted as literal percentages: `0` maps to invisible CSS opacity `0`, and `100` maps to fully opaque CSS opacity `1`.
+
+Do not combine slider opacity with semi-transparent `rgba(...)` or generated alpha colors. The fill/stroke color should be solid, and the slider should be the only opacity source; otherwise `100` still renders partially transparent.
+
+Prevention:
+
+When adding any opacity-backed setting, put it through the shared map settings defaults and parser, and test both the default slider value and at least one boundary conversion.
+
 ### Infrastructure Paths Need View Stability
 
 Context:
@@ -182,7 +238,7 @@ Coordinate conversion depends on the exact view state at the time of the pointer
 
 Decision:
 
-Store the view used to open a context menu and pass it into path creation. Path drawing sets that view as the manual view before accepting additional clicks. Paths are first-class `path_markers` records with type `bridge`, `canal`, or `highway`, 2-10 points, width `1`-`20`, soft delete/restore support, search text, settings toggles, and per-type colors.
+Store the view used to open a context menu and pass it into path creation. Path drawing sets that view as the manual view before accepting additional clicks. Paths are first-class `path_markers` records with type `bridge`, `canal`, or `highway`, 2-10 points, width `1`-`20`, soft delete/restore support, settings toggles, and per-type colors/opacities.
 
 Prevention:
 
@@ -204,11 +260,181 @@ The global pointer-up fallback added points whenever a path draft existed, even 
 
 Decision:
 
-Only append path points when there is an active drag/click state created by a pointerdown on the map viewport. Highways are also passive by default: hover details and marker actions require the persisted `Highway Details` display mode.
+Only append path points when there is an active drag/click state created by a pointerdown on the map viewport. Infrastructure paths are also passive by default: hover details and marker actions require local `Roadway Edit Mode`.
 
 Prevention:
 
 For every multi-click map workflow, test clicks in floating dialogs and controls while the workflow is active. Do not let window-level listeners infer map intent from pointer-up alone.
+
+### Route Planner Is Temporary
+
+Context:
+
+Users needed a quick route measuring tool separate from persisted bridges, canals, and highways.
+
+What happened:
+
+The map already had multi-point path creation, but that flow writes first-class marker records and opens a save dialog. Reusing it would blur a temporary measurement tool with shared map data.
+
+Decision:
+
+The route planner is local-only state behind a compact bottom-left icon toggle. Only one planned route can exist at a time. With the planner enabled, double-click starts a route when none exists and clears the existing route when one exists. Left clicks append points after the route starts. Distance is summed as straight-line tile-coordinate segment length and meters are `tiles * 4`.
+
+Prevention:
+
+Keep measurement tools separate from persisted marker/path workflows unless the product explicitly asks to save them. Regression tests should cover double-click start, double-click clear, click-to-add, the tile-to-meter conversion, and clicks over marker overlays.
+
+### Map Tool Clicks Over Marker Overlays
+
+Context:
+
+The route planner is a map-level click workflow, but deed overlays and some marker centers are interactive buttons.
+
+What happened:
+
+The generic map click guard ignored interactive targets to keep dialogs and controls from creating map points. That also blocked route planner clicks on deed overlays, even though those overlays are visually part of the map.
+
+Decision:
+
+When route planner mode is active, pointer and double-click handling treats marker overlays inside the map viewport as map targets. Fixed controls, menus, and dialogs remain outside the viewport workflow and must not create route points.
+
+Prevention:
+
+For map-level tools, test both plain map clicks and clicks over marker overlay elements. Do not use a broad interactive-target guard when the interaction mode intentionally needs to pass through map markers.
+
+### Legend Uses Display Settings
+
+Decision:
+
+The map legend is a local bottom-left popup next to the route planner. It lists tower, deed, note, rift, camp, minedoor, bridge, canal, and highway symbols, and each symbol reads from the current marker color settings instead of hardcoded duplicate colors.
+
+Prevention:
+
+When adding a new visible marker or path type, update the legend in the same pass as marker rendering and settings. Tests should assert that legend symbol colors come from `markerColors`.
+
+### Note Marker Shape And Search Pulse
+
+Context:
+
+Notes should render as circular map markers while still participating in normal search highlighting.
+
+What happened:
+
+The later 3x3 note marker sizing rule reset `border-radius` to `0`, overriding the shared circular marker shape and making notes appear as squares.
+
+Root cause:
+
+Marker shape, marker sizing, and search pulse behavior all live on the interactive button. Changing the sizing rule without preserving the shape changed the visual marker even though search still added the correct `map-search-match` class.
+
+Decision:
+
+Keep notes as 3x3 centered circles by preserving `border-radius: 50%` on `.map-marker--note`. Do not move the note shape to a pseudo-element; the interactive button should keep the shape and the search pulse animation.
+
+Prevention:
+
+CSS regression tests should cover both the note shape and the search pulse contract. When changing marker shape CSS, verify the searched marker still receives `map-search-match` and that no pseudo-element absorbs the visible marker shape.
+
+### Default Floating Tool Stacks
+
+Context:
+
+Tile highlighting, Roadway Edit Mode, the legend, and route planner are all draggable or floating map tools.
+
+Decision:
+
+Use explicit corner stacks for default, unpositioned tools. The lower-right stack places Tile Highlighting above Roadway Edit Mode. The lower-left stack places the legend button above the route planner button. Once a user drags a panel, its saved fixed position overrides the default stack.
+
+Prevention:
+
+When adding or moving floating map tools, test both DOM order and CSS stack direction. Avoid encoding "above another panel" as a guessed pixel offset when the controls can live in a flex stack.
+
+### Roadway Edit Mode
+
+Context:
+
+Bridges, canals, and highways needed the same interaction model, and users did not want roadways to participate in search.
+
+What happened:
+
+The old implementation treated highways as passive behind a saved `Highway Details` setting, while bridges and canals stayed interactive. Path search text also caused roadways to filter and pulse like normal markers.
+
+Root cause:
+
+Roadway visibility/style preferences and roadway edit intent are different concerns. Persisting edit intent in marker visibility settings made one path type behave differently and put an interaction mode in the wrong UI.
+
+Decision:
+
+Keep bridge, canal, and highway visibility, colors, and opacities in map settings. Move edit intent to a draggable bottom-right `Roadway Edit Mode` control. The mode defaults off and is local to the current view; only the panel position is saved in user map settings. When off, all roadways are visual-only with no hover, focus, or context menu. When on, all three path types support hover details and edit/delete context actions identically. Roadways are excluded from search text entirely.
+
+Prevention:
+
+When adding path behavior, test all three path types together. Do not add per-type interaction toggles unless there is a product requirement for different behavior.
+
+### Top-Right Dropdowns Share Open State
+
+Context:
+
+The account dropdown and map settings dropdown live beside each other in the top-right controls.
+
+What happened:
+
+Each dropdown originally owned its own `isOpen` state, so users could open both panels concurrently and overlap the UI.
+
+Root cause:
+
+Open/close state was local to each dropdown component even though the two controls form one menu group.
+
+Decision:
+
+The map workspace owns a single top-panel state and passes controlled `isOpen`/`onOpenChange` props to account and map settings. Opening one panel closes the other.
+
+Prevention:
+
+For colocated dropdowns that should be mutually exclusive, keep ownership of open state at their nearest shared parent and add a regression test that opens both in sequence.
+
+### Settings Defaults Are One Action
+
+Context:
+
+Users need a quick way to return the dense map settings menu to a known baseline.
+
+What happened:
+
+Settings were individually adjustable and persisted, but there was no single control to undo accumulated display changes.
+
+Root cause:
+
+The settings UI exposed the shared defaults but did not expose a reset action wired to the same source of truth.
+
+Decision:
+
+The top-right `Settings` menu includes a bottom-right `Default` button. It resets marker visibility, colors, opacities, tile highlight settings, and draggable panel positions to `DEFAULT_USER_MAP_SETTINGS`.
+
+Prevention:
+
+When adding new persisted user map settings, include them in `DEFAULT_USER_MAP_SETTINGS` and verify the `Default` action restores that field.
+
+### Context Coordinates Are Copyable Links
+
+Context:
+
+Right-click context menus already compute the exact coordinate the user clicked.
+
+What happened:
+
+The coordinate was visible, but sharing it required manually copying or reconstructing the URL.
+
+Root cause:
+
+Coordinate display and shared-link generation were separate UI paths.
+
+Decision:
+
+Map and marker context menus render a copyable coordinate row at the top. The row is a single button containing both the coordinate text and copy icon, and clicking either writes the current page URL with updated `x` and `y` parameters to the clipboard.
+
+Prevention:
+
+For future context-menu coordinate changes, test both map and marker menus, verify the copied URL matches the coordinate used by the menu actions, and keep the text/icon affordance as one accessible menu item.
 
 ### Deleted Marker Retention
 

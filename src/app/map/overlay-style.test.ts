@@ -60,13 +60,23 @@ describe("map overlay styles", () => {
   });
 
   it("draws triangle markers inside unclipped buttons so search pulses radiate", () => {
-    const riftColorBlock = getStandaloneCssBlock(".map-marker--rift::before");
     const campColorBlock = getStandaloneCssBlock(".map-marker--camp::before");
 
     expect(globalsCss).not.toMatch(/\.map-marker--rift,\s*\.map-marker--camp\s*\{[^}]*clip-path/s);
     expect(globalsCss).toMatch(/\.map-marker--rift::before,\s*\.map-marker--camp::before\s*\{[^}]*clip-path: polygon\(50% 0, 0 100%, 100% 100%\)/s);
-    expect(riftColorBlock).toContain("background: #ef4444");
+    expect(globalsCss).not.toContain(".map-marker--rift::before {\n  background: #ef4444");
+    expect(globalsCss).toContain("background: var(--map-rift-color, #ef4444)");
     expect(campColorBlock).toContain("background: var(--map-camp-color, #facc15)");
+  });
+
+  it("draws note markers as circles on the marker button so search pulses still radiate", () => {
+    const noteSizingBlock = getAllStandaloneCssBlocks(".map-marker--note").find((block) => block.includes("width: 3px"));
+    const searchBlock = getCssBlock(".map-search-match");
+
+    expect(noteSizingBlock).toContain("height: 3px");
+    expect(noteSizingBlock).toContain("border-radius: 50%");
+    expect(searchBlock).toContain("animation:");
+    expect(globalsCss).not.toContain(".map-marker--note::before");
   });
 
   it("keeps marker dialogs inside the viewport with scrollable content", () => {
@@ -95,21 +105,43 @@ describe("map overlay styles", () => {
     const controlsBlock = getStandaloneCssBlock(".map-layer-controls");
     const rowBlock = getStandaloneCssBlock(".map-layer-row");
     const colorBlock = getStandaloneCssBlock(".map-layer-color");
+    const settingsPanelBlock = getStandaloneCssBlock(".map-settings-panel");
 
     expect(controlsBlock).toContain("display: grid");
-    expect(rowBlock).toContain("grid-template-columns: 18px minmax(0, 1fr) 42px minmax(72px, 1fr)");
-    expect(rowBlock).toContain("min-height: 30px");
+    expect(controlsBlock).toContain("gap: 3px");
+    expect(controlsBlock).toContain("padding: 6px");
+    expect(settingsPanelBlock).toContain("width: min(330px, calc(100vw - 32px))");
+    expect(settingsPanelBlock).toContain("padding: 10px");
+    expect(rowBlock).toContain("grid-template-columns: 16px 32px minmax(0, 1fr) minmax(56px, 0.8fr)");
+    expect(rowBlock).toContain("min-height: 24px");
+    expect(rowBlock).toContain("font-size: 12px");
     expect(rowBlock).toContain("align-items: center");
-    expect(colorBlock).toContain("justify-self: end");
+    expect(colorBlock).toContain("justify-self: start");
+    expect(colorBlock).toContain("width: 32px");
+    expect(colorBlock).toContain("height: 22px");
     expect(globalsCss).not.toContain(".map-visibility-controls");
     expect(globalsCss).not.toContain(".map-color-controls");
+  });
+
+  it("stacks default floating map tools in their map corners", () => {
+    const rightControlsBlock = getStandaloneCssBlock(".map-right-side-controls");
+    const bottomLeftControlsBlock = getStandaloneCssBlock(".map-bottom-left-controls");
+    const roadwayPositionedBlock = getStandaloneCssBlock(".map-roadway-edit-control.is-positioned");
+
+    expect(rightControlsBlock).toContain("position: fixed");
+    expect(rightControlsBlock).toContain("right: 16px");
+    expect(rightControlsBlock).toContain("bottom: 16px");
+    expect(rightControlsBlock).toContain("flex-direction: column");
+    expect(bottomLeftControlsBlock).toContain("flex-direction: column");
+    expect(bottomLeftControlsBlock).toContain("align-items: flex-start");
+    expect(roadwayPositionedBlock).toContain("position: fixed");
   });
 
   it("keeps map settings opacity sliders contained inside compact rows", () => {
     const rowBlock = getStandaloneCssBlock(".map-layer-row");
     const opacityBlock = getStandaloneCssBlock(".map-layer-opacity");
 
-    expect(rowBlock).toContain("grid-template-columns: 18px minmax(0, 1fr) 42px minmax(72px, 1fr)");
+    expect(rowBlock).toContain("grid-template-columns: 16px 32px minmax(0, 1fr) minmax(56px, 0.8fr)");
     expect(opacityBlock).toContain("box-sizing: border-box");
     expect(opacityBlock).toContain("min-width: 0");
     expect(opacityBlock).toContain("max-width: 100%");
@@ -168,7 +200,18 @@ function getCssBlock(selector: string): string {
 }
 
 function getStandaloneCssBlock(selector: string): string {
+  const blocks = getAllStandaloneCssBlocks(selector);
+
+  if (blocks[0] !== undefined) {
+    return blocks[0];
+  }
+
+  throw new Error(`Missing standalone CSS block for ${selector}`);
+}
+
+function getAllStandaloneCssBlocks(selector: string): string[] {
   const lines = globalsCss.split(/\r?\n/);
+  const blocks: string[] = [];
 
   for (let index = 0; index < lines.length; index += 1) {
     if (lines[index]?.trim() !== `${selector} {`) {
@@ -185,14 +228,15 @@ function getStandaloneCssBlock(selector: string): string {
 
     for (let blockIndex = index + 1; blockIndex < lines.length; blockIndex += 1) {
       if (lines[blockIndex]?.trim() === "}") {
-        return blockLines.join("\n");
+        blocks.push(blockLines.join("\n"));
+        break;
       }
 
       blockLines.push(lines[blockIndex]);
     }
   }
 
-  throw new Error(`Missing standalone CSS block for ${selector}`);
+  return blocks;
 }
 
 function findPreviousNonEmptyLine(lines: string[], index: number): string {

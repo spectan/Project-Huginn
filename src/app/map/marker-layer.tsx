@@ -22,6 +22,7 @@ type MarkerLayerProps = {
   onContextMenu(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
   onHoverEnd(): void;
   onHoverMove(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
+  roadwayEditMode: boolean;
   view: MarkerLayerView;
   visibility: MarkerVisibility;
 };
@@ -40,12 +41,13 @@ export function MarkerLayer({
   onContextMenu,
   onHoverEnd,
   onHoverMove,
+  roadwayEditMode,
   view,
   visibility
 }: MarkerLayerProps) {
   return (
     <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
-      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, view, visibility))}
+      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, roadwayEditMode, view, visibility))}
     </div>
   );
 }
@@ -58,6 +60,7 @@ function renderMarker(
   onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
   onHoverEnd: () => void,
   onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
+  roadwayEditMode: boolean,
   view: MarkerLayerView,
   visibility: MarkerVisibility
 ) {
@@ -68,7 +71,7 @@ function renderMarker(
       return null;
     }
 
-    const canInteract = marker.type !== "highway" || visibility.highwayDetails;
+    const canInteract = roadwayEditMode;
 
     return (
       <svg aria-label={`${getPathTypeLabel(marker.type)} path layer`} className="map-path-svg" key={marker.id}>
@@ -81,6 +84,7 @@ function renderMarker(
           onMouseEnter={canInteract ? (event) => onHoverMove(marker, event) : undefined}
           onMouseLeave={canInteract ? onHoverEnd : undefined}
           onMouseMove={canInteract ? (event) => onHoverMove(marker, event) : undefined}
+          opacity={getPathOpacity(marker.type, markerOpacities)}
           points={getPathSvgPoints(marker.points, view)}
           role={canInteract ? "button" : undefined}
           stroke={getPathColor(marker.type, markerColors)}
@@ -105,12 +109,12 @@ function renderMarker(
             <span
               className="map-tower-zone map-tower-zone--placement"
               data-testid={`tower-placement-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, markerColors.towers, 0.08, markerOpacities.towers, view)}
+              style={getOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, markerColors.towers, markerOpacities.towers, view)}
             />
             <span
               className="map-tower-zone map-tower-zone--protection"
               data-testid={`tower-protection-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, TOWER_PROTECTION_DISTANCE_TILES, markerColors.towers, 0.22, markerOpacities.towers, view)}
+              style={getOverlayStyle(marker.x, marker.y, TOWER_PROTECTION_DISTANCE_TILES, markerColors.towers, markerOpacities.towers, view)}
             />
           </>
         ) : null}
@@ -158,7 +162,7 @@ function renderMarker(
               onMouseMove={(event) => onHoverMove(marker, event)}
               style={{
                 ...deedOverlayStyle,
-                backgroundColor: colorWithAlpha(markerColors.deeds, 0.4),
+                backgroundColor: markerColors.deeds,
                 opacity: percentageToOpacity(markerOpacities.deeds)
               }}
               type="button"
@@ -217,7 +221,7 @@ function renderMarker(
           <span
             className="map-rift-overlay"
             data-testid={`rift-overlay-${marker.id}`}
-            style={getOverlayStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, "#ef4444", 0.18, markerOpacities.riftOverlays, view)}
+            style={getOverlayStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, markerColors.rifts, markerOpacities.riftOverlays, view)}
           />
         ) : null}
         <button
@@ -228,7 +232,7 @@ function renderMarker(
           onMouseEnter={(event) => onHoverMove(marker, event)}
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
-          style={getCenterTileStyle(marker.x, marker.y, view)}
+          style={getRiftMarkerStyle(marker.x, marker.y, markerColors.rifts, view)}
           type="button"
         />
       </div>
@@ -319,6 +323,17 @@ type CampMarkerStyle = CSSProperties & {
   "--map-camp-color": string;
 };
 
+type RiftMarkerStyle = CSSProperties & {
+  "--map-rift-color": string;
+};
+
+function getRiftMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): RiftMarkerStyle {
+  return {
+    ...getCenterTileStyle(x, y, view),
+    "--map-rift-color": color
+  };
+}
+
 function getCampMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): CampMarkerStyle {
   return {
     ...getCenterTileStyle(x, y, view),
@@ -366,6 +381,18 @@ function getPathColor(type: "bridge" | "canal" | "highway", markerColors: Marker
   }
 
   return markerColors.highways;
+}
+
+function getPathOpacity(type: "bridge" | "canal" | "highway", markerOpacities: MarkerOpacities): number {
+  if (type === "bridge") {
+    return percentageToOpacity(markerOpacities.bridges);
+  }
+
+  if (type === "canal") {
+    return percentageToOpacity(markerOpacities.canals);
+  }
+
+  return percentageToOpacity(markerOpacities.highways);
 }
 
 function getPathClassName(isHighlighted: boolean, canInteract: boolean): string {
@@ -421,13 +448,12 @@ function getOverlayStyle(
   y: number,
   distance: number,
   color: string,
-  alpha: number,
   opacity: number,
   view: MarkerLayerView
 ): CSSProperties {
   return {
     ...getSquareStyle(x, y, distance, view),
-    backgroundColor: colorWithAlpha(color, alpha),
+    backgroundColor: color,
     opacity: percentageToOpacity(opacity)
   };
 }
@@ -456,20 +482,6 @@ function getScreenRectStyle(
   };
 }
 
-function colorWithAlpha(color: string, alpha: number): string {
-  const match = /^#(?<red>[0-9a-f]{2})(?<green>[0-9a-f]{2})(?<blue>[0-9a-f]{2})$/i.exec(color);
-
-  if (match?.groups === undefined) {
-    return `rgba(255, 255, 255, ${alpha})`;
-  }
-
-  const red = Number.parseInt(match.groups.red ?? "ff", 16);
-  const green = Number.parseInt(match.groups.green ?? "ff", 16);
-  const blue = Number.parseInt(match.groups.blue ?? "ff", 16);
-
-  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
-}
-
 function percentageToOpacity(value: number): number {
   return Math.min(100, Math.max(0, value)) / 100;
 }
@@ -493,7 +505,7 @@ function getDeedPerimeterStyles(
   const width = getDeedWidth(marker) + marker.perimeter * 2;
   const height = getDeedHeight(marker) + marker.perimeter * 2;
   const edgeStyle = {
-    backgroundColor: colorWithAlpha(color, 0.9),
+    backgroundColor: color,
     opacity: percentageToOpacity(opacity)
   };
 
