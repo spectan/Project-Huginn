@@ -1,3 +1,9 @@
+import type {
+  LocateSoulCasterFacing,
+  LocateSoulDirection,
+  LocateSoulDistanceBandKey
+} from "@/lib/domain/locate-soul";
+
 export type WorkspaceMapLayer = {
   heightPx: number;
   id: string;
@@ -85,6 +91,18 @@ export type MinedoorWorkspaceMarker = {
   y: number;
 };
 
+export type LocateSoulWorkspaceMarker = {
+  casterFacing: LocateSoulCasterFacing;
+  direction: LocateSoulDirection;
+  distanceBand: LocateSoulDistanceBandKey;
+  id: string;
+  notes: string;
+  targetName: string;
+  type: "locateSoul";
+  x: number;
+  y: number;
+};
+
 export type PathWorkspaceMarker = {
   id: string;
   name: string;
@@ -103,6 +121,7 @@ export type WorkspaceMarker =
   | RiftWorkspaceMarker
   | CampWorkspaceMarker
   | MinedoorWorkspaceMarker
+  | LocateSoulWorkspaceMarker
   | PathWorkspaceMarker;
 
 export type MarkerType = WorkspaceMarker["type"];
@@ -115,6 +134,7 @@ export type MarkerVisibility = {
   deedNames: boolean;
   deedPerimeters: boolean;
   highways: boolean;
+  locateSouls: boolean;
   minedoors: boolean;
   missionGrid: boolean;
   notes: boolean;
@@ -131,6 +151,7 @@ export type MarkerColors = {
   canals: string;
   deeds: string;
   highways: string;
+  locateSouls: string;
   minedoors: string;
   missionGrid: string;
   notes: string;
@@ -144,6 +165,7 @@ export type MarkerOpacities = {
   canals: number;
   deeds: number;
   highways: number;
+  locateSouls: number;
   missionGrid: number;
   notes: number;
   riftOverlays: number;

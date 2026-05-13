@@ -65,6 +65,7 @@ The server owns:
 - Audit event creation.
 - Deleted marker cleanup.
 - Map metadata.
+- External event feed fetching and normalization.
 
 Every write operation must run through a server-side permission check. Client-side checks are only usability improvements.
 
@@ -82,6 +83,7 @@ The client owns:
 - Client-side tile-type highlighting by exact RGB matching against the loaded map image. The source map image remains the coordinate source: one pixel equals one tile, and generated highlight masks are local visual overlays only.
 - Top-right account and map settings dropdowns use shared open-panel state so only one dropdown can be open at a time.
 - The top-right map preferences dropdown is labeled `Settings`; its `Default` action resets the full user map settings payload back to the shared defaults.
+- The bottom-left map tool stack renders the legend button, route planner button, and compact server event feed panel in that order.
 
 Client code must treat server responses as authoritative. Client-calculated coordinates must be validated again on the server against the target map dimensions.
 
@@ -131,9 +133,9 @@ User map settings are stored server-side in PostgreSQL as a `UserMapSettings` re
 
 Persisted settings include:
 
-- Marker layer visibility, including camps, minedoors, bridge/canal/highway paths, deed perimeters, and rift overlays.
-- Marker, grid, and tile highlight colors, including rift, camp, minedoor, bridge, canal, and highway marker colors.
-- Marker, grid, roadway, and tile highlight opacities.
+- Marker layer visibility, including camps, minedoors, locate souls, bridge/canal/highway paths, deed perimeters, and rift overlays.
+- Marker, grid, and tile highlight colors, including rift, camp, minedoor, locate soul, bridge, canal, and highway marker colors.
+- Overlay, grid, roadway, and tile highlight opacities.
 - Tile highlight selection.
 - Tile highlighter panel position.
 - Roadway edit mode panel position.
@@ -254,6 +256,7 @@ Rules:
 - The stored `x` and `y` are the deed center pixel.
 - Active deed views exclude rows with `deletedAt` set.
 - Expired deleted rows are permanently deleted after `deleteExpiresAt`.
+- Editing an active deed can mark it disbanded. This creates a replacement note at the deed center, uses the old deed name as the note title, stores the old deed details in note text, creates or reuses the map-scoped `Abandoned Deed` note category, and soft-deletes the deed through the normal deleted-marker lifecycle.
 
 ### Note
 
@@ -278,6 +281,7 @@ Rules:
 
 - Note categories are map-scoped and selectable by all approved users.
 - Admins can add new note categories; non-admins can only select existing categories.
+- The deed-disband conversion may create the `Abandoned Deed` category server-side for a writer, because it is part of converting an existing deed rather than general category administration.
 - Title, category, and text are validated server-side for every note write.
 - Text has a fixed maximum length.
 - Active note views exclude rows with `deletedAt` set.
@@ -346,6 +350,36 @@ Rules:
 - Active minedoor views exclude rows with `deletedAt` set.
 - Expired deleted rows are permanently deleted after `deleteExpiresAt`.
 
+### LocateSoul
+
+Locate Soul casts are stored as first-class marker records. The stored coordinate is the cast center and interaction pip; the spell result area is derived from the cast metadata.
+
+Fields:
+
+- `id`.
+- `mapId`.
+- `x`.
+- `y`.
+- `targetName`.
+- `casterFacing`, one of the eight compass facings.
+- `direction`, one of the eight Locate Soul relative directions.
+- `distanceBand`, constrained to the current Wurmpedia distance bands.
+- `notes`, optional text.
+- Standard create, update, delete, restore, and expiry fields.
+
+Rules:
+
+- The stored `x` and `y` are the center of the 3x3 locate-soul pip.
+- The 3x3 pip footprint must fit inside the map bounds and always renders fully opaque.
+- Locate Soul does not track above-ground, cave, or similar extra state unless a later feature explicitly needs it.
+- The marker dialog asks for caster facing plus one pasted Locate Soul event output box. The client parses target name, relative direction, and distance band from that text before submitting the existing marker payload.
+- Locate Soul distance phrase parsing follows the Wurmpedia message table, including `very far away` as `2000+` tiles.
+- The derived shadow overlay is an annular 45-degree sector based on caster facing, relative direction, and distance band.
+- The open-ended `2000+` distance band renders to the map diagonal so the overlay reaches the map edge.
+- If the derived distance sector has no possible tiles inside the current map bounds, the map renders a dashed off-map direction indicator instead of a blank invisible sector.
+- Active locate-soul views exclude rows with `deletedAt` set.
+- Expired deleted rows are permanently deleted after `deleteExpiresAt`.
+
 ### PathMarker
 
 Infrastructure paths are stored as first-class marker records for bridges, canals, and highways.
@@ -411,6 +445,21 @@ Rules:
 - Deleted marker coordinate-bearing records are permanently removed after the restore window.
 - Cleanup deletion events should record marker type, marker ID, actor as system, and cleanup time.
 
+### External Server Events
+
+Celebration event/status data is fetched server-side from the WurmMaps stat delegate endpoint:
+
+- `https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration`
+
+Rules:
+
+- Treat this as an unofficial external feed, not a stable database contract.
+- Browser clients read our normalized data and must not call WurmMaps directly.
+- The normalizer accepts WurmMaps sections such as deed events, mission events, mission constructions, holy sites, unique slayings, rifts, rite casts, and lightning strikes.
+- Events are decoded from simple HTML entities, sorted newest-first by Unix timestamp, capped to the latest 30 entries, and rendered as read-only map context.
+- Feed failures must not block the map workspace. Failed fetches produce unavailable feed data rather than breaking marker loading.
+- This integration imports event/status history only. It must not import WurmMaps marker or path data unless a later feature explicitly requests that source.
+
 ## Authorization Model
 
 Authorization must use explicit server-side checks:
@@ -439,7 +488,7 @@ Tower overlays:
 - Protection distance is 25 pixels in each direction from the tower center.
 - Placement distance is 50 pixels in each direction from the tower center.
 - Render as opacity-controlled squares centered on the tower position.
-- The center pixel renders as a bright white square.
+- The 3x3 center pip renders fully opaque, independent of the tower opacity slider.
 
 Deed overlays:
 
@@ -447,15 +496,19 @@ Deed overlays:
 - The stored coordinate is the center pixel.
 - Rectangle edges are calculated from north, west, east, and south tile counts.
 - Perimeters render as outline-only edge strips around the rectangle expanded by the deed's perimeter tile count.
-- The visual center pixel is highlighted independently from the area overlay.
+- The visual 3x3 center pip is highlighted independently from the area overlay and always renders fully opaque.
 
 Special markers:
 
-- Notes render as 3x3 centered circles using the user's note marker color setting. The circle must remain on the interactive marker button so the normal search pulse can radiate from the same element.
+- Notes render as fully opaque 3x3 centered circles using the user's note marker color setting. The circle must remain on the interactive marker button so the normal search pulse can radiate from the same element.
 - Rifts render as 3x3-centered triangles using the user's rift marker color setting, defaulting to red.
 - Rifts can optionally render a same-colored 51x51 overlay centered on the rift location. This overlay is controlled by the global overlay toggle plus a dedicated `Rifts` toggle, `Rifts color` selector, and `Rifts opacity` slider.
 - Camps render as 3x3-centered triangles using the user's camp marker color setting, defaulting to yellow.
 - Minedoors render as a 1x1 marker at the marked tile with a user-colored outline, defaulting to cyan, and white diagonal stripes.
+- Locate Soul casts render as a fully opaque 3x3-centered pip using the user's locate-soul marker color setting, defaulting to orange.
+- Locate Soul casts can optionally render a same-colored direction/distance shadow overlay. This overlay is controlled by the global overlay toggle plus a dedicated `Locate Souls` toggle, `Locate Souls color` selector, and `Locate Souls opacity` slider.
+- Locate Soul overlay SVG paths must be non-interactive so right-click and route-style map interactions still target the pip or map coordinate underneath.
+- Locate Soul off-map indicators are also non-interactive and use the same color and opacity as the locate-soul overlay setting.
 - Marker buttons rendered directly under the screen-space marker layer must explicitly opt back into pointer events so hover details and context menus work through the layer's non-interactive default.
 - Triangle markers draw the clipped triangle on an inner pseudo-element, not on the interactive button itself, so the button can still render the search pulse outside the triangle bounds.
 - Search text for searchable marker types should include user-facing aliases such as plural forms and spaced variants like `mine door` so users can find markers by how they describe them.
@@ -475,7 +528,7 @@ Infrastructure paths:
 Route planner:
 
 - The route planner is a local, unsaved map tool controlled by a compact bottom-left icon button.
-- The bottom-left tool stack renders the legend button above the route planner button.
+- The bottom-left tool stack renders the legend button above the route planner button, with the server event feed panel below both controls.
 - Only one planned route can exist at a time.
 - When the planner is enabled, double-clicking an empty planner starts a route at that map tile. Double-clicking while a route exists clears that route.
 - After a route starts, primary left clicks on the map append route points.
@@ -486,8 +539,14 @@ Route planner:
 Legend:
 
 - The bottom-left map tools include a legend button next to the route planner.
-- The legend popup lists map marker and path symbols for towers, deeds, notes, rifts, camps, minedoors, bridges, canals, and highways.
+- The legend popup lists map marker and path symbols for towers, deeds, notes, rifts, camps, minedoors, locate souls, bridges, canals, and highways.
 - Legend symbol colors come from the current user map settings so changing layer colors updates the legend without separate state.
+
+Server event feed:
+
+- The bottom-left map tools include a compact Celebration event feed panel below the legend and route planner controls.
+- The panel shows the newest events first, has a visible height for roughly five entries, and scrolls through the latest 30 normalized entries.
+- Event feed content is read-only and must not create marker rows, audit events, user map settings, or map-coordinate state.
 
 Tile highlighting:
 

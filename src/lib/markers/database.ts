@@ -15,6 +15,7 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
   return {
     createCamp: async (input) => prisma.camp.create({ data: input }),
     createDeed: async (input) => prisma.deed.create({ data: input }),
+    createLocateSoul: async (input) => prisma.locateSoul.create({ data: input }),
     createMinedoor: async (input) => prisma.minedoor.create({ data: input }),
     createNote: async (input) => prisma.note.create({ data: input }),
     createPath: async (input) => prisma.pathMarker.create({
@@ -25,11 +26,52 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
     }).then(normalizePathRecord),
     createRift: async (input) => prisma.rift.create({ data: input }),
     createTower: async (input) => prisma.tower.create({ data: input }),
+    disbandDeed: async (input) => prisma.$transaction(async (transaction) => {
+      const deed = await transaction.deed.findFirst({
+        where: { deletedAt: null, id: input.deedId }
+      });
+
+      if (deed === null || deed.mapId !== input.note.mapId) {
+        return null;
+      }
+
+      const existingCategory = await transaction.noteCategory.findUnique({
+        where: {
+          mapId_name: {
+            mapId: deed.mapId,
+            name: input.categoryName
+          }
+        }
+      });
+      const category = existingCategory ?? await transaction.noteCategory.create({
+        data: {
+          mapId: deed.mapId,
+          name: input.categoryName
+        }
+      });
+      const note = await transaction.note.create({
+        data: input.note
+      });
+      const deletedDeed = await transaction.deed.update({
+        data: {
+          deletedAt: input.deletedAt,
+          deletedByUserId: input.actorUserId,
+          deleteExpiresAt: input.deleteExpiresAt
+        },
+        where: { id: deed.id }
+      });
+
+      return { category, deletedDeed, note };
+    }),
     findCamp: async (id) => prisma.camp.findFirst({
       include: { map: true },
       where: { deletedAt: null, id }
     }),
     findDeed: async (id) => prisma.deed.findFirst({
+      include: { map: true },
+      where: { deletedAt: null, id }
+    }),
+    findLocateSoul: async (id) => prisma.locateSoul.findFirst({
       include: { map: true },
       where: { deletedAt: null, id }
     }),
@@ -58,7 +100,7 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       where: { deletedAt: null, id }
     }),
     listActiveMarkers: async (mapId) => {
-      const [towers, deeds, notes, rifts, camps, minedoors, paths] = await Promise.all([
+      const [towers, deeds, notes, rifts, camps, minedoors, locateSouls, paths] = await Promise.all([
         prisma.tower.findMany({
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
@@ -83,13 +125,17 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
+        prisma.locateSoul.findMany({
+          orderBy: { createdAt: "asc" },
+          where: { deletedAt: null, mapId }
+        }),
         prisma.pathMarker.findMany({
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         })
       ]);
 
-      return { camps, deeds, minedoors, notes, paths: paths.map(normalizePathRecord), rifts, towers };
+      return { camps, deeds, locateSouls, minedoors, notes, paths: paths.map(normalizePathRecord), rifts, towers };
     },
     now: () => new Date(),
     recordAudit: async (input) => {
@@ -140,6 +186,15 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
 
       return prisma.minedoor.update({ data: input, where: { id } });
     },
+    softDeleteLocateSoul: async (id, input) => {
+      const existing = await prisma.locateSoul.findFirst({ where: { deletedAt: null, id } });
+
+      if (existing === null) {
+        return null;
+      }
+
+      return prisma.locateSoul.update({ data: input, where: { id } });
+    },
     softDeletePath: async (id, input) => {
       const existing = await prisma.pathMarker.findFirst({ where: { deletedAt: null, id } });
 
@@ -176,6 +231,10 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       where: { id }
     }),
     updateMinedoor: async (id, input) => prisma.minedoor.update({
+      data: input,
+      where: { id }
+    }),
+    updateLocateSoul: async (id, input) => prisma.locateSoul.update({
       data: input,
       where: { id }
     }),

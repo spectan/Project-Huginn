@@ -5,8 +5,14 @@ import {
 } from "@/lib/domain/constants";
 import { getDeleteExpiresAt } from "@/lib/domain/deletion";
 import {
+  isLocateSoulCasterFacing,
+  isLocateSoulDirection,
+  isLocateSoulDistanceBandKey
+} from "@/lib/domain/locate-soul";
+import {
   validateCampInput,
   validateDeedInput,
+  validateLocateSoulInput,
   validateMinedoorInput,
   validateNoteInput,
   validatePathInput,
@@ -14,6 +20,7 @@ import {
   validateTowerInput,
   type CampMarkerInput,
   type DeedMarkerInput,
+  type LocateSoulMarkerInput,
   type MinedoorMarkerInput,
   type NoteMarkerInput,
   type PathMarkerInput,
@@ -31,8 +38,10 @@ import { err, ok, type Result } from "@/lib/domain/result";
 import type {
   CampWorkspaceMarker,
   DeedWorkspaceMarker,
+  LocateSoulWorkspaceMarker,
   MarkerType,
   MinedoorWorkspaceMarker,
+  NoteCategory,
   NoteWorkspaceMarker,
   PathWorkspaceMarker,
   RiftWorkspaceMarker,
@@ -78,6 +87,12 @@ type NoteRecord = NoteMarkerInput & {
   mapId: string;
 };
 
+type NoteCategoryRecord = {
+  id: string;
+  mapId: string;
+  name: string;
+};
+
 type RiftRecord = RiftMarkerInput & {
   id: string;
   mapId: string;
@@ -90,6 +105,14 @@ type CampRecord = Omit<CampMarkerInput, "campType"> & {
 };
 
 type MinedoorRecord = MinedoorMarkerInput & {
+  id: string;
+  mapId: string;
+};
+
+type LocateSoulRecord = Omit<LocateSoulMarkerInput, "casterFacing" | "direction" | "distanceBand"> & {
+  casterFacing: string;
+  direction: string;
+  distanceBand: string;
   id: string;
   mapId: string;
 };
@@ -111,7 +134,7 @@ type MarkerAuditAction =
   | "MARKER_DELETED"
   | "MARKER_LIST_VIEW";
 
-type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "PATH" | "MAP";
+type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "MAP";
 
 type MarkerAuditInput = {
   action: MarkerAuditAction;
@@ -125,13 +148,27 @@ type MarkerAuditInput = {
 export type MarkerServiceDependencies = {
   createCamp(input: CampMarkerInput & { createdByUserId: string; mapId: string }): Promise<CampRecord>;
   createDeed(input: DeedMarkerInput & { createdByUserId: string; mapId: string }): Promise<DeedRecord>;
+  createLocateSoul(input: LocateSoulMarkerInput & { createdByUserId: string; mapId: string }): Promise<LocateSoulRecord>;
   createMinedoor(input: MinedoorMarkerInput & { createdByUserId: string; mapId: string }): Promise<MinedoorRecord>;
   createNote(input: NoteMarkerInput & { createdByUserId: string; mapId: string }): Promise<NoteRecord>;
   createPath(input: PathMarkerInput & { createdByUserId: string; mapId: string }): Promise<PathRecord>;
   createRift(input: RiftMarkerInput & { createdByUserId: string; mapId: string }): Promise<RiftRecord>;
   createTower(input: TowerMarkerInput & { createdByUserId: string; mapId: string }): Promise<TowerRecord>;
+  disbandDeed(input: {
+    actorUserId: string;
+    categoryName: string;
+    deedId: string;
+    deletedAt: Date;
+    deleteExpiresAt: Date;
+    note: NoteMarkerInput & { createdByUserId: string; mapId: string };
+  }): Promise<{
+    category: NoteCategoryRecord;
+    deletedDeed: DeedRecord;
+    note: NoteRecord;
+  } | null>;
   findCamp(id: string): Promise<MarkerWithMap<CampRecord> | null>;
   findDeed(id: string): Promise<MarkerWithMap<DeedRecord> | null>;
+  findLocateSoul(id: string): Promise<MarkerWithMap<LocateSoulRecord> | null>;
   findMap(mapId: string): Promise<MapRecord | null>;
   findMinedoor(id: string): Promise<MarkerWithMap<MinedoorRecord> | null>;
   findNote(id: string): Promise<MarkerWithMap<NoteRecord> | null>;
@@ -141,6 +178,7 @@ export type MarkerServiceDependencies = {
   listActiveMarkers(mapId: string): Promise<{
     camps: CampRecord[];
     deeds: DeedRecord[];
+    locateSouls: LocateSoulRecord[];
     minedoors: MinedoorRecord[];
     notes: NoteRecord[];
     paths: PathRecord[];
@@ -157,6 +195,10 @@ export type MarkerServiceDependencies = {
     id: string,
     input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
   ): Promise<DeedRecord | null>;
+  softDeleteLocateSoul(
+    id: string,
+    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
+  ): Promise<LocateSoulRecord | null>;
   softDeleteMinedoor(
     id: string,
     input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
@@ -179,12 +221,15 @@ export type MarkerServiceDependencies = {
   ): Promise<TowerRecord | null>;
   updateCamp(id: string, input: CampMarkerInput & { updatedByUserId: string }): Promise<CampRecord | null>;
   updateDeed(id: string, input: DeedMarkerInput & { updatedByUserId: string }): Promise<DeedRecord | null>;
+  updateLocateSoul(id: string, input: LocateSoulMarkerInput & { updatedByUserId: string }): Promise<LocateSoulRecord | null>;
   updateMinedoor(id: string, input: MinedoorMarkerInput & { updatedByUserId: string }): Promise<MinedoorRecord | null>;
   updateNote(id: string, input: NoteMarkerInput & { updatedByUserId: string }): Promise<NoteRecord | null>;
   updatePath(id: string, input: PathMarkerInput & { updatedByUserId: string }): Promise<PathRecord | null>;
   updateRift(id: string, input: RiftMarkerInput & { updatedByUserId: string }): Promise<RiftRecord | null>;
   updateTower(id: string, input: TowerMarkerInput & { updatedByUserId: string }): Promise<TowerRecord | null>;
 };
+
+const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
 
 type PathCreateMarkerInput = { type: PathType } & {
   name: string;
@@ -240,6 +285,15 @@ export type CreateMarkerInput =
       x: number;
       y: number;
     })
+  | ({ type: "locateSoul" } & {
+      casterFacing: string;
+      direction: string;
+      distanceBand: string;
+      notes: string;
+      targetName: string;
+      x: number;
+      y: number;
+    })
   | PathCreateMarkerInput;
 
 export async function listMarkers(
@@ -271,6 +325,7 @@ export async function listMarkers(
         markers.rifts.length +
         markers.camps.length +
         markers.minedoors.length +
+        markers.locateSouls.length +
         markers.paths.length
     },
     targetId: map.id,
@@ -286,6 +341,7 @@ export async function listMarkers(
       ...markers.rifts.map(serializeRift),
       ...markers.camps.map(serializeCamp),
       ...markers.minedoors.map(serializeMinedoor),
+      ...markers.locateSouls.map(serializeLocateSoul),
       ...markers.paths.map(serializePath)
     ]
   });
@@ -394,6 +450,23 @@ export async function createMarker(
       mapId: map.id
     });
     const marker = serializeMinedoor(created);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    return ok(marker);
+  }
+
+  if (markerInput.value.type === "locateSoul") {
+    const locateSoul = validateLocateSoulInput(markerInput.value, bounds);
+
+    if (!locateSoul.ok) {
+      return locateSoul;
+    }
+
+    const created = await dependencies.createLocateSoul({
+      ...locateSoul.value,
+      createdByUserId: input.actor.id,
+      mapId: map.id
+    });
+    const marker = serializeLocateSoul(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
     return ok(marker);
   }
@@ -589,6 +662,32 @@ export async function updateMarker(
     return ok(marker);
   }
 
+  if (input.markerType === "locateSoul") {
+    const existing = await dependencies.findLocateSoul(input.markerId);
+
+    if (existing === null || markerInput.value.type !== "locateSoul") {
+      return err("Marker was not found");
+    }
+
+    const validated = validateLocateSoulInput(markerInput.value, existing.map);
+    if (!validated.ok) {
+      return validated;
+    }
+
+    const updated = await dependencies.updateLocateSoul(input.markerId, {
+      ...validated.value,
+      updatedByUserId: input.actor.id
+    });
+
+    if (updated === null) {
+      return err("Marker was not found");
+    }
+
+    const marker = serializeLocateSoul(updated);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    return ok(marker);
+  }
+
   if (isPathMarkerType(input.markerType)) {
     const existing = await dependencies.findPath(input.markerId);
 
@@ -638,6 +737,84 @@ export async function updateMarker(
   const marker = serializeNote(updated);
   await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
   return ok(marker);
+}
+
+export async function disbandDeedMarker(
+  input: {
+    actor: Actor;
+    markerId: string;
+  },
+  dependencies: MarkerServiceDependencies
+): Promise<Result<{
+  category: NoteCategory;
+  deletedMarkerId: string;
+  marker: NoteWorkspaceMarker;
+}>> {
+  if (!canWriteMarkers(input.actor)) {
+    await auditAuthorizationFailure(dependencies, input.actor, null);
+    return err("Write access is required");
+  }
+
+  const existing = await dependencies.findDeed(input.markerId);
+
+  if (existing === null) {
+    return err("Marker was not found");
+  }
+
+  const note = validateNoteInput({
+    category: ABANDONED_DEED_CATEGORY_NAME,
+    text: formatDisbandedDeedNoteText(existing),
+    title: existing.name,
+    x: existing.x,
+    y: existing.y
+  }, existing.map);
+
+  if (!note.ok) {
+    return note;
+  }
+
+  const deletedAt = dependencies.now();
+  const conversion = await dependencies.disbandDeed({
+    actorUserId: input.actor.id,
+    categoryName: ABANDONED_DEED_CATEGORY_NAME,
+    deedId: existing.id,
+    deletedAt,
+    deleteExpiresAt: getDeleteExpiresAt(deletedAt),
+    note: {
+      ...note.value,
+      createdByUserId: input.actor.id,
+      mapId: existing.mapId
+    }
+  });
+
+  if (conversion === null) {
+    return err("Marker was not found");
+  }
+
+  const marker = serializeNote(conversion.note);
+
+  await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, existing.mapId, marker);
+  await recordAudit(dependencies, {
+    action: "MARKER_DELETED",
+    actorUserId: input.actor.id,
+    mapId: existing.mapId,
+    metadata: {
+      convertedTo: "note",
+      markerType: "deed",
+      noteCategory: conversion.category.name
+    },
+    targetId: conversion.deletedDeed.id,
+    targetType: "DEED"
+  });
+
+  return ok({
+    category: {
+      id: conversion.category.id,
+      name: conversion.category.name
+    },
+    deletedMarkerId: conversion.deletedDeed.id,
+    marker
+  });
 }
 
 function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
@@ -710,6 +887,19 @@ function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
       notes: getString(input, "notes"),
       strength: getString(input, "strength"),
       type: "minedoor",
+      x: getNumber(input, "x"),
+      y: getNumber(input, "y")
+    });
+  }
+
+  if (input.type === "locateSoul") {
+    return ok({
+      casterFacing: getString(input, "casterFacing"),
+      direction: getString(input, "direction"),
+      distanceBand: getString(input, "distanceBand"),
+      notes: getString(input, "notes"),
+      targetName: getString(input, "targetName"),
+      type: "locateSoul",
       x: getNumber(input, "x"),
       y: getNumber(input, "y")
     });
@@ -928,6 +1118,32 @@ function serializeMinedoor(minedoor: MinedoorRecord): MinedoorWorkspaceMarker {
   };
 }
 
+function serializeLocateSoul(locateSoul: LocateSoulRecord): LocateSoulWorkspaceMarker {
+  return {
+    casterFacing: normalizeStoredLocateSoulFacing(locateSoul.casterFacing),
+    direction: normalizeStoredLocateSoulDirection(locateSoul.direction),
+    distanceBand: normalizeStoredLocateSoulDistanceBand(locateSoul.distanceBand),
+    id: locateSoul.id,
+    notes: locateSoul.notes,
+    targetName: locateSoul.targetName,
+    type: "locateSoul",
+    x: locateSoul.x,
+    y: locateSoul.y
+  };
+}
+
+function normalizeStoredLocateSoulFacing(value: string): LocateSoulWorkspaceMarker["casterFacing"] {
+  return isLocateSoulCasterFacing(value) ? value : "north";
+}
+
+function normalizeStoredLocateSoulDirection(value: string): LocateSoulWorkspaceMarker["direction"] {
+  return isLocateSoulDirection(value) ? value : "ahead";
+}
+
+function normalizeStoredLocateSoulDistanceBand(value: string): LocateSoulWorkspaceMarker["distanceBand"] {
+  return isLocateSoulDistanceBandKey(value) ? value : "20-49";
+}
+
 function serializePath(path: PathRecord): PathWorkspaceMarker {
   return {
     id: path.id,
@@ -949,6 +1165,17 @@ function normalizeStoredPathType(pathType: string): "bridge" | "canal" | "highwa
   return "bridge";
 }
 
+function formatDisbandedDeedNoteText(deed: DeedRecord): string {
+  return [
+    `Former deed: ${deed.name}`,
+    `Mayor: ${deed.founder}`,
+    `Founding date: ${formatOptionalDate(deed.foundingDate) ?? "Unknown"}`,
+    `Dimensions: N${deed.north} W${deed.west} E${deed.east} S${deed.south}`,
+    `Perimeter: ${deed.perimeter} tiles`,
+    `Coordinates: ${deed.x}, ${deed.y}`
+  ].join("\n");
+}
+
 function formatOptionalDateTime(value: Date | null): string | null {
   return value === null ? null : value.toISOString().slice(0, 16);
 }
@@ -957,7 +1184,7 @@ async function softDeleteMarker(
   input: { markerId: string; markerType: MarkerType },
   softDeleteInput: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date },
   dependencies: MarkerServiceDependencies
-): Promise<(TowerRecord | DeedRecord | NoteRecord | RiftRecord | CampRecord | MinedoorRecord | PathRecord) | null> {
+): Promise<(TowerRecord | DeedRecord | NoteRecord | RiftRecord | CampRecord | MinedoorRecord | LocateSoulRecord | PathRecord) | null> {
   if (input.markerType === "tower") {
     return dependencies.softDeleteTower(input.markerId, softDeleteInput);
   }
@@ -976,6 +1203,10 @@ async function softDeleteMarker(
 
   if (input.markerType === "minedoor") {
     return dependencies.softDeleteMinedoor(input.markerId, softDeleteInput);
+  }
+
+  if (input.markerType === "locateSoul") {
+    return dependencies.softDeleteLocateSoul(input.markerId, softDeleteInput);
   }
 
   if (isPathMarkerType(input.markerType)) {
@@ -1042,6 +1273,10 @@ function getAuditTargetType(markerType: MarkerType): MarkerAuditTarget {
 
   if (markerType === "minedoor") {
     return "MINEDOOR";
+  }
+
+  if (markerType === "locateSoul") {
+    return "LOCATE_SOUL";
   }
 
   if (isPathMarkerType(markerType)) {

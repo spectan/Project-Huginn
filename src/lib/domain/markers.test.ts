@@ -3,6 +3,7 @@ import {
   formatTowerCreator,
   validateCampInput,
   validateDeedInput,
+  validateLocateSoulInput,
   validateMinedoorInput,
   validateNoteInput,
   validatePathInput,
@@ -441,6 +442,90 @@ describe("validateMinedoorInput", () => {
         x: 100,
         y: 120
       }
+    });
+  });
+});
+
+describe("validateLocateSoulInput", () => {
+  it("normalizes a locate soul cast with a target, facing, direction, distance band, and optional notes", () => {
+    expect(validateLocateSoulInput({
+      casterFacing: "north",
+      direction: "aheadLeft",
+      distanceBand: "50-199",
+      notes: "  Corpse result  ",
+      targetName: "  Funkiey  ",
+      x: 100,
+      y: 120
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        casterFacing: "north",
+        direction: "aheadLeft",
+        distanceBand: "50-199",
+        notes: "Corpse result",
+        targetName: "Funkiey",
+        x: 100,
+        y: 120
+      }
+    });
+  });
+
+  it("rejects locate soul casts whose 3 by 3 marker footprint does not fit on the map", () => {
+    expect(validateLocateSoulInput({
+      casterFacing: "north",
+      direction: "ahead",
+      distanceBand: "20-49",
+      notes: "",
+      targetName: "Funkiey",
+      x: 0,
+      y: 120
+    }, bounds)).toEqual({
+      ok: false,
+      error: "Locate soul marker must fit inside map bounds"
+    });
+  });
+
+  it.each([
+    {
+      error: "Caster facing must be a compass direction",
+      input: {
+        casterFacing: "up",
+        direction: "ahead",
+        distanceBand: "20-49",
+        notes: "",
+        targetName: "Funkiey",
+        x: 100,
+        y: 120
+      }
+    },
+    {
+      error: "Locate soul direction must be a relative direction",
+      input: {
+        casterFacing: "north",
+        direction: "sideways",
+        distanceBand: "20-49",
+        notes: "",
+        targetName: "Funkiey",
+        x: 100,
+        y: 120
+      }
+    },
+    {
+      error: "Locate soul distance must be one of the known Wurmpedia bands",
+      input: {
+        casterFacing: "north",
+        direction: "ahead",
+        distanceBand: "7-42",
+        notes: "",
+        targetName: "Funkiey",
+        x: 100,
+        y: 120
+      }
+    }
+  ])("rejects invalid locate soul input: $error", ({ error, input }) => {
+    expect(validateLocateSoulInput(input, bounds)).toEqual({
+      ok: false,
+      error
     });
   });
 });

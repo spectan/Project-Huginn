@@ -78,6 +78,7 @@ function isMarkerType(value: string): value is MarkerType {
     value === "rift" ||
     value === "camp" ||
     value === "minedoor" ||
+    value === "locateSoul" ||
     value === "bridge" ||
     value === "canal" ||
     value === "highway"

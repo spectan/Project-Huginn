@@ -159,6 +159,20 @@ export function MapSettingsOverlay({
               })}
             />
             <LayerControlRow
+              checked={markerVisibility.locateSouls}
+              colorLabel="Locate Souls color"
+              colorValue={markerColors.locateSouls}
+              label="Locate Souls"
+              opacityLabel="Locate Souls opacity"
+              opacityValue={markerOpacities.locateSouls}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, locateSouls: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, locateSouls: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                locateSouls: !markerVisibility.locateSouls
+              })}
+            />
+            <LayerControlRow
               checked={markerVisibility.bridges}
               colorLabel="Bridges color"
               colorValue={markerColors.bridges}

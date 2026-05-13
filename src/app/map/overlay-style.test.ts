@@ -147,6 +147,23 @@ describe("map overlay styles", () => {
     expect(opacityBlock).toContain("max-width: 100%");
   });
 
+  it("keeps locate soul overlays non-interactive so the 3 by 3 pip owns right-click actions", () => {
+    const svgBlock = getStandaloneCssBlock(".map-locate-soul-overlay-svg");
+    const overlayBlock = getStandaloneCssBlock(".map-locate-soul-overlay");
+
+    expect(svgBlock).toContain("pointer-events: none");
+    expect(overlayBlock).toContain("pointer-events: none");
+  });
+
+  it("keeps the event feed compact and scrollable", () => {
+    const panelBlock = getStandaloneCssBlock(".map-event-feed-panel");
+    const listBlock = getStandaloneCssBlock(".map-event-feed-list");
+
+    expect(panelBlock).toContain("width: min(320px, calc(100vw - 32px))");
+    expect(listBlock).toContain("max-height: 188px");
+    expect(listBlock).toContain("overflow-y: auto");
+  });
+
   it("uses configurable grid colors with black grid edging", () => {
     const sectorBlock = getStandaloneCssBlock(".map-sector-grid");
     const missionBlock = getStandaloneCssBlock(".map-mission-grid");

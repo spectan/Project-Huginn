@@ -20,6 +20,13 @@ import {
   MAX_PATH_WIDTH_TILES
 } from "@/lib/domain/constants";
 import {
+  LOCATE_SOUL_CASTER_FACINGS,
+  formatLocateSoulCasterFacing,
+  formatLocateSoulDirection,
+  formatLocateSoulDistanceBand,
+  parseLocateSoulMessage
+} from "@/lib/domain/locate-soul";
+import {
   TILE_HIGHLIGHT_GROUPS,
   buildTileHighlightOutlineMask,
   getTileHighlightTargetColors,
@@ -31,6 +38,7 @@ import {
   type TileHighlightPanelPosition,
   type UserMapSettings
 } from "@/lib/map-settings/map-settings";
+import type { WurmMapsEvent, WurmMapsEventFeed } from "@/lib/wurmmaps/event-feed";
 import type {
   MarkerColors,
   MarkerOpacities,
@@ -54,6 +62,7 @@ const ZOOM_STEP = 1.2;
 const SERVER_VIEWPORT_SNAPSHOT = `${FALLBACK_MAP_SIZE_PX}x${FALLBACK_MAP_SIZE_PX}`;
 const SECTOR_GRID_LEFT_OFFSET_PX = -16;
 const SECTOR_GRID_TOP_OFFSET_PX = 18;
+const EVENT_FEED_DISPLAY_LIMIT = 30;
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
 const TILE_SIZE_METERS = 4;
@@ -146,6 +155,7 @@ type PathPointDragState = {
 type TopPanelState = "account" | "settings" | null;
 
 type MapWorkspaceProps = {
+  initialEventFeed?: WurmMapsEventFeed | null;
   initialMarkers: WorkspaceMarker[];
   initialNoteCategories?: readonly NoteCategory[];
   initialSettings?: UserMapSettings;
@@ -156,6 +166,7 @@ type MapWorkspaceProps = {
 };
 
 export default function MapWorkspace({
+  initialEventFeed,
   initialMarkers,
   initialNoteCategories = DEFAULT_NOTE_CATEGORIES,
   initialSettings = DEFAULT_USER_MAP_SETTINGS,
@@ -755,6 +766,7 @@ export default function MapWorkspace({
           </div>
           <MarkerLayer
             highlightedMarkerIds={highlightedMarkerIds}
+            mapSize={mapSize}
             markerColors={markerColors}
             markerOpacities={markerOpacities}
             markers={displayedMarkers}
@@ -880,6 +892,13 @@ export default function MapWorkspace({
             setDialog(null);
             setFormError(null);
           }}
+          onDisbandDeed={(marker) => void disbandDeedRequest(
+            marker,
+            updateMarkers,
+            setNoteCategories,
+            setDialog,
+            setFormError
+          )}
           onSubmit={(event) => void submitMarkerForm(event, dialog, map.id, updateMarkers, setDialog, setFormError)}
           viewerIsAdmin={viewer?.isAdmin ?? false}
         />
@@ -923,7 +942,7 @@ export default function MapWorkspace({
         </div>
       ) : null}
       {canViewMap ? (
-        <div className="map-bottom-left-controls">
+        <div className="map-bottom-left-controls" data-testid="map-bottom-left-controls">
           <MapLegendControl
             isOpen={isLegendOpen}
             markerColors={markerColors}
@@ -934,6 +953,9 @@ export default function MapWorkspace({
             onToggle={toggleRoutePlanner}
             routeDistance={routePlannerPoints === null ? null : getRouteDistanceTiles(routePlannerPoints)}
           />
+          {initialEventFeed !== undefined && map !== null ? (
+            <MapEventFeedPanel feed={initialEventFeed} serverName={map.name} />
+          ) : null}
         </div>
       ) : null}
     </main>
@@ -968,6 +990,7 @@ function MapContextMenu({
           <button onClick={() => onCreate("rift")} role="menuitem" type="button">Rift</button>
           <button onClick={() => onCreate("camp")} role="menuitem" type="button">Camp</button>
           <button onClick={() => onCreate("minedoor")} role="menuitem" type="button">Minedoor</button>
+          <button onClick={() => onCreate("locateSoul")} role="menuitem" type="button">Locate Soul</button>
           <button onClick={() => onCreate("bridge")} role="menuitem" type="button">Bridge</button>
           <button onClick={() => onCreate("canal")} role="menuitem" type="button">Canal</button>
           <button onClick={() => onCreate("highway")} role="menuitem" type="button">Highway</button>
@@ -1326,6 +1349,73 @@ function MapLegendControl({
   );
 }
 
+function MapEventFeedPanel({
+  feed,
+  serverName
+}: {
+  feed: WurmMapsEventFeed | null;
+  serverName: string;
+}) {
+  const events = feed?.events
+    .slice()
+    .sort((left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id))
+    .slice(0, EVENT_FEED_DISPLAY_LIMIT) ?? [];
+
+  return (
+    <section aria-label={`${serverName} event feed`} className="map-event-feed-panel">
+      <div className="map-event-feed-header">
+        <strong>{serverName} Events</strong>
+        <span>{feed === null ? "Unavailable" : formatServerStatus(feed.serverStatus.status)}</span>
+      </div>
+      {events.length === 0 ? (
+        <p className="map-event-feed-empty">
+          {feed === null ? "Events unavailable" : "No recent events"}
+        </p>
+      ) : (
+        <ol className="map-event-feed-list">
+          {events.map((event) => (
+            <MapEventFeedRow event={event} key={`${event.kind}-${event.id}`} />
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
+
+function MapEventFeedRow({ event }: { event: WurmMapsEvent }) {
+  return (
+    <li className="map-event-feed-item">
+      <div className="map-event-feed-meta">
+        <span className={`map-event-feed-kind map-event-feed-kind--${event.kind}`}>{event.label}</span>
+        <time dateTime={formatEventDateTime(event.timestamp)}>{formatEventTimestamp(event.timestamp)}</time>
+      </div>
+      <p>{event.message}</p>
+    </li>
+  );
+}
+
+function formatServerStatus(status: WurmMapsEventFeed["serverStatus"]["status"]): string {
+  if (status === "online") {
+    return "Online";
+  }
+
+  if (status === "offline") {
+    return "Offline";
+  }
+
+  return "Unknown";
+}
+
+function formatEventTimestamp(timestamp: number): string {
+  const dateTime = formatEventDateTime(timestamp);
+  return dateTime === "" ? "Unknown" : dateTime.slice(5, 16).replace("T", " ");
+}
+
+function formatEventDateTime(timestamp: number): string {
+  const date = new Date(timestamp * 1000);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
 type LegendItem = {
   color: string;
   id: string;
@@ -1345,6 +1435,7 @@ function getLegendItems(markerColors: MarkerColors): LegendItem[] {
     { color: markerColors.rifts, id: "rift", label: "Rift", variant: "triangle" },
     { color: markerColors.camps, id: "camp", label: "Camp", variant: "triangle" },
     { color: markerColors.minedoors, id: "minedoor", label: "Minedoor", variant: "minedoor" },
+    { color: markerColors.locateSouls, id: "locate-soul", label: "Locate Soul", variant: "square" },
     { color: markerColors.bridges, id: "bridge", label: "Bridge", variant: "line" },
     { color: markerColors.canals, id: "canal", label: "Canal", variant: "line" },
     { color: markerColors.highways, id: "highway", label: "Highway", variant: "line" }
@@ -1691,6 +1782,7 @@ function MarkerContextMenu({
         <button onClick={() => onCreate("rift")} role="menuitem" type="button">Rift</button>
         <button onClick={() => onCreate("camp")} role="menuitem" type="button">Camp</button>
         <button onClick={() => onCreate("minedoor")} role="menuitem" type="button">Minedoor</button>
+        <button onClick={() => onCreate("locateSoul")} role="menuitem" type="button">Locate Soul</button>
         <button onClick={() => onCreate("bridge")} role="menuitem" type="button">Bridge</button>
         <button onClick={() => onCreate("canal")} role="menuitem" type="button">Canal</button>
         <button onClick={() => onCreate("highway")} role="menuitem" type="button">Highway</button>
@@ -1838,6 +1930,7 @@ function MarkerDialog({
   map,
   noteCategories,
   onClose,
+  onDisbandDeed,
   onNoteCategoryCreate,
   onSubmit,
   viewerIsAdmin
@@ -1847,6 +1940,7 @@ function MarkerDialog({
   map: WorkspaceMap;
   noteCategories: NoteCategory[];
   onClose(): void;
+  onDisbandDeed(marker: Extract<WorkspaceMarker, { type: "deed" }>): void;
   onNoteCategoryCreate(name: string): Promise<NoteCategory | null>;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
   viewerIsAdmin: boolean;
@@ -1856,6 +1950,9 @@ function MarkerDialog({
   const coordinate = dialog.mode === "create"
     ? { x: dialog.x, y: dialog.y }
     : { x: dialog.marker.x, y: dialog.marker.y };
+  const disbandableDeed = dialog.mode === "edit" && dialog.marker.type === "deed"
+    ? dialog.marker
+    : null;
 
   return (
     <section className="map-marker-dialog" role="dialog" aria-label={title}>
@@ -1879,7 +1976,14 @@ function MarkerDialog({
           viewerIsAdmin={viewerIsAdmin}
         />
         {error !== null ? <p className="map-auth-error">{error}</p> : null}
-        <button className="map-dialog-primary" type="submit">Save</button>
+        <div className="map-dialog-actions">
+          {disbandableDeed !== null ? (
+            <button onClick={() => onDisbandDeed(disbandableDeed)} type="button">
+              Mark Disbanded
+            </button>
+          ) : null}
+          <button className="map-dialog-primary" type="submit">Save</button>
+        </div>
       </form>
     </section>
   );
@@ -1961,6 +2065,18 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
       <dl className="map-hover-details-list">
         <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
         {marker.strength.length === 0 ? null : <div><dt>Strength</dt><dd>{marker.strength}</dd></div>}
+        {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
+      </dl>
+    );
+  }
+
+  if (marker.type === "locateSoul") {
+    return (
+      <dl className="map-hover-details-list">
+        <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
+        <div><dt>Caster facing</dt><dd>{formatLocateSoulCasterFacing(marker.casterFacing)}</dd></div>
+        <div><dt>Direction</dt><dd>{formatLocateSoulDirection(marker.direction)}</dd></div>
+        <div><dt>Distance</dt><dd>{formatLocateSoulDistanceBand(marker.distanceBand)}</dd></div>
         {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
@@ -2076,6 +2192,31 @@ function MarkerFields({
     );
   }
 
+  if (markerType === "locateSoul") {
+    const locateSoul = marker?.type === "locateSoul" ? marker : null;
+    return (
+      <>
+        <label>
+          <span>Caster Facing</span>
+          <select name="casterFacing" required defaultValue={locateSoul?.casterFacing ?? "north"}>
+            {LOCATE_SOUL_CASTER_FACINGS.map((facing) => (
+              <option key={facing} value={facing}>{formatLocateSoulCasterFacing(facing)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Locate Soul Output</span>
+          <textarea
+            name="locateSoulOutput"
+            required
+            defaultValue={locateSoul === null ? "" : formatLocateSoulOutputForForm(locateSoul)}
+          />
+        </label>
+        <input name="notes" type="hidden" value={locateSoul?.notes ?? ""} readOnly />
+      </>
+    );
+  }
+
   if (isPathMarkerType(markerType)) {
     const path = marker !== null && isPathMarker(marker) ? marker : null;
     return (
@@ -2179,6 +2320,90 @@ function NoteFields({
   );
 }
 
+function formatLocateSoulOutputForForm(marker: Extract<WorkspaceMarker, { type: "locateSoul" }>): string {
+  if (marker.distanceBand === "0") {
+    return `You are practically standing on ${marker.targetName}!`;
+  }
+
+  return `${marker.targetName} is ${formatLocateSoulDistancePhraseForForm(marker.distanceBand)} ${formatLocateSoulDirectionPhraseForForm(marker.direction)}.`;
+}
+
+function formatLocateSoulDistancePhraseForForm(
+  distanceBand: Extract<WorkspaceMarker, { type: "locateSoul" }>["distanceBand"]
+): string {
+  if (distanceBand === "1-3") {
+    return "a stone's throw away";
+  }
+
+  if (distanceBand === "4-5") {
+    return "very close";
+  }
+
+  if (distanceBand === "6-9") {
+    return "pretty close by";
+  }
+
+  if (distanceBand === "10-19") {
+    return "fairly close by";
+  }
+
+  if (distanceBand === "20-49") {
+    return "some distance away";
+  }
+
+  if (distanceBand === "50-199") {
+    return "quite some distance away";
+  }
+
+  if (distanceBand === "200-499") {
+    return "rather a long distance away";
+  }
+
+  if (distanceBand === "500-999") {
+    return "pretty far away";
+  }
+
+  if (distanceBand === "1000+") {
+    return "far away";
+  }
+
+  return "very far away";
+}
+
+function formatLocateSoulDirectionPhraseForForm(
+  direction: Extract<WorkspaceMarker, { type: "locateSoul" }>["direction"]
+): string {
+  if (direction === "ahead") {
+    return "ahead of you";
+  }
+
+  if (direction === "aheadRight") {
+    return "ahead of you to the right";
+  }
+
+  if (direction === "right") {
+    return "to the right";
+  }
+
+  if (direction === "behindRight") {
+    return "behind you to the right";
+  }
+
+  if (direction === "behind") {
+    return "behind you";
+  }
+
+  if (direction === "behindLeft") {
+    return "behind you to the left";
+  }
+
+  if (direction === "left") {
+    return "to the left";
+  }
+
+  return "ahead of you to the left";
+}
+
 async function submitMarkerForm(
   event: FormEvent<HTMLFormElement>,
   dialog: DialogState,
@@ -2190,12 +2415,18 @@ async function submitMarkerForm(
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
   const markerType = dialog.mode === "create" ? dialog.markerType : dialog.marker.type;
-  const payload = buildMarkerPayload(markerType, formData);
+  const payloadResult = buildMarkerPayload(markerType, formData);
+
+  if (!payloadResult.ok) {
+    setFormError(payloadResult.error);
+    return;
+  }
+
   const url = dialog.mode === "edit"
     ? `/api/markers/${dialog.marker.type}/${dialog.marker.id}`
     : `/api/maps/${mapId}/markers`;
   const response = await fetch(url, {
-    body: JSON.stringify(payload),
+    body: JSON.stringify(payloadResult.payload),
     headers: { "content-type": "application/json" },
     method: dialog.mode === "edit" ? "PATCH" : "POST"
   });
@@ -2227,6 +2458,36 @@ async function deleteMarkerRequest(
   }
 
   setMarkers((current) => current.filter((candidate) => candidate.id !== marker.id));
+  setDialog(null);
+  setFormError(null);
+}
+
+async function disbandDeedRequest(
+  marker: Extract<WorkspaceMarker, { type: "deed" }>,
+  setMarkers: (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => void,
+  setNoteCategories: (updater: (categories: NoteCategory[]) => NoteCategory[]) => void,
+  setDialog: (dialog: DialogState | null) => void,
+  setFormError: (error: string | null) => void
+): Promise<void> {
+  const response = await fetch(`/api/markers/deed/${marker.id}/disband`, { method: "POST" });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    setFormError(body?.error ?? "Deed could not be marked disbanded");
+    return;
+  }
+
+  const body = (await response.json()) as {
+    category: NoteCategory;
+    deletedMarkerId: string;
+    marker: WorkspaceMarker;
+  };
+
+  setNoteCategories((current) => upsertNoteCategory(current, body.category));
+  setMarkers((current) => upsertMarker(
+    current.filter((candidate) => candidate.id !== body.deletedMarkerId),
+    body.marker
+  ));
   setDialog(null);
   setFormError(null);
 }
@@ -2283,7 +2544,11 @@ async function saveUserMapSettings(mapId: string, settings: UserMapSettings): Pr
   }
 }
 
-function buildMarkerPayload(markerType: MarkerType, formData: FormData) {
+type MarkerPayloadResult =
+  | { error: string; ok: false }
+  | { ok: true; payload: Record<string, unknown> };
+
+function buildMarkerPayload(markerType: MarkerType, formData: FormData): MarkerPayloadResult {
   const base = {
     type: markerType,
     x: Number(formData.get("x")),
@@ -2294,68 +2559,112 @@ function buildMarkerPayload(markerType: MarkerType, formData: FormData) {
     const creator = parseCreatorInput(String(formData.get("creator") ?? ""));
 
     return {
-      ...base,
-      damage: String(formData.get("damage") ?? ""),
-      makerName: creator.makerName,
-      makerNumber: creator.makerNumber,
-      ql: String(formData.get("ql") ?? "")
+      ok: true,
+      payload: {
+        ...base,
+        damage: String(formData.get("damage") ?? ""),
+        makerName: creator.makerName,
+        makerNumber: creator.makerNumber,
+        ql: String(formData.get("ql") ?? "")
+      }
     };
   }
 
   if (markerType === "deed") {
     return {
-      ...base,
-      east: Number(formData.get("east")),
-      foundingDate: String(formData.get("foundingDate") ?? ""),
-      founder: String(formData.get("founder") ?? ""),
-      name: String(formData.get("name") ?? ""),
-      north: Number(formData.get("north")),
-      perimeter: Number(formData.get("perimeter")),
-      south: Number(formData.get("south")),
-      west: Number(formData.get("west"))
+      ok: true,
+      payload: {
+        ...base,
+        east: Number(formData.get("east")),
+        foundingDate: String(formData.get("foundingDate") ?? ""),
+        founder: String(formData.get("founder") ?? ""),
+        name: String(formData.get("name") ?? ""),
+        north: Number(formData.get("north")),
+        perimeter: Number(formData.get("perimeter")),
+        south: Number(formData.get("south")),
+        west: Number(formData.get("west"))
+      }
     };
   }
 
   if (markerType === "rift") {
     return {
-      ...base,
-      arrivalDate: String(formData.get("arrivalDate") ?? ""),
-      estimatedRiftTime: String(formData.get("estimatedRiftTime") ?? ""),
-      notes: String(formData.get("notes") ?? "")
+      ok: true,
+      payload: {
+        ...base,
+        arrivalDate: String(formData.get("arrivalDate") ?? ""),
+        estimatedRiftTime: String(formData.get("estimatedRiftTime") ?? ""),
+        notes: String(formData.get("notes") ?? "")
+      }
     };
   }
 
   if (markerType === "camp") {
     return {
-      ...base,
-      campType: String(formData.get("campType") ?? ""),
-      notes: String(formData.get("notes") ?? "")
+      ok: true,
+      payload: {
+        ...base,
+        campType: String(formData.get("campType") ?? ""),
+        notes: String(formData.get("notes") ?? "")
+      }
     };
   }
 
   if (markerType === "minedoor") {
     return {
-      ...base,
-      notes: String(formData.get("notes") ?? ""),
-      strength: String(formData.get("strength") ?? "")
+      ok: true,
+      payload: {
+        ...base,
+        notes: String(formData.get("notes") ?? ""),
+        strength: String(formData.get("strength") ?? "")
+      }
+    };
+  }
+
+  if (markerType === "locateSoul") {
+    const locateSoul = parseLocateSoulMessage(String(formData.get("locateSoulOutput") ?? ""));
+
+    if (locateSoul === null) {
+      return {
+        error: "Paste a Locate Soul result that includes a target, distance, and direction.",
+        ok: false
+      };
+    }
+
+    return {
+      ok: true,
+      payload: {
+        ...base,
+        casterFacing: String(formData.get("casterFacing") ?? ""),
+        direction: locateSoul.direction,
+        distanceBand: locateSoul.distanceBand,
+        notes: String(formData.get("notes") ?? ""),
+        targetName: locateSoul.targetName
+      }
     };
   }
 
   if (isPathMarkerType(markerType)) {
     return {
-      name: String(formData.get("name") ?? ""),
-      notes: String(formData.get("notes") ?? ""),
-      points: [],
-      type: markerType,
-      width: 1
+      ok: true,
+      payload: {
+        name: String(formData.get("name") ?? ""),
+        notes: String(formData.get("notes") ?? ""),
+        points: [],
+        type: markerType,
+        width: 1
+      }
     };
   }
 
   return {
-    category: String(formData.get("category") ?? ""),
-    ...base,
-    title: String(formData.get("title") ?? ""),
-    text: String(formData.get("text") ?? "")
+    ok: true,
+    payload: {
+      category: String(formData.get("category") ?? ""),
+      ...base,
+      title: String(formData.get("title") ?? ""),
+      text: String(formData.get("text") ?? "")
+    }
   };
 }
 
@@ -2901,6 +3210,10 @@ function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility):
     return visibility.minedoors;
   }
 
+  if (marker.type === "locateSoul") {
+    return visibility.locateSouls;
+  }
+
   return visibility.notes;
 }
 
@@ -2977,6 +3290,20 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
       "mine door",
       "mine doors",
       marker.strength,
+      marker.notes,
+      marker.x,
+      marker.y
+    ].join(" ");
+  }
+
+  if (marker.type === "locateSoul") {
+    return [
+      "locate soul",
+      marker.targetName,
+      "locate souls",
+      formatLocateSoulCasterFacing(marker.casterFacing),
+      formatLocateSoulDirection(marker.direction),
+      formatLocateSoulDistanceBand(marker.distanceBand),
       marker.notes,
       marker.x,
       marker.y
@@ -3066,6 +3393,10 @@ function getMarkerTitle(marker: WorkspaceMarker): string {
     return "Minedoor";
   }
 
+  if (marker.type === "locateSoul") {
+    return "Locate Soul";
+  }
+
   if (isPathMarker(marker)) {
     return getPathTypeTitle(marker.type);
   }
@@ -3094,6 +3425,10 @@ function getMarkerHoverTitle(marker: WorkspaceMarker): string {
     return "Minedoor";
   }
 
+  if (marker.type === "locateSoul") {
+    return `Locate Soul: ${marker.targetName}`;
+  }
+
   if (isPathMarker(marker)) {
     return `${getPathTypeTitle(marker.type)}: ${marker.name || "Unnamed path"}`;
   }
@@ -3120,6 +3455,10 @@ function getMarkerLabel(marker: WorkspaceMarker): string {
 
   if (marker.type === "minedoor") {
     return "Minedoor";
+  }
+
+  if (marker.type === "locateSoul") {
+    return `Locate Soul ${marker.targetName}`;
   }
 
   if (isPathMarker(marker)) {
@@ -3158,6 +3497,10 @@ function getMarkerContextTitle(marker: WorkspaceMarker): string {
     return "Minedoor";
   }
 
+  if (marker.type === "locateSoul") {
+    return `Locate Soul ${marker.targetName}`;
+  }
+
   if (isPathMarker(marker)) {
     return marker.name || getPathTypeTitle(marker.type);
   }
@@ -3184,6 +3527,10 @@ function getMarkerContextMeta(marker: WorkspaceMarker): string {
 
   if (marker.type === "minedoor") {
     return marker.strength.length === 0 ? "Minedoor" : `Minedoor | Strength ${marker.strength}`;
+  }
+
+  if (marker.type === "locateSoul") {
+    return `Locate Soul | ${formatLocateSoulDirection(marker.direction)} | ${formatLocateSoulDistanceBand(marker.distanceBand)}`;
   }
 
   if (isPathMarker(marker)) {
@@ -3224,6 +3571,10 @@ function getMarkerContextColor(marker: WorkspaceMarker, markerColors: MarkerColo
     return markerColors.minedoors;
   }
 
+  if (marker.type === "locateSoul") {
+    return markerColors.locateSouls;
+  }
+
   if (marker.type === "bridge") {
     return markerColors.bridges;
   }
@@ -3262,6 +3613,10 @@ function getMarkerTypeTitle(markerType: MarkerType): string {
 
   if (markerType === "minedoor") {
     return "minedoor";
+  }
+
+  if (markerType === "locateSoul") {
+    return "locate soul";
   }
 
   if (markerType === "bridge") {

@@ -53,6 +53,7 @@ export type AuditHistoryTargetType =
   | "RIFT"
   | "CAMP"
   | "MINEDOOR"
+  | "LOCATE_SOUL"
   | "PATH"
   | "SESSION"
   | "SYSTEM";

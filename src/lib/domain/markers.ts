@@ -7,6 +7,14 @@ import {
   parseDamageHundredths,
   parseQualityLevelHundredths
 } from "./number-fields";
+import {
+  isLocateSoulCasterFacing,
+  isLocateSoulDirection,
+  isLocateSoulDistanceBandKey,
+  type LocateSoulCasterFacing,
+  type LocateSoulDirection,
+  type LocateSoulDistanceBandKey
+} from "./locate-soul";
 import { err, ok, type Result } from "./result";
 
 export type TowerInput = {
@@ -111,6 +119,26 @@ export type MinedoorInput = {
 export type MinedoorMarkerInput = {
   notes: string;
   strength: string;
+  x: number;
+  y: number;
+};
+
+export type LocateSoulInput = {
+  casterFacing: string;
+  direction: string;
+  distanceBand: string;
+  notes: string;
+  targetName: string;
+  x: number;
+  y: number;
+};
+
+export type LocateSoulMarkerInput = {
+  casterFacing: LocateSoulCasterFacing;
+  direction: LocateSoulDirection;
+  distanceBand: LocateSoulDistanceBandKey;
+  notes: string;
+  targetName: string;
   x: number;
   y: number;
 };
@@ -400,6 +428,56 @@ export function validateMinedoorInput(
   return ok({
     notes: notes.value,
     strength: strength.value,
+    x: coordinate.value.x,
+    y: coordinate.value.y
+  });
+}
+
+export function validateLocateSoulInput(
+  input: LocateSoulInput,
+  bounds: MapBounds
+): Result<LocateSoulMarkerInput> {
+  const coordinate = validateCoordinate({ x: input.x, y: input.y }, bounds);
+  if (!coordinate.ok) {
+    return coordinate;
+  }
+
+  const markerBounds = validateCenteredMarkerFootprint(coordinate.value, bounds, "Locate soul");
+  if (!markerBounds.ok) {
+    return markerBounds;
+  }
+
+  const targetName = normalizeRequiredText(input.targetName, "Target");
+  if (!targetName.ok) {
+    return targetName;
+  }
+
+  const casterFacing = input.casterFacing.trim();
+  if (!isLocateSoulCasterFacing(casterFacing)) {
+    return err("Caster facing must be a compass direction");
+  }
+
+  const direction = input.direction.trim();
+  if (!isLocateSoulDirection(direction)) {
+    return err("Locate soul direction must be a relative direction");
+  }
+
+  const distanceBand = input.distanceBand.trim();
+  if (!isLocateSoulDistanceBandKey(distanceBand)) {
+    return err("Locate soul distance must be one of the known Wurmpedia bands");
+  }
+
+  const notes = normalizeOptionalText(input.notes, "Notes", MAX_NOTE_TEXT_LENGTH);
+  if (!notes.ok) {
+    return notes;
+  }
+
+  return ok({
+    casterFacing,
+    direction,
+    distanceBand,
+    notes: notes.value,
+    targetName: targetName.value,
     x: coordinate.value.x,
     y: coordinate.value.y
   });

@@ -297,6 +297,24 @@ body {
   box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.6);
 }
 
+.map-locate-soul-overlay-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.map-locate-soul-overlay {
+  pointer-events: none;
+}
+
+.map-locate-soul-off-map {
+  pointer-events: none;
+  stroke-linecap: round;
+}
+
 .map-deed-perimeter {
   pointer-events: none;
   z-index: 1;
@@ -342,7 +360,8 @@ body {
 
 .map-marker--rift,
 .map-marker--camp,
-.map-marker--minedoor {
+.map-marker--minedoor,
+.map-marker--locate-soul {
   width: 3px;
   height: 3px;
   border: 0;
@@ -377,6 +396,10 @@ body {
     repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.95) 0 1px, transparent 1px 2px),
     transparent;
   box-shadow: inset 0 0 0 1px var(--map-minedoor-color, #22d3ee);
+}
+
+.map-marker--locate-soul {
+  box-shadow: none;
 }
 
 .map-deed-overlay {
@@ -1170,6 +1193,102 @@ body {
   height: 4px;
   border-radius: 999px;
   background: var(--map-legend-color, #facc15);
+}
+
+.map-event-feed-panel {
+  display: grid;
+  gap: 8px;
+  width: min(320px, calc(100vw - 32px));
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #e5e7eb;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.34);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+}
+
+.map-event-feed-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.map-event-feed-header strong {
+  color: #f8fafc;
+  font-size: 13px;
+}
+
+.map-event-feed-header span {
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgba(20, 184, 166, 0.18);
+  color: #99f6e4;
+  font-weight: 700;
+}
+
+.map-event-feed-list {
+  display: grid;
+  gap: 6px;
+  max-height: 188px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.map-event-feed-item {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  padding-top: 6px;
+}
+
+.map-event-feed-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.map-event-feed-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.map-event-feed-kind {
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: rgba(96, 165, 250, 0.18);
+  color: #bfdbfe;
+  font-weight: 700;
+}
+
+.map-event-feed-kind--deed {
+  background: rgba(250, 204, 21, 0.18);
+  color: #fde68a;
+}
+
+.map-event-feed-kind--rift {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fecaca;
+}
+
+.map-event-feed-kind--rite,
+.map-event-feed-kind--holySite {
+  background: rgba(168, 85, 247, 0.2);
+  color: #e9d5ff;
+}
+
+.map-event-feed-item p,
+.map-event-feed-empty {
+  margin: 0;
+  color: #dbe4ef;
+  line-height: 1.32;
 }
 
 .map-account,

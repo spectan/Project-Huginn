@@ -18,6 +18,7 @@ describe("user map settings", () => {
         camps: "#ffcc00",
         canals: "#0055cc",
         highways: "#cccc00",
+        locateSouls: "#ff8800",
         minedoors: "#00ffff",
         rifts: "#ff0000",
         towers: "#00ff00"
@@ -29,6 +30,7 @@ describe("user map settings", () => {
         deedPerimeters: false,
         deedNames: true,
         highways: false,
+        locateSouls: false,
         minedoors: false,
         riftOverlays: false
       },
@@ -47,6 +49,7 @@ describe("user map settings", () => {
         camps: "#ffcc00",
         canals: "#0055cc",
         highways: "#cccc00",
+        locateSouls: "#ff8800",
         minedoors: "#00ffff",
         rifts: "#ff0000",
         towers: "#00ff00"
@@ -59,6 +62,7 @@ describe("user map settings", () => {
         deedPerimeters: false,
         deedNames: true,
         highways: false,
+        locateSouls: false,
         minedoors: false,
         riftOverlays: false
       },
@@ -81,6 +85,7 @@ describe("user map settings", () => {
         canals: "#0055CC",
         deeds: "gold",
         highways: "yellow",
+        locateSouls: "#F97316",
         minedoors: "cyan",
         notes: "#ABCDEF",
         rifts: "#DC2626"
@@ -90,6 +95,7 @@ describe("user map settings", () => {
         canals: 50.2,
         deeds: -10,
         highways: 101,
+        locateSouls: 62.2,
         notes: 150,
         riftOverlays: 37.2,
         towers: 44.6
@@ -106,6 +112,7 @@ describe("user map settings", () => {
         canals: "#0055cc",
         deeds: DEFAULT_USER_MAP_SETTINGS.markerColors.deeds,
         highways: DEFAULT_USER_MAP_SETTINGS.markerColors.highways,
+        locateSouls: "#f97316",
         minedoors: DEFAULT_USER_MAP_SETTINGS.markerColors.minedoors,
         notes: "#abcdef",
         rifts: "#dc2626"
@@ -115,6 +122,7 @@ describe("user map settings", () => {
         canals: 50,
         deeds: 0,
         highways: 100,
+        locateSouls: 62,
         notes: 100,
         riftOverlays: 37,
         towers: 45

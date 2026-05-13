@@ -222,6 +222,50 @@ Prevention:
 
 When adding any opacity-backed setting, put it through the shared map settings defaults and parser, and test both the default slider value and at least one boundary conversion.
 
+### Marker Opacity Is Overlay-Only
+
+Context:
+
+Tower, deed, and note center pips need to stay readable even when users reduce overlay opacity.
+
+What happened:
+
+The shared center-pip style helper accepted an opacity value, so tower, deed, and note 3x3 centers faded with the same slider used for their larger overlays.
+
+Root cause:
+
+Overlay opacity and marker-pip opacity were coupled in one style helper even though the UI intent is different: overlays should fade, but center pips are location anchors.
+
+Decision:
+
+Keep tower, deed, and note center pips at CSS opacity `1`. Apply marker opacity sliders only to overlay/area visuals such as tower ranges, deed rectangles/perimeters, rift overlays, paths, grids, and tile highlighting.
+
+Prevention:
+
+Use separate helper paths for opaque center pips and opacity-controlled overlays. Tests should assert both sides: a low tower opacity fades the tower overlay while the tower center remains fully opaque, and note centers remain fully opaque because notes have no separate overlay.
+
+### Disbanded Deeds Convert Server-Side
+
+Context:
+
+Users need to preserve old deed information after a deed disbands, but the map should stop treating it as an active deed.
+
+What happened:
+
+The desired workflow crosses marker types: an edited deed becomes an `Abandoned Deed` note while the deed leaves the active marker list.
+
+Root cause:
+
+Doing this as separate client calls would split category creation, note creation, deed deletion, and marker state replacement across multiple failure points.
+
+Decision:
+
+Use one server-side deed-disband operation. It creates or reuses the map-scoped `Abandoned Deed` note category, creates a note at the deed center with the old deed name and details, and soft-deletes the deed inside one database transaction.
+
+Prevention:
+
+Keep cross-marker conversions in marker service/database dependencies rather than UI request chains. The client should apply the single response by adding the returned category if needed, removing the deleted deed ID, and inserting the returned note marker.
+
 ### Infrastructure Paths Need View Stability
 
 Context:
@@ -414,6 +458,72 @@ Prevention:
 
 When adding new persisted user map settings, include them in `DEFAULT_USER_MAP_SETTINGS` and verify the `Default` action restores that field.
 
+### Locate Soul Casts Are Pip Plus Shadow
+
+Context:
+
+Locate Soul support needs to represent a cast target location and the approximate spell result area without turning the result area into the interactive marker itself.
+
+What happened:
+
+The feature spans domain spell bands, persisted marker data, map rendering, search, hover details, deleted-marker restore, audit target typing, and per-user display settings.
+
+Root cause:
+
+The user-facing marker is a 3x3 cast pip, but the useful spell result is a derived direction/distance overlay. Treating both as one visual would make opacity and hit testing behave incorrectly.
+
+Decision:
+
+Store Locate Soul as a first-class marker with target name, caster facing, relative direction, Wurmpedia distance band, optional notes, and a 3x3 centered pip. Keep the pip fully opaque and interactive. Render the derived spell shadow as a non-interactive annular sector whose opacity comes only from the Locate Souls overlay setting. Do not track above-ground or cave state.
+
+Prevention:
+
+For spell-derived or calculated overlays, keep the persisted marker pip as the hit target and render the derived area with `pointer-events: none`. Keep modern game value tables in a domain module with tests; reference Wurm Unlimited code only as implementation context when current Wurmpedia values differ.
+
+### Locate Soul Input Should Match The Event Log
+
+Context:
+
+Manually selecting target, direction, and distance for Locate Soul made users translate a game message into form fields.
+
+What happened:
+
+The game already emits one structured result line such as `Corpse of Itsumo is very far away behind you to the right`, and users naturally copy that line from the event window.
+
+Root cause:
+
+The first UI exposed the database fields directly instead of matching the workflow players actually use.
+
+Decision:
+
+The Locate Soul dialog keeps caster facing as a selector and replaces target, direction, distance, and notes inputs with one pasted event-output textarea. A shared domain parser extracts target name, Wurmpedia distance band, and relative direction from the log text. Existing stored markers still keep the same normalized fields.
+
+Prevention:
+
+For game-log-derived marker types, design the form around pasteable event output first, then parse into normalized server fields. Keep phrase parsing in the domain module with tests for real copied lines and no-result lines.
+
+### Locate Soul Can Produce No In-Map Tiles
+
+Context:
+
+A Locate Soul marker can store and render correctly while its derived distance sector has no overlap with the current map.
+
+What happened:
+
+The pip appeared, but the shadow appeared missing. The saved user setting had `Locate Souls` opacity at `0`, and the latest `2000+` result was placed at a coordinate whose farthest Celebration tile was less than 2000 tiles away.
+
+Root cause:
+
+The renderer created an SVG path for the mathematical sector even when that sector was completely outside the map viewport, and there was no visible state distinguishing "hidden by opacity" from "no possible tiles on this map".
+
+Decision:
+
+Detect whether the locate-soul annular sector intersects the current map bounds. Render the normal filled shadow when it does. When it does not, render a dashed non-interactive direction indicator to the map edge using the same Locate Souls color and opacity settings.
+
+Prevention:
+
+For map overlays derived from ranges or bearings, test both a visible in-map case and an off-map/no-intersection case. Also check saved opacity when a layer appears absent, because `0%` opacity is a valid user setting.
+
 ### Context Coordinates Are Copyable Links
 
 Context:
@@ -477,6 +587,28 @@ The existing `Map` row is the durable server/data scope because towers, deeds, n
 Prevention:
 
 Do not add a second `Map` row when adding a new visual layer for the same server. Doing so splits marker data and user settings. Add a `MapLayer` instead, and keep marker write/read APIs pointed at the server-scope `map.id`.
+
+### External Event Feeds Stay Server-Owned
+
+Context:
+
+Celebration live event/status data is useful in the map UI, but WurmMaps exposes it through an unofficial PHP endpoint rather than a documented API contract.
+
+What happened:
+
+The visible WurmMaps client calls `stat-delegate.php?map=celebration` and receives mixed event sections for deeds, missions, rifts, rites, holy sites, unique slayings, and status data.
+
+Root cause:
+
+The endpoint is public JSON but still an external implementation detail. Letting every browser call it directly would spread the dependency through the client and make failures harder to control.
+
+Decision:
+
+Fetch WurmMaps event/status data server-side, normalize it into a small read-only event feed, decode simple HTML entities, sort newest-first, cap the payload to 30 entries, and render it below the bottom-left legend and route planner controls. Do not import WurmMaps marker or path data as part of the event feed.
+
+Prevention:
+
+Keep external feed parsing in a dedicated module with tests. Route and page code should consume normalized data only, and feed failures must not block normal map loading.
 
 ### Self-Service Password Changes
 

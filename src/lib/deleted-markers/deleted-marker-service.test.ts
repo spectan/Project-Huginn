@@ -28,6 +28,7 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
   return {
     findDeletedCamp: async () => null,
     findDeletedDeed: async () => null,
+    findDeletedLocateSoul: async () => null,
     findDeletedMinedoor: async () => null,
     findDeletedNote: async () => null,
     findDeletedPath: async () => null,
@@ -36,6 +37,7 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
     listExpiredDeletedMarkers: async () => ({
       camps: [],
       deeds: [],
+      locateSouls: [],
       minedoors: [],
       notes: [],
       paths: [],
@@ -45,6 +47,7 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
     listRestorableDeletedMarkers: async () => ({
       camps: [],
       deeds: [],
+      locateSouls: [],
       minedoors: [],
       notes: [],
       paths: [],
@@ -67,6 +70,7 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
     now: () => now,
     permanentlyDeleteCamps: async () => 0,
     permanentlyDeleteDeeds: async () => 0,
+    permanentlyDeleteLocateSouls: async () => 0,
     permanentlyDeleteMinedoors: async () => 0,
     permanentlyDeleteNotes: async () => 0,
     permanentlyDeletePaths: async () => 0,
@@ -77,6 +81,7 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
     },
     restoreCamp: async () => null,
     restoreDeed: async () => null,
+    restoreLocateSoul: async () => null,
     restoreMinedoor: async () => null,
     restoreNote: async () => null,
     restorePath: async () => null,
@@ -214,6 +219,7 @@ describe("deleted marker service", () => {
         return {
           camps: [],
           deeds: [],
+          locateSouls: [],
           minedoors: [],
           notes: [
             {
@@ -255,6 +261,7 @@ describe("deleted marker service", () => {
         canal: 0,
         deed: 0,
         highway: 0,
+        locateSoul: 0,
         minedoor: 0,
         note: 1,
         rift: 0,

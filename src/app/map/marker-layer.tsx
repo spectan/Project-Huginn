@@ -6,6 +6,10 @@ import {
   TOWER_PLACEMENT_DISTANCE_TILES,
   TOWER_PROTECTION_DISTANCE_TILES
 } from "@/lib/domain/constants";
+import {
+  getLocateSoulOverlayGeometry,
+  locateSoulOverlayIntersectsMap
+} from "@/lib/domain/locate-soul";
 import { formatTowerCreator } from "@/lib/domain/markers";
 import type {
   MarkerColors,
@@ -16,6 +20,7 @@ import type {
 
 type MarkerLayerProps = {
   highlightedMarkerIds: Set<string>;
+  mapSize: { heightPx: number; widthPx: number };
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markers: WorkspaceMarker[];
@@ -35,6 +40,7 @@ type MarkerLayerView = {
 
 export function MarkerLayer({
   highlightedMarkerIds,
+  mapSize,
   markerColors,
   markerOpacities,
   markers,
@@ -47,7 +53,7 @@ export function MarkerLayer({
 }: MarkerLayerProps) {
   return (
     <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
-      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, roadwayEditMode, view, visibility))}
+      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, mapSize, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, roadwayEditMode, view, visibility))}
     </div>
   );
 }
@@ -55,6 +61,7 @@ export function MarkerLayer({
 function renderMarker(
   marker: WorkspaceMarker,
   highlightedMarkerIds: Set<string>,
+  mapSize: { heightPx: number; widthPx: number },
   markerColors: MarkerColors,
   markerOpacities: MarkerOpacities,
   onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
@@ -126,7 +133,7 @@ function renderMarker(
           onMouseEnter={(event) => onHoverMove(marker, event)}
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
-          style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.towers, markerOpacities.towers, view)}
+          style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.towers, view)}
           type="button"
         />
       </div>
@@ -194,7 +201,7 @@ function renderMarker(
             <span
               className={isHighlighted ? "map-deed-center map-deed-center--visual map-search-match" : "map-deed-center map-deed-center--visual"}
               data-testid={`deed-center-${marker.id}`}
-              style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.deeds, markerOpacities.deeds, view)}
+              style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.deeds, view)}
             />
           </>
         ) : (
@@ -206,7 +213,7 @@ function renderMarker(
             onMouseEnter={(event) => onHoverMove(marker, event)}
             onMouseLeave={onHoverEnd}
             onMouseMove={(event) => onHoverMove(marker, event)}
-            style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.deeds, markerOpacities.deeds, view)}
+            style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.deeds, view)}
             type="button"
           />
         )}
@@ -281,6 +288,74 @@ function renderMarker(
     );
   }
 
+  if (marker.type === "locateSoul") {
+    if (!visibility.locateSouls) {
+      return null;
+    }
+
+    const geometry = getLocateSoulOverlayGeometry({
+      casterFacing: marker.casterFacing,
+      direction: marker.direction,
+      distanceBand: marker.distanceBand,
+      mapHeightPx: mapSize.heightPx,
+      mapWidthPx: mapSize.widthPx
+    });
+    const locateSoulOverlayIntersects = locateSoulOverlayIntersectsMap({
+      casterFacing: marker.casterFacing,
+      direction: marker.direction,
+      distanceBand: marker.distanceBand,
+      mapHeightPx: mapSize.heightPx,
+      mapWidthPx: mapSize.widthPx,
+      x: marker.x,
+      y: marker.y
+    });
+    const offMapLine = getLocateSoulOffMapLine(marker.x, marker.y, geometry.centerAngleDegrees, mapSize, view);
+
+    return (
+      <div className="map-marker-group" key={marker.id}>
+        {visibility.overlays && locateSoulOverlayIntersects ? (
+          <svg aria-hidden="true" className="map-locate-soul-overlay-svg">
+            <path
+              className="map-locate-soul-overlay"
+              data-testid={`locate-soul-overlay-${marker.id}`}
+              d={getLocateSoulOverlayPath(marker.x, marker.y, geometry, view)}
+              fill={markerColors.locateSouls}
+              fillRule="evenodd"
+              opacity={percentageToOpacity(markerOpacities.locateSouls)}
+            />
+          </svg>
+        ) : null}
+        {visibility.overlays && !locateSoulOverlayIntersects && offMapLine !== null ? (
+          <svg aria-hidden="true" className="map-locate-soul-overlay-svg">
+            <line
+              className="map-locate-soul-off-map"
+              data-testid={`locate-soul-off-map-${marker.id}`}
+              opacity={percentageToOpacity(markerOpacities.locateSouls)}
+              stroke={markerColors.locateSouls}
+              strokeDasharray="8 6"
+              strokeWidth={Math.max(2, 3 * view.zoom)}
+              x1={formatSvgNumber(offMapLine.x1)}
+              x2={formatSvgNumber(offMapLine.x2)}
+              y1={formatSvgNumber(offMapLine.y1)}
+              y2={formatSvgNumber(offMapLine.y2)}
+            />
+          </svg>
+        ) : null}
+        <button
+          aria-label={`Locate Soul ${marker.targetName} at ${marker.x}, ${marker.y}`}
+          className={isHighlighted ? "map-marker map-marker--locate-soul map-search-match" : "map-marker map-marker--locate-soul"}
+          data-testid={`locate-soul-marker-${marker.id}`}
+          onContextMenu={(event) => onContextMenu(marker, event)}
+          onMouseEnter={(event) => onHoverMove(marker, event)}
+          onMouseLeave={onHoverEnd}
+          onMouseMove={(event) => onHoverMove(marker, event)}
+          style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.locateSouls, view)}
+          type="button"
+        />
+      </div>
+    );
+  }
+
   if (!visibility.notes) {
     return null;
   }
@@ -295,7 +370,7 @@ function renderMarker(
       onMouseEnter={(event) => onHoverMove(marker, event)}
       onMouseLeave={onHoverEnd}
       onMouseMove={(event) => onHoverMove(marker, event)}
-      style={getColoredCenterTileStyle(marker.x, marker.y, markerColors.notes, markerOpacities.notes, view)}
+      style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.notes, view)}
       type="button"
     />
   );
@@ -421,6 +496,119 @@ function getPathSvgPoints(points: Array<{ x: number; y: number }>, view: MarkerL
   )).join(" ");
 }
 
+function getLocateSoulOverlayPath(
+  x: number,
+  y: number,
+  geometry: ReturnType<typeof getLocateSoulOverlayGeometry>,
+  view: MarkerLayerView
+): string {
+  const center = {
+    x: view.x + (x + 0.5) * view.zoom,
+    y: view.y + (y + 0.5) * view.zoom
+  };
+  const startAngle = geometry.centerAngleDegrees - geometry.spanDegrees / 2;
+  const endAngle = geometry.centerAngleDegrees + geometry.spanDegrees / 2;
+  const outerRadius = Math.max(0.5, geometry.maxDistanceTiles) * view.zoom;
+  const innerRadius = geometry.minDistanceTiles * view.zoom;
+  const outerStart = getPolarPoint(center, outerRadius, startAngle);
+  const outerEnd = getPolarPoint(center, outerRadius, endAngle);
+  const largeArcFlag = geometry.spanDegrees > 180 ? 1 : 0;
+
+  if (innerRadius <= 0) {
+    return [
+      `M ${formatSvgNumber(center.x)},${formatSvgNumber(center.y)}`,
+      `L ${formatSvgNumber(outerStart.x)},${formatSvgNumber(outerStart.y)}`,
+      `A ${formatSvgNumber(outerRadius)},${formatSvgNumber(outerRadius)} 0 ${largeArcFlag} 1 ${formatSvgNumber(outerEnd.x)},${formatSvgNumber(outerEnd.y)}`,
+      "Z"
+    ].join(" ");
+  }
+
+  const innerStart = getPolarPoint(center, innerRadius, startAngle);
+  const innerEnd = getPolarPoint(center, innerRadius, endAngle);
+
+  return [
+    `M ${formatSvgNumber(outerStart.x)},${formatSvgNumber(outerStart.y)}`,
+    `A ${formatSvgNumber(outerRadius)},${formatSvgNumber(outerRadius)} 0 ${largeArcFlag} 1 ${formatSvgNumber(outerEnd.x)},${formatSvgNumber(outerEnd.y)}`,
+    `L ${formatSvgNumber(innerEnd.x)},${formatSvgNumber(innerEnd.y)}`,
+    `A ${formatSvgNumber(innerRadius)},${formatSvgNumber(innerRadius)} 0 ${largeArcFlag} 0 ${formatSvgNumber(innerStart.x)},${formatSvgNumber(innerStart.y)}`,
+    "Z"
+  ].join(" ");
+}
+
+function getPolarPoint(
+  center: { x: number; y: number },
+  radius: number,
+  angleDegrees: number
+): { x: number; y: number } {
+  const radians = angleDegrees * (Math.PI / 180);
+
+  return {
+    x: center.x + Math.sin(radians) * radius,
+    y: center.y - Math.cos(radians) * radius
+  };
+}
+
+function getLocateSoulOffMapLine(
+  x: number,
+  y: number,
+  angleDegrees: number,
+  mapSize: { heightPx: number; widthPx: number },
+  view: MarkerLayerView
+): { x1: number; x2: number; y1: number; y2: number } | null {
+  const center = { x: x + 0.5, y: y + 0.5 };
+  const exitDistance = getRayMapExitDistance(center, angleDegrees, mapSize);
+
+  if (exitDistance === null) {
+    return null;
+  }
+
+  const exitPoint = getPolarPoint(center, exitDistance, angleDegrees);
+
+  return {
+    x1: view.x + center.x * view.zoom,
+    x2: view.x + exitPoint.x * view.zoom,
+    y1: view.y + center.y * view.zoom,
+    y2: view.y + exitPoint.y * view.zoom
+  };
+}
+
+function getRayMapExitDistance(
+  center: { x: number; y: number },
+  angleDegrees: number,
+  mapSize: { heightPx: number; widthPx: number }
+): number | null {
+  const radians = angleDegrees * (Math.PI / 180);
+  const direction = {
+    x: Math.sin(radians),
+    y: -Math.cos(radians)
+  };
+  const candidates = [
+    getPositiveBoundaryDistance(center.x, direction.x, 0),
+    getPositiveBoundaryDistance(center.x, direction.x, mapSize.widthPx),
+    getPositiveBoundaryDistance(center.y, direction.y, 0),
+    getPositiveBoundaryDistance(center.y, direction.y, mapSize.heightPx)
+  ].filter((value): value is number => value !== null);
+
+  const validCandidates = candidates.filter((distance) => {
+    const point = getPolarPoint(center, distance, angleDegrees);
+    return point.x >= 0 &&
+      point.x <= mapSize.widthPx &&
+      point.y >= 0 &&
+      point.y <= mapSize.heightPx;
+  });
+
+  return validCandidates.length === 0 ? null : Math.min(...validCandidates);
+}
+
+function getPositiveBoundaryDistance(origin: number, direction: number, boundary: number): number | null {
+  if (Math.abs(direction) < 0.000001) {
+    return null;
+  }
+
+  const distance = (boundary - origin) / direction;
+  return distance <= 0 ? null : distance;
+}
+
 function getPathStrokeWidth(width: number, view: MarkerLayerView): number {
   return Math.max(1, width * view.zoom);
 }
@@ -429,17 +617,16 @@ function formatSvgNumber(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
-function getColoredCenterTileStyle(
+function getOpaqueCenterTileStyle(
   x: number,
   y: number,
   color: string,
-  opacity: number,
   view: MarkerLayerView
 ): CSSProperties {
   return {
     ...getCenterTileStyle(x, y, view),
     backgroundColor: color,
-    opacity: percentageToOpacity(opacity)
+    opacity: 1
   };
 }
 

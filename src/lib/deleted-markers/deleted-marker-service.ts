@@ -20,7 +20,7 @@ type DeletedMarkerAuditAction =
   | "MARKER_CLEANED_UP"
   | "MARKER_RESTORED";
 
-type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "PATH" | "SYSTEM";
+type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "SYSTEM";
 type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway">;
 
 type DeletedMarkerAuditInput = {
@@ -87,6 +87,10 @@ type DeletedMinedoorRecord = DeletedMarkerRecordBase & {
   strength: string;
 };
 
+type DeletedLocateSoulRecord = DeletedMarkerRecordBase & {
+  targetName: string;
+};
+
 type DeletedPathRecord = DeletedMarkerRecordBase & {
   name: string;
   pathType: PathMarkerType;
@@ -107,6 +111,7 @@ export type DeletedMarkerSummary = {
 export type DeletedMarkerDependencies = {
   findDeletedCamp(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedDeed(id: string): Promise<DeletedMarkerReference | null>;
+  findDeletedLocateSoul(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedMinedoor(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedNote(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedPath(id: string): Promise<DeletedMarkerReference | null>;
@@ -118,6 +123,7 @@ export type DeletedMarkerDependencies = {
   }): Promise<{
     camps: ExpiredDeletedMarkerReference[];
     deeds: ExpiredDeletedMarkerReference[];
+    locateSouls: ExpiredDeletedMarkerReference[];
     minedoors: ExpiredDeletedMarkerReference[];
     notes: ExpiredDeletedMarkerReference[];
     paths: ExpiredDeletedPathReference[];
@@ -130,6 +136,7 @@ export type DeletedMarkerDependencies = {
   }): Promise<{
     camps: DeletedCampRecord[];
     deeds: DeletedDeedRecord[];
+    locateSouls: DeletedLocateSoulRecord[];
     minedoors: DeletedMinedoorRecord[];
     notes: DeletedNoteRecord[];
     paths: DeletedPathRecord[];
@@ -139,6 +146,7 @@ export type DeletedMarkerDependencies = {
   now(): Date;
   permanentlyDeleteCamps(ids: string[]): Promise<number>;
   permanentlyDeleteDeeds(ids: string[]): Promise<number>;
+  permanentlyDeleteLocateSouls(ids: string[]): Promise<number>;
   permanentlyDeleteMinedoors(ids: string[]): Promise<number>;
   permanentlyDeleteNotes(ids: string[]): Promise<number>;
   permanentlyDeletePaths(ids: string[]): Promise<number>;
@@ -147,6 +155,7 @@ export type DeletedMarkerDependencies = {
   recordAudit(input: DeletedMarkerAuditInput): Promise<void>;
   restoreCamp(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreDeed(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
+  restoreLocateSoul(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreMinedoor(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreNote(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restorePath(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
@@ -179,6 +188,7 @@ export async function listRestorableDeletedMarkers(
     ...deletedMarkers.rifts.map(serializeDeletedRift),
     ...deletedMarkers.camps.map(serializeDeletedCamp),
     ...deletedMarkers.minedoors.map(serializeDeletedMinedoor),
+    ...deletedMarkers.locateSouls.map(serializeDeletedLocateSoul),
     ...deletedMarkers.paths.map(serializeDeletedPath)
   ]);
 }
@@ -288,6 +298,13 @@ export async function cleanupExpiredDeletedMarkers(
     dependencies.permanentlyDeleteMinedoors,
     dependencies
   );
+  const locateSoulCount = await deleteAndAuditExpiredMarkers(
+    "locateSoul",
+    expired.locateSouls,
+    now,
+    dependencies.permanentlyDeleteLocateSouls,
+    dependencies
+  );
   const pathCounts = await deleteAndAuditExpiredPathMarkers(
     expired.paths,
     now,
@@ -301,6 +318,7 @@ export async function cleanupExpiredDeletedMarkers(
       canal: pathCounts.canal,
       deed: deedCount,
       highway: pathCounts.highway,
+      locateSoul: locateSoulCount,
       minedoor: minedoorCount,
       note: noteCount,
       rift: riftCount,
@@ -339,6 +357,10 @@ function serializeDeletedCamp(marker: DeletedCampRecord): DeletedMarkerSummary {
 
 function serializeDeletedMinedoor(marker: DeletedMinedoorRecord): DeletedMarkerSummary {
   return serializeDeletedMarker(marker, "minedoor", "Minedoor");
+}
+
+function serializeDeletedLocateSoul(marker: DeletedLocateSoulRecord): DeletedMarkerSummary {
+  return serializeDeletedMarker(marker, "locateSoul", `Locate Soul ${marker.targetName}`);
 }
 
 function serializeDeletedPath(marker: DeletedPathRecord): DeletedMarkerSummary {
@@ -388,6 +410,10 @@ async function findDeletedMarker(
     return dependencies.findDeletedMinedoor(markerId);
   }
 
+  if (markerType === "locateSoul") {
+    return dependencies.findDeletedLocateSoul(markerId);
+  }
+
   if (isPathMarkerType(markerType)) {
     return dependencies.findDeletedPath(markerId);
   }
@@ -419,6 +445,10 @@ async function restoreMarker(
 
   if (markerType === "minedoor") {
     return dependencies.restoreMinedoor(markerId, input);
+  }
+
+  if (markerType === "locateSoul") {
+    return dependencies.restoreLocateSoul(markerId, input);
   }
 
   if (isPathMarkerType(markerType)) {
@@ -531,6 +561,10 @@ function getAuditTargetType(markerType: MarkerType): DeletedMarkerAuditTarget {
 
   if (markerType === "minedoor") {
     return "MINEDOOR";
+  }
+
+  if (markerType === "locateSoul") {
+    return "LOCATE_SOUL";
   }
 
   if (isPathMarkerType(markerType)) {

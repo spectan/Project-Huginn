@@ -121,6 +121,10 @@ function formatMarkerType(type: DeletedMarkerSummary["type"]): string {
     return "Minedoor";
   }
 
+  if (type === "locateSoul") {
+    return "Locate Soul";
+  }
+
   if (type === "bridge") {
     return "Bridge";
   }

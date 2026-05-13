@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   createMarker,
   deleteMarker,
+  disbandDeedMarker,
   type MarkerServiceDependencies,
   listMarkers,
   updateMarker
@@ -69,6 +70,11 @@ function createDependencies(): MarkerServiceDependencies {
     x: number;
     y: number;
   }>();
+  const noteCategories = new Map<string, {
+    id: string;
+    mapId: string;
+    name: string;
+  }>();
   const rifts = new Map<string, {
     arrivalDate: Date | null;
     estimatedRiftTime: Date | null;
@@ -91,6 +97,17 @@ function createDependencies(): MarkerServiceDependencies {
     mapId: string;
     notes: string;
     strength: string;
+    x: number;
+    y: number;
+  }>();
+  const locateSouls = new Map<string, {
+    casterFacing: "north" | "northeast" | "east" | "southeast" | "south" | "southwest" | "west" | "northwest";
+    direction: "ahead" | "aheadRight" | "right" | "behindRight" | "behind" | "behindLeft" | "left" | "aheadLeft";
+    distanceBand: "0" | "1-3" | "4-5" | "6-9" | "10-19" | "20-49" | "50-199" | "200-499" | "500-999" | "1000+" | "2000+";
+    id: string;
+    mapId: string;
+    notes: string;
+    targetName: string;
     x: number;
     y: number;
   }>();
@@ -121,13 +138,21 @@ function createDependencies(): MarkerServiceDependencies {
   }>();
   let towerCount = 0;
   let noteCount = 0;
+  let noteCategoryCount = 0;
   let deedCount = 0;
   let riftCount = 0;
   let campCount = 0;
   let minedoorCount = 0;
+  let locateSoulCount = 0;
   let pathCount = 0;
 
   return {
+    createLocateSoul: async (data) => {
+      locateSoulCount += 1;
+      const locateSoul = { ...data, id: `locate-soul-${locateSoulCount}` };
+      locateSouls.set(locateSoul.id, locateSoul);
+      return locateSoul;
+    },
     createPath: async (data) => {
       pathCount += 1;
       const path = { ...data, id: `path-${pathCount}` };
@@ -169,6 +194,38 @@ function createDependencies(): MarkerServiceDependencies {
       const tower = { ...data, id: `tower-${towerCount}` };
       towers.set(tower.id, tower);
       return tower;
+    },
+    disbandDeed: async (input) => {
+      const deed = deeds.get(input.deedId);
+
+      if (deed === undefined) {
+        return null;
+      }
+
+      const existingCategory = Array.from(noteCategories.values()).find((category) => (
+        category.mapId === deed.mapId && category.name === input.categoryName
+      ));
+      const category = existingCategory ?? {
+        id: `category-${noteCategoryCount + 1}`,
+        mapId: deed.mapId,
+        name: input.categoryName
+      };
+
+      if (existingCategory === undefined) {
+        noteCategoryCount += 1;
+        noteCategories.set(category.id, category);
+      }
+
+      noteCount += 1;
+      const note = { ...input.note, id: `note-${noteCount}` };
+      notes.set(note.id, note);
+      deeds.delete(input.deedId);
+
+      return {
+        category,
+        deletedDeed: deed,
+        note
+      };
     },
     findDeed: async (id) => {
       const deed = deeds.get(id);
@@ -215,6 +272,17 @@ function createDependencies(): MarkerServiceDependencies {
             }
           };
     },
+    findLocateSoul: async (id) => {
+      const locateSoul = locateSouls.get(id);
+      return locateSoul === undefined
+        ? null
+        : {
+            ...locateSoul,
+            map: {
+              ...createMapRecord(locateSoul.mapId)
+            }
+          };
+    },
     findRift: async (id) => {
       const rift = rifts.get(id);
       return rift === undefined
@@ -251,6 +319,7 @@ function createDependencies(): MarkerServiceDependencies {
     listActiveMarkers: async (mapId) => ({
       camps: Array.from(camps.values()).filter((camp) => camp.mapId === mapId),
       deeds: Array.from(deeds.values()).filter((deed) => deed.mapId === mapId),
+      locateSouls: Array.from(locateSouls.values()).filter((locateSoul) => locateSoul.mapId === mapId),
       minedoors: Array.from(minedoors.values()).filter((minedoor) => minedoor.mapId === mapId),
       notes: Array.from(notes.values()).filter((note) => note.mapId === mapId),
       paths: Array.from(paths.values()).filter((path) => path.mapId === mapId),
@@ -278,6 +347,11 @@ function createDependencies(): MarkerServiceDependencies {
       const minedoor = minedoors.get(id);
       minedoors.delete(id);
       return minedoor ?? null;
+    },
+    softDeleteLocateSoul: async (id) => {
+      const locateSoul = locateSouls.get(id);
+      locateSouls.delete(id);
+      return locateSoul ?? null;
     },
     softDeletePath: async (id) => {
       const path = paths.get(id);
@@ -325,6 +399,17 @@ function createDependencies(): MarkerServiceDependencies {
 
       const updated = { ...existing, ...data };
       minedoors.set(id, updated);
+      return updated;
+    },
+    updateLocateSoul: async (id, data) => {
+      const existing = locateSouls.get(id);
+
+      if (existing === undefined) {
+        return null;
+      }
+
+      const updated = { ...existing, ...data };
+      locateSouls.set(id, updated);
       return updated;
     },
     updateNote: async (id, data) => {
@@ -549,6 +634,38 @@ describe("marker service", () => {
     });
   });
 
+  it("creates a locate soul marker with a 3 by 3 pip and overlay inputs", async () => {
+    const result = await createMarker({
+      actor: writer,
+      input: {
+        casterFacing: "north",
+        direction: "aheadLeft",
+        distanceBand: "50-199",
+        notes: "Corpse result",
+        targetName: "Funkiey",
+        type: "locateSoul",
+        x: 100,
+        y: 120
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        casterFacing: "north",
+        direction: "aheadLeft",
+        distanceBand: "50-199",
+        id: "locate-soul-1",
+        notes: "Corpse result",
+        targetName: "Funkiey",
+        type: "locateSoul",
+        x: 100,
+        y: 120
+      }
+    });
+  });
+
   it("creates an infrastructure path for approved writers", async () => {
     const result = await createMarker({
       actor: writer,
@@ -724,5 +841,70 @@ describe("marker service", () => {
         markerType: "tower"
       }
     });
+  });
+
+  it("disbands a deed into an abandoned deed note with deed details", async () => {
+    const created = await createMarker({
+      actor: writer,
+      input: {
+        east: 6,
+        foundingDate: "2026-05-09",
+        founder: "Mayor Mako",
+        name: "Oak Harbour",
+        north: 4,
+        perimeter: 8,
+        south: 7,
+        type: "deed",
+        west: 5,
+        x: 500,
+        y: 600
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(created.ok).toBe(true);
+
+    if (!created.ok || created.value.type !== "deed") {
+      return;
+    }
+
+    const result = await disbandDeedMarker({
+      actor: writer,
+      markerId: created.value.id
+    }, deps);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.deletedMarkerId).toBe(created.value.id);
+    expect(result.value.category).toEqual({
+      id: "category-1",
+      name: "Abandoned Deed"
+    });
+    expect(result.value.marker).toMatchObject({
+      category: "Abandoned Deed",
+      title: "Oak Harbour",
+      type: "note",
+      x: 500,
+      y: 600
+    });
+    expect(result.value.marker.text).toContain("Former deed: Oak Harbour");
+    expect(result.value.marker.text).toContain("Mayor: Mayor Mako");
+    expect(result.value.marker.text).toContain("Founding date: 2026-05-09");
+    expect(result.value.marker.text).toContain("Dimensions: N4 W5 E6 S7");
+    expect(result.value.marker.text).toContain("Perimeter: 8 tiles");
+
+    const listed = await listMarkers({ actor: writer, mapId: "map-1" }, deps);
+    expect(listed.ok).toBe(true);
+
+    if (!listed.ok) {
+      return;
+    }
+
+    expect(listed.value.markers.some((marker) => marker.id === created.value.id)).toBe(false);
+    expect(listed.value.markers).toContainEqual(result.value.marker);
   });
 });

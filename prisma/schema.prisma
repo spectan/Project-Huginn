@@ -51,6 +51,7 @@ enum AuditTargetType {
   RIFT
   CAMP
   MINEDOOR
+  LOCATE_SOUL
   PATH
   SESSION
   SYSTEM
@@ -87,6 +88,9 @@ model User {
   createdMinedoors Minedoor[]        @relation("MinedoorCreatedBy")
   updatedMinedoors Minedoor[]        @relation("MinedoorUpdatedBy")
   deletedMinedoors Minedoor[]        @relation("MinedoorDeletedBy")
+  createdLocateSouls LocateSoul[]    @relation("LocateSoulCreatedBy")
+  updatedLocateSouls LocateSoul[]    @relation("LocateSoulUpdatedBy")
+  deletedLocateSouls LocateSoul[]    @relation("LocateSoulDeletedBy")
   createdPaths     PathMarker[]      @relation("PathCreatedBy")
   updatedPaths     PathMarker[]      @relation("PathUpdatedBy")
   deletedPaths     PathMarker[]      @relation("PathDeletedBy")
@@ -129,6 +133,7 @@ model Map {
   rifts          Rift[]
   camps          Camp[]
   minedoors      Minedoor[]
+  locateSouls    LocateSoul[]
   paths          PathMarker[]
   noteCategories NoteCategory[]
   auditEvents    AuditEvent[]
@@ -308,6 +313,33 @@ model Minedoor {
   @@index([mapId, deletedAt])
   @@index([deleteExpiresAt])
   @@map("minedoors")
+}
+
+model LocateSoul {
+  id              String    @id @default(cuid())
+  mapId           String
+  map             Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  x               Int
+  y               Int
+  targetName      String
+  casterFacing    String
+  direction       String
+  distanceBand    String
+  notes           String    @default("")
+  createdByUserId String?
+  createdBy       User?     @relation("LocateSoulCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUserId String?
+  updatedBy       User?     @relation("LocateSoulUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  deletedAt       DateTime?
+  deletedByUserId String?
+  deletedBy       User?     @relation("LocateSoulDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
+  deleteExpiresAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([mapId, deletedAt])
+  @@index([deleteExpiresAt])
+  @@map("locate_souls")
 }
 
 model PathMarker {

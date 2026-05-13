@@ -41,6 +41,22 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
 
       return deed === null ? null : requireDeletedReference(deed);
     },
+    findDeletedLocateSoul: async (id) => {
+      const locateSoul = await prisma.locateSoul.findFirst({
+        select: {
+          deletedAt: true,
+          deleteExpiresAt: true,
+          id: true,
+          mapId: true
+        },
+        where: {
+          deletedAt: { not: null },
+          id
+        }
+      });
+
+      return locateSoul === null ? null : requireDeletedReference(locateSoul);
+    },
     findDeletedMinedoor: async (id) => {
       const minedoor = await prisma.minedoor.findFirst({
         select: {
@@ -122,7 +138,7 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
       return tower === null ? null : requireDeletedReference(tower);
     },
     listExpiredDeletedMarkers: async ({ limit, now }) => {
-      const [towers, deeds, notes, rifts, camps, minedoors, paths] = await Promise.all([
+      const [towers, deeds, notes, rifts, camps, minedoors, locateSouls, paths] = await Promise.all([
         prisma.tower.findMany({
           orderBy: { deleteExpiresAt: "asc" },
           select: {
@@ -189,6 +205,19 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
           }
         }),
         prisma.minedoor.findMany({
+          orderBy: { deleteExpiresAt: "asc" },
+          select: {
+            deleteExpiresAt: true,
+            id: true,
+            mapId: true
+          },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { lte: now }
+          }
+        }),
+        prisma.locateSoul.findMany({
           orderBy: { deleteExpiresAt: "asc" },
           select: {
             deleteExpiresAt: true,
@@ -220,6 +249,7 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
       return {
         camps: camps.map(requireExpiredReference),
         deeds: deeds.map(requireExpiredReference),
+        locateSouls: locateSouls.map(requireExpiredReference),
         minedoors: minedoors.map(requireExpiredReference),
         notes: notes.map(requireExpiredReference),
         paths: paths.map((path) => ({
@@ -231,7 +261,7 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
       };
     },
     listRestorableDeletedMarkers: async ({ limit, now }) => {
-      const [towers, deeds, notes, rifts, camps, minedoors, paths] = await Promise.all([
+      const [towers, deeds, notes, rifts, camps, minedoors, locateSouls, paths] = await Promise.all([
         prisma.tower.findMany({
           include: deletedMarkerIncludes(),
           orderBy: { deletedAt: "desc" },
@@ -286,6 +316,15 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
             deleteExpiresAt: { gt: now }
           }
         }),
+        prisma.locateSoul.findMany({
+          include: deletedMarkerIncludes(),
+          orderBy: { deletedAt: "desc" },
+          take: limit,
+          where: {
+            deletedAt: { not: null },
+            deleteExpiresAt: { gt: now }
+          }
+        }),
         prisma.pathMarker.findMany({
           include: deletedMarkerIncludes(),
           orderBy: { deletedAt: "desc" },
@@ -307,6 +346,11 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
           ...deed,
           deletedAt: requireDate(deed.deletedAt),
           deleteExpiresAt: requireDate(deed.deleteExpiresAt)
+        })),
+        locateSouls: locateSouls.map((locateSoul) => ({
+          ...locateSoul,
+          deletedAt: requireDate(locateSoul.deletedAt),
+          deleteExpiresAt: requireDate(locateSoul.deleteExpiresAt)
         })),
         minedoors: minedoors.map((minedoor) => ({
           ...minedoor,
@@ -348,6 +392,15 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
     },
     permanentlyDeleteDeeds: async (ids) => {
       const result = await prisma.deed.deleteMany({
+        where: {
+          id: { in: ids }
+        }
+      });
+
+      return result.count;
+    },
+    permanentlyDeleteLocateSouls: async (ids) => {
+      const result = await prisma.locateSoul.deleteMany({
         where: {
           id: { in: ids }
         }
@@ -414,6 +467,7 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
     },
     restoreCamp: async (id, input) => restoreDeletedRecord("camp", id, input.updatedByUserId),
     restoreDeed: async (id, input) => restoreDeletedRecord("deed", id, input.updatedByUserId),
+    restoreLocateSoul: async (id, input) => restoreDeletedRecord("locateSoul", id, input.updatedByUserId),
     restoreMinedoor: async (id, input) => restoreDeletedRecord("minedoor", id, input.updatedByUserId),
     restoreNote: async (id, input) => restoreDeletedRecord("note", id, input.updatedByUserId),
     restorePath: async (id, input) => restoreDeletedRecord("path", id, input.updatedByUserId),
@@ -475,7 +529,7 @@ function requirePathType(value: string): "bridge" | "canal" | "highway" {
 }
 
 async function restoreDeletedRecord(
-  model: "camp" | "deed" | "minedoor" | "note" | "path" | "rift" | "tower",
+  model: "camp" | "deed" | "locateSoul" | "minedoor" | "note" | "path" | "rift" | "tower",
   id: string,
   updatedByUserId: string
 ): Promise<{ id: string; mapId: string } | null> {
@@ -546,6 +600,22 @@ async function restoreDeletedRecord(
 
     if (model === "minedoor") {
       return await prisma.minedoor.update({
+        data: {
+          deletedAt: null,
+          deletedByUserId: null,
+          deleteExpiresAt: null,
+          updatedByUserId
+        },
+        select: {
+          id: true,
+          mapId: true
+        },
+        where: { id }
+      });
+    }
+
+    if (model === "locateSoul") {
+      return await prisma.locateSoul.update({
         data: {
           deletedAt: null,
           deletedByUserId: null,
