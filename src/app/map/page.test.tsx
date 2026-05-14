@@ -102,7 +102,22 @@ describe("MapPage", () => {
     expect(screen.getByRole("searchbox", { name: "Search map" })).toBeTruthy();
   });
 
-  it("renders the Celebration event feed below the bottom-left map tools", () => {
+  it("renders an unobtrusive support link for hosting and development costs", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const supportLink = screen.getByRole("link", { name: "support me and hosting/development costs" });
+
+    expect(supportLink.getAttribute("href")).toBe("https://ko-fi.com/poindexter8085");
+    expect(supportLink.getAttribute("target")).toBe("_blank");
+    expect(supportLink.getAttribute("rel")).toBe("noreferrer");
+  });
+
+  it("keeps the Celebration event feed minimized until the events button is opened", () => {
     render(React.createElement(MapWorkspace, {
       initialEventFeed: {
         events: Array.from({ length: 35 }, (_, index) => ({
@@ -132,10 +147,18 @@ describe("MapPage", () => {
     expect(Array.from(controls.children).map((child) => child.className)).toEqual([
       "map-legend-control",
       "map-route-planner-control",
-      "map-event-feed-panel"
+      "map-event-feed-control"
     ]);
 
-    const feed = screen.getByRole("region", { name: "Celebration event feed" });
+    expect(screen.queryByRole("dialog", { name: "Celebration event feed" })).toBeNull();
+
+    const eventsButton = screen.getByRole("button", { name: "Celebration events" });
+    expect(eventsButton.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(eventsButton);
+
+    expect(eventsButton.getAttribute("aria-expanded")).toBe("true");
+    const feed = screen.getByRole("dialog", { name: "Celebration event feed" });
     expect(within(feed).getByText("Celebration Events")).toBeTruthy();
     expect(within(feed).getByText("Online")).toBeTruthy();
     expect(within(feed).getAllByRole("listitem")).toHaveLength(30);
@@ -683,6 +706,114 @@ describe("MapPage", () => {
     expect(screen.getByLabelText("Perimeter")).toHaveProperty("value", "5");
   });
 
+  it("opens a deed create form from shift-dragged map bounds", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 100,
+      clientY: 200,
+      pointerId: 91,
+      shiftKey: true
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 110,
+      clientY: 214,
+      pointerId: 91,
+      shiftKey: true
+    });
+
+    const draft = screen.getByTestId("quick-deed-draft");
+    expect(draft.style.left).toBe("100px");
+    expect(draft.style.top).toBe("200px");
+    expect(draft.style.width).toBe("11px");
+    expect(draft.style.height).toBe("15px");
+
+    fireEvent.pointerUp(window, {
+      clientX: 110,
+      clientY: 214,
+      pointerId: 91
+    });
+
+    const persistedDraft = screen.getByTestId("quick-deed-draft");
+    expect(persistedDraft.style.width).toBe("11px");
+    expect(persistedDraft.style.height).toBe("15px");
+    expect(screen.getByRole("dialog", { name: "Add deed" })).toBeTruthy();
+    expect(screen.getByLabelText("X")).toHaveProperty("value", "105");
+    expect(screen.getByLabelText("Y")).toHaveProperty("value", "207");
+    expect(screen.getByLabelText("North")).toHaveProperty("value", "7");
+    expect(screen.getByLabelText("West")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("East")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("South")).toHaveProperty("value", "7");
+    expect(screen.getByLabelText("Perimeter")).toHaveProperty("value", "5");
+    expect(window.location.href).toBe(`${window.location.origin}/map?x=105&y=207`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close marker dialog" }));
+
+    expect(screen.queryByTestId("quick-deed-draft")).toBeNull();
+  });
+
+  it("opens a quick deed create form when shift-dragging over marker overlays", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    await waitFor(() => expect(screen.getByTestId("map-stage").dataset.zoom).toBe("1"));
+
+    const deedOverlay = screen.getByTestId("deed-overlay-deed-1");
+    fireEvent.pointerDown(deedOverlay, {
+      button: 0,
+      clientX: 498,
+      clientY: 598,
+      pointerId: 92,
+      shiftKey: true
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 508,
+      clientY: 606,
+      pointerId: 92,
+      shiftKey: true
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 508,
+      clientY: 606,
+      pointerId: 92
+    });
+
+    expect(screen.getByRole("dialog", { name: "Add deed" })).toBeTruthy();
+    expect(screen.getByLabelText("X")).toHaveProperty("value", "503");
+    expect(screen.getByLabelText("Y")).toHaveProperty("value", "602");
+    expect(screen.getByLabelText("North")).toHaveProperty("value", "4");
+    expect(screen.getByLabelText("West")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("East")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("South")).toHaveProperty("value", "4");
+  });
+
   it("opens a tower create form with one creator field", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
@@ -1066,6 +1197,49 @@ describe("MapPage", () => {
     expect(screen.getByText("2026-05-10")).toBeTruthy();
   });
 
+  it("shows stacked hover pills for markers underneath an overlay", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        },
+        {
+          category: "General",
+          id: "note-1",
+          text: "Hidden under the deed overlay",
+          title: "Buried note",
+          type: "note",
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.mouseMove(screen.getByTestId("deed-overlay-deed-1"), {
+      clientX: 500,
+      clientY: 600
+    });
+
+    const details = screen.getByRole("tooltip", { name: "Map items at 500, 600" });
+    expect(details.className).toContain("map-hover-details");
+    expect(within(details).getByText("Deed: Oak Harbour")).toBeTruthy();
+    expect(within(details).getByText("General - Buried note")).toBeTruthy();
+    expect(within(details).getAllByTestId("hover-marker-pill")).toHaveLength(2);
+  });
+
   it("displays incomplete tower creator numbers as unknown", async () => {
     const savedTower = {
       damage: "1.25",
@@ -1116,6 +1290,83 @@ describe("MapPage", () => {
           damage: "1.25",
           makerName: "Mako",
           makerNumber: "",
+          ql: "88.50"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      }
+    ));
+  });
+
+  it("relocates an edited marker by dragging its center pip before saving", async () => {
+    const savedTower = {
+      damage: "1.25",
+      id: "tower-1",
+      makerName: "Mako",
+      makerNumber: "945",
+      ql: "88.50",
+      type: "tower",
+      x: 280,
+      y: 335
+    } as const;
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({ marker: savedTower }),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          ...savedTower,
+          x: 250,
+          y: 300
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
+      clientX: 250,
+      clientY: 300
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Tower Mako 945" }));
+
+    const editedTower = screen.getByTestId("tower-center-tower-1");
+    const startLeft = Number.parseFloat(editedTower.style.left);
+    const startTop = Number.parseFloat(editedTower.style.top);
+    fireEvent.pointerDown(editedTower, {
+      button: 0,
+      clientX: startLeft + 1,
+      clientY: startTop + 1,
+      pointerId: 51
+    });
+    fireEvent.pointerMove(window, {
+      clientX: startLeft + 31,
+      clientY: startTop + 36,
+      pointerId: 51
+    });
+    fireEvent.pointerUp(window, { pointerId: 51 });
+
+    await waitFor(() => expect(screen.getByLabelText("X")).toHaveProperty("value", "280"));
+    expect(screen.getByLabelText("Y")).toHaveProperty("value", "335");
+    expect(Number.parseFloat(screen.getByTestId("tower-center-tower-1").style.left)).toBe(startLeft + 30);
+    expect(Number.parseFloat(screen.getByTestId("tower-center-tower-1").style.top)).toBe(startTop + 35);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/markers/tower/tower-1",
+      {
+        body: JSON.stringify({
+          type: "tower",
+          x: 280,
+          y: 335,
+          damage: "1.25",
+          makerName: "Mako",
+          makerNumber: "945",
           ql: "88.50"
         }),
         headers: { "content-type": "application/json" },
@@ -1262,17 +1513,19 @@ describe("MapPage", () => {
       clientX: 910,
       clientY: 1010
     });
-    expect(screen.getByRole("tooltip", { name: "Camp: Goblin" })).toBeTruthy();
-    expect(screen.getByText("Needs scouts")).toBeTruthy();
+    const campDetails = screen.getByRole("tooltip", { name: "Map items at 910, 1010" });
+    expect(within(campDetails).getByText("Camp: Goblin")).toBeTruthy();
+    expect(within(campDetails).getByText("Rift")).toBeTruthy();
+    expect(within(campDetails).getByText("Needs scouts")).toBeTruthy();
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Minedoor at 920, 1020" }), {
       clientX: 920,
       clientY: 1020
     });
-    expect(screen.getByRole("tooltip", { name: "Minedoor" })).toBeTruthy();
-    expect(screen.getByText("Strength")).toBeTruthy();
-    expect(screen.getByText("73ql")).toBeTruthy();
-    expect(screen.getByText("Hidden entrance")).toBeTruthy();
+    const minedoorDetails = screen.getByRole("tooltip", { name: "Map items at 920, 1020" });
+    expect(within(minedoorDetails).getByText("Minedoor")).toBeTruthy();
+    expect(within(minedoorDetails).getByText("Minedoor | Strength 73ql")).toBeTruthy();
+    expect(within(minedoorDetails).getByText("Hidden entrance")).toBeTruthy();
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Locate Soul Funkiey at 930, 1030" }), {
       clientX: 930,
@@ -3055,6 +3308,56 @@ describe("MapPage", () => {
     expect(screen.getByRole("dialog", { name: "Edit Deed" })).toBeTruthy();
     expect(screen.getByLabelText("Name")).toHaveProperty("value", "Oak Harbour");
     expect(screen.getByLabelText("Founding date")).toHaveProperty("value", "2026-05-10");
+  });
+
+  it("lists overlay-covered marker pips from the marker context menu", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        },
+        {
+          category: "General",
+          id: "note-1",
+          text: "Hidden under the deed overlay",
+          title: "Buried note",
+          type: "note",
+          x: 503,
+          y: 604
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
+      clientX: 504,
+      clientY: 605
+    });
+
+    const menu = screen.getByRole("menu", { name: "Marker actions" });
+    expect(menu).toBeTruthy();
+    expect(screen.getByText("2 items at 504, 605")).toBeTruthy();
+    expect(screen.getByTestId("context-marker-row-note-1")).toBeTruthy();
+    expect(screen.getByText("Buried note")).toBeTruthy();
+    expect(screen.getByText("Note | General")).toBeTruthy();
+    expect(screen.getByTestId("context-marker-row-deed-1")).toBeTruthy();
+    expect(screen.getByText("Oak Harbour")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Note General - Buried note" }));
+
+    expect(screen.getByRole("dialog", { name: "Edit Note General - Buried note" })).toBeTruthy();
   });
 
   it("marks an edited deed as disbanded and replaces it with an abandoned deed note", async () => {

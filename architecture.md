@@ -77,13 +77,15 @@ The client owns:
 - Pan and zoom interactions.
 - Pointer-to-coordinate conversion.
 - Marker selection and form presentation.
+- Edit-dialog relocation previews for non-path marker centers. Dragging the active center pip updates the dialog coordinate fields and rendered marker preview, but marker persistence still happens only when the edit form is saved.
 - Overlay rendering for tower radii and deed bounds.
 - Read-only versus writable control visibility.
 - Client-side marker search, filtering, and visual match highlighting for the currently loaded map data.
 - Client-side tile-type highlighting by exact RGB matching against the loaded map image. The source map image remains the coordinate source: one pixel equals one tile, and generated highlight masks are local visual overlays only.
 - Top-right account and map settings dropdowns use shared open-panel state so only one dropdown can be open at a time.
 - The top-right map preferences dropdown is labeled `Settings`; its `Default` action resets the full user map settings payload back to the shared defaults.
-- The bottom-left map tool stack renders the legend button, route planner button, and compact server event feed panel in that order.
+- The bottom-left map tool stack renders the legend button, route planner button, and Events button in that order. Legend and event panels pop out to the right of their buttons so the icon stack stays visible. The event feed panel is minimized by default and opens from the Events button.
+- A small bottom-center support link points to the Ko-fi page for hosting and development costs. It is fixed, low-emphasis text and must not become part of the map tool stacks or block map interactions.
 
 Client code must treat server responses as authoritative. Client-calculated coordinates must be validated again on the server against the target map dimensions.
 
@@ -497,6 +499,7 @@ Deed overlays:
 - Rectangle edges are calculated from north, west, east, and south tile counts.
 - Perimeters render as outline-only edge strips around the rectangle expanded by the deed's perimeter tile count.
 - The visual 3x3 center pip is highlighted independently from the area overlay and always renders fully opaque.
+- Writers can quick-add deeds with `Shift + left-drag` on the map. The drag rectangle previews as a deed-style area, then opens the normal unsaved `Add deed` dialog with the center coordinate and directional dimensions derived from the inclusive drag bounds. The selected deed footprint remains visible while the create dialog is open, and is cleared only when the dialog closes or the deed saves. The quick-add gesture must work over marker overlays and must not persist anything until the form is saved.
 
 Special markers:
 
@@ -510,6 +513,8 @@ Special markers:
 - Locate Soul overlay SVG paths must be non-interactive so right-click and route-style map interactions still target the pip or map coordinate underneath.
 - Locate Soul off-map indicators are also non-interactive and use the same color and opacity as the locate-soul overlay setting.
 - Marker buttons rendered directly under the screen-space marker layer must explicitly opt back into pointer events so hover details and context menus work through the layer's non-interactive default.
+- When a non-path marker is being edited, only that marker's center pip becomes draggable. Path markers continue to use the roadway path editor instead of whole-marker relocation.
+- Hover details are coordinate-hit-tested instead of relying only on the DOM element receiving the pointer event. Direct pips at the hovered tile are shown first, followed by overlay/path areas covering that tile, and multiple matches render as a stacked pill tooltip. Path hover remains gated by Roadway Edit Mode.
 - Triangle markers draw the clipped triangle on an inner pseudo-element, not on the interactive button itself, so the button can still render the search pulse outside the triangle bounds.
 - Search text for searchable marker types should include user-facing aliases such as plural forms and spaced variants like `mine door` so users can find markers by how they describe them.
 
@@ -528,7 +533,7 @@ Infrastructure paths:
 Route planner:
 
 - The route planner is a local, unsaved map tool controlled by a compact bottom-left icon button.
-- The bottom-left tool stack renders the legend button above the route planner button, with the server event feed panel below both controls.
+- The bottom-left tool stack renders the legend button above the route planner button, with the Events button below both controls.
 - Only one planned route can exist at a time.
 - When the planner is enabled, double-clicking an empty planner starts a route at that map tile. Double-clicking while a route exists clears that route.
 - After a route starts, primary left clicks on the map append route points.
@@ -536,16 +541,26 @@ Route planner:
 - Route length is the sum of straight-line segment distances in tile coordinates. The meter value is `tiles * 4`.
 - Planned routes are visual overlays only; they do not create marker rows, audit events, or user map settings.
 
+Quick deed drafting:
+
+- Quick deed drafting is a writer-only map gesture, not a separate settings mode.
+- `Shift + primary pointer drag` starts a deed draft only when route planning and path drafting are inactive.
+- Plain Shift-clicks and same-tile drags are ignored so users do not accidentally open tiny deed forms.
+- Drag bounds are clamped to the map, converted to an inclusive tile rectangle, and translated into the existing deed create fields. Even-width or even-height drags are represented with asymmetric directional dimensions around the chosen center tile.
+- The draft footprint must stay rendered behind the `Add deed` dialog so users can verify the size while filling the form, then clear on dialog close or successful save.
+
 Legend:
 
 - The bottom-left map tools include a legend button next to the route planner.
 - The legend popup lists map marker and path symbols for towers, deeds, notes, rifts, camps, minedoors, locate souls, bridges, canals, and highways.
 - Legend symbol colors come from the current user map settings so changing layer colors updates the legend without separate state.
+- The legend popup opens to the right of its icon and must not cover the bottom-left button stack.
 
 Server event feed:
 
-- The bottom-left map tools include a compact Celebration event feed panel below the legend and route planner controls.
-- The panel shows the newest events first, has a visible height for roughly five entries, and scrolls through the latest 30 normalized entries.
+- The bottom-left map tools include a compact Events icon button below the legend and route planner controls.
+- The feed panel is minimized by default. Opening the Events button shows the newest events first, has a visible height for roughly five entries, and scrolls through the latest 30 normalized entries.
+- The feed panel opens to the right of its icon and must not cover the bottom-left button stack.
 - Event feed content is read-only and must not create marker rows, audit events, user map settings, or map-coordinate state.
 
 Tile highlighting:
@@ -565,6 +580,7 @@ Context menus:
 - Right-click map and marker context menus show a copyable coordinate row at the top.
 - The coordinate row is one button with the coordinate label and copy icon inside it, so either the visible text or icon writes the same shared link for that coordinate to the browser clipboard.
 - Coordinate copy links use the current URL with `x` and `y` search parameters updated, preserving other relevant search parameters.
+- Marker context menus use the same coordinate hit test as hover details. A right-click on an overlay-covered pip should list the direct pip plus every overlay/path area covering that coordinate, in the same marker set users would see while hovering.
 
 ## Deleted Marker Cleanup
 

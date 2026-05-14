@@ -17,13 +17,16 @@ import { formatTowerCreator } from "@/lib/domain/markers";
 import { canReadMap, canWriteMarkers } from "@/lib/domain/permissions";
 import {
   MAX_PATH_POINTS,
-  MAX_PATH_WIDTH_TILES
+  MAX_PATH_WIDTH_TILES,
+  RIFT_OVERLAY_DISTANCE_TILES,
+  TOWER_PLACEMENT_DISTANCE_TILES
 } from "@/lib/domain/constants";
 import {
   LOCATE_SOUL_CASTER_FACINGS,
   formatLocateSoulCasterFacing,
   formatLocateSoulDirection,
   formatLocateSoulDistanceBand,
+  getLocateSoulOverlayGeometry,
   parseLocateSoulMessage
 } from "@/lib/domain/locate-soul";
 import {
@@ -125,12 +128,26 @@ type ContextMenuState = {
     }
 );
 
+type DeedDirectionalDimensions = {
+  east: number;
+  north: number;
+  south: number;
+  west: number;
+};
+
 type DialogState =
-  | { mode: "create"; markerType: MarkerType; x: number; y: number }
+  | {
+      initialDeedDimensions?: DeedDirectionalDimensions;
+      markerType: MarkerType;
+      mode: "create";
+      x: number;
+      y: number;
+    }
   | { marker: WorkspaceMarker; mode: "edit" };
 
 type HoveredMarkerState = {
-  marker: WorkspaceMarker;
+  coordinate: MapCoordinate;
+  markers: WorkspaceMarker[];
   screenX: number;
   screenY: number;
 };
@@ -150,6 +167,26 @@ type PathDraftState = {
 type PathPointDragState = {
   pointIndex: number;
   pointerId: number;
+};
+
+type MarkerRelocationDragState = {
+  markerId: string;
+  pointerId: number;
+};
+
+type QuickDeedDragState = {
+  end: MapCoordinate;
+  hasMoved: boolean;
+  pointerId: number;
+  start: MapCoordinate;
+  startClientX: number;
+  startClientY: number;
+  view: ViewState;
+};
+
+type QuickDeedDraftState = {
+  end: MapCoordinate;
+  start: MapCoordinate;
 };
 
 type TopPanelState = "account" | "settings" | null;
@@ -223,15 +260,19 @@ export default function MapWorkspace({
   const [hoveredMarker, setHoveredMarker] = useState<HoveredMarkerState | null>(null);
   const [pathDraft, setPathDraft] = useState<PathDraftState | null>(null);
   const pathDraftRef = useRef<PathDraftState | null>(pathDraft);
+  const [quickDeedDraft, setQuickDeedDraft] = useState<QuickDeedDraftState | null>(null);
   const [routePlannerEnabled, setRoutePlannerEnabled] = useState(false);
   const [routePlannerPoints, setRoutePlannerPoints] = useState<MapCoordinate[] | null>(null);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
+  const [isEventFeedOpen, setIsEventFeedOpen] = useState(false);
   const [noteCategories, setNoteCategories] = useState<NoteCategory[]>(
     Array.from(initialNoteCategories.length === 0 ? DEFAULT_NOTE_CATEGORIES : initialNoteCategories)
   );
   const [searchQuery, setSearchQuery] = useState("");
   const dragRef = useRef<DragState | null>(null);
   const pathPointDragRef = useRef<PathPointDragState | null>(null);
+  const markerRelocationDragRef = useRef<MarkerRelocationDragState | null>(null);
+  const quickDeedDragRef = useRef<QuickDeedDragState | null>(null);
   const hasInitializedSettingsSaveRef = useRef(false);
   const view = manualView ?? urlCoordinateView ?? fittedView;
   const markers = localMarkers ?? initialMarkers;
@@ -246,8 +287,19 @@ export default function MapWorkspace({
     () => searchTerm.length === 0 ? new Set<string>() : new Set(displayedMarkers.map((marker) => marker.id)),
     [displayedMarkers, searchTerm.length]
   );
-  const hiddenDeedLabelId = hoveredMarker?.marker.type === "deed" ? hoveredMarker.marker.id : null;
-  const hiddenTowerLabelId = hoveredMarker?.marker.type === "tower" ? hoveredMarker.marker.id : null;
+  const displayedMarkersWithEditPreview = useMemo(
+    () => {
+      if (dialog === null || dialog.mode !== "edit" || isPathMarker(dialog.marker)) {
+        return displayedMarkers;
+      }
+
+      return displayedMarkers.map((marker) => marker.id === dialog.marker.id ? dialog.marker : marker);
+    },
+    [dialog, displayedMarkers]
+  );
+  const hoveredMarkers = hoveredMarker?.markers ?? [];
+  const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
+  const hiddenTowerLabelId = hoveredMarkers.find((marker) => marker.type === "tower")?.id ?? null;
   const renderedSelectedCoordinate = selectedCoordinate ?? urlCoordinate;
   const canViewMap = map !== null && viewer !== null && canReadMap({
     accessLevel: viewer.permissions,
@@ -318,6 +370,7 @@ export default function MapWorkspace({
   const startCreateMarker = useCallback((markerType: MarkerType, coordinate: MapCoordinate, creationView: ViewState = view) => {
     setFormError(null);
     setContextMenu(null);
+    setQuickDeedDraft(null);
 
     if (isPathMarkerType(markerType)) {
       setManualView(creationView);
@@ -342,6 +395,7 @@ export default function MapWorkspace({
   const startEditMarker = useCallback((marker: WorkspaceMarker) => {
     setFormError(null);
     setContextMenu(null);
+    setQuickDeedDraft(null);
 
     if (isPathMarker(marker)) {
       setPathDraft({
@@ -408,9 +462,71 @@ export default function MapWorkspace({
     [view.zoom, zoomAt]
   );
 
+  const startQuickDeedDrag = useCallback(
+    (event: {
+      clientX: number;
+      clientY: number;
+      pointerId: number;
+      preventDefault(): void;
+      shiftKey: boolean;
+      stopPropagation?(): void;
+    }): boolean => {
+      if (
+        !event.shiftKey ||
+        !canWriteMapMarkers ||
+        routePlannerEnabled ||
+        pathDraftRef.current !== null ||
+        dialog !== null ||
+        visualMap === null ||
+        quickDeedDragRef.current !== null
+      ) {
+        return false;
+      }
+
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+
+      if (!isInsideMap(coordinate, visualMap)) {
+        return false;
+      }
+
+      event.preventDefault();
+      event.stopPropagation?.();
+      setContextMenu(null);
+      setHoveredMarker(null);
+      quickDeedDragRef.current = {
+        end: coordinate,
+        hasMoved: false,
+        pointerId: event.pointerId,
+        start: coordinate,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        view
+      };
+      setQuickDeedDraft({
+        end: coordinate,
+        start: coordinate
+      });
+      return true;
+    },
+    [canWriteMapMarkers, dialog, routePlannerEnabled, view, visualMap]
+  );
+
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
-      if (!isPrimaryPointerButton(event.button) || (!routePlannerEnabled && isInteractivePanTarget(event.target))) {
+      if (!isPrimaryPointerButton(event.button)) {
+        return;
+      }
+
+      if (startQuickDeedDrag(event)) {
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+        return;
+      }
+
+      if (event.shiftKey && canWriteMapMarkers) {
+        return;
+      }
+
+      if (!routePlannerEnabled && isInteractivePanTarget(event.target)) {
         return;
       }
 
@@ -428,7 +544,7 @@ export default function MapWorkspace({
       };
       setIsDragging(true);
     },
-    [routePlannerEnabled, view.x, view.y, view.zoom]
+    [canWriteMapMarkers, routePlannerEnabled, startQuickDeedDrag, view.x, view.y, view.zoom]
   );
 
   const handleContextMenu = useCallback(
@@ -495,28 +611,54 @@ export default function MapWorkspace({
         isInsideMap(eventCoordinate, visualMap)
         ? eventCoordinate
         : { x: marker.x, y: marker.y };
+      const markersAtCoordinate = getHoverMarkersAtCoordinate(
+        displayedMarkersWithEditPreview,
+        markerVisibility,
+        roadwayEditMode,
+        mapCoordinate,
+        mapSize
+      );
 
       selectCoordinate(mapCoordinate);
       setContextMenu({
         mapX: mapCoordinate.x,
         mapY: mapCoordinate.y,
-        markers: getUniqueMarkers([
-          marker,
-          ...getVisibleMarkersAtCoordinate(
-            displayedMarkers,
-            markerVisibility,
-            roadwayEditMode,
-            mapCoordinate.x,
-            mapCoordinate.y
-          )
-        ]),
+        markers: getUniqueMarkers(markersAtCoordinate.length === 0
+          ? [marker]
+          : [...markersAtCoordinate, marker]
+        ),
         mode: "marker",
         screenX: event.clientX,
         screenY: event.clientY,
         view
       });
     },
-    [canWriteMapMarkers, displayedMarkers, markerVisibility, roadwayEditMode, selectCoordinate, view, visualMap]
+    [canWriteMapMarkers, displayedMarkersWithEditPreview, mapSize, markerVisibility, roadwayEditMode, selectCoordinate, view, visualMap]
+  );
+
+  const handleMarkerRelocationPointerDown = useCallback(
+    (marker: WorkspaceMarker, event: React.PointerEvent<Element>) => {
+      if (
+        !isPrimaryPointerButton(event.button) ||
+        dialog === null ||
+        dialog.mode !== "edit" ||
+        dialog.marker.id !== marker.id ||
+        isPathMarker(marker)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      markerRelocationDragRef.current = {
+        markerId: marker.id,
+        pointerId: event.pointerId
+      };
+      setContextMenu(null);
+      setHoveredMarker(null);
+    },
+    [dialog]
   );
 
   const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; pointerId: number }) => {
@@ -567,11 +709,23 @@ export default function MapWorkspace({
 
   useEffect(() => {
     function handleNativePointerDown(event: PointerEvent) {
-      if (!isPrimaryPointerButton(event.button) || (!routePlannerEnabled && isInteractivePanTarget(event.target))) {
+      if (!isPrimaryPointerButton(event.button) || quickDeedDragRef.current !== null) {
         return;
       }
 
       if (!(event.target instanceof Element) || event.target.closest(".map-viewport") === null) {
+        return;
+      }
+
+      if (startQuickDeedDrag(event)) {
+        return;
+      }
+
+      if (event.shiftKey && canWriteMapMarkers) {
+        return;
+      }
+
+      if (!routePlannerEnabled && isInteractivePanTarget(event.target)) {
         return;
       }
 
@@ -594,7 +748,7 @@ export default function MapWorkspace({
     return () => {
       window.removeEventListener("pointerdown", handleNativePointerDown);
     };
-  }, [routePlannerEnabled, view.x, view.y, view.zoom]);
+  }, [canWriteMapMarkers, routePlannerEnabled, startQuickDeedDrag, view.x, view.y, view.zoom]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -634,6 +788,61 @@ export default function MapWorkspace({
       window.removeEventListener("pointercancel", endDrag);
     };
   }, [finishPointerDrag]);
+
+  useEffect(() => {
+    function handleQuickDeedDrag(event: PointerEvent) {
+      const drag = quickDeedDragRef.current;
+
+      if (drag === null || drag.pointerId !== event.pointerId || visualMap === null) {
+        return;
+      }
+
+      const deltaX = event.clientX - drag.startClientX;
+      const deltaY = event.clientY - drag.startClientY;
+      drag.hasMoved = drag.hasMoved || Math.hypot(deltaX, deltaY) > CLICK_DRAG_THRESHOLD_PX;
+      drag.end = getClampedMapCoordinate(event.clientX, event.clientY, drag.view, visualMap);
+      setQuickDeedDraft({
+        end: drag.end,
+        start: drag.start
+      });
+    }
+
+    function endQuickDeedDrag(event: PointerEvent) {
+      const drag = quickDeedDragRef.current;
+
+      if (drag === null || drag.pointerId !== event.pointerId) {
+        return;
+      }
+
+      quickDeedDragRef.current = null;
+
+      if (!drag.hasMoved || coordinatesAreEqual(drag.start, drag.end)) {
+        setQuickDeedDraft(null);
+        return;
+      }
+
+      const quickDeed = getQuickDeedDialogState(drag.start, drag.end);
+      selectCoordinate(quickDeed.coordinate);
+      setFormError(null);
+      setDialog({
+        initialDeedDimensions: quickDeed.dimensions,
+        markerType: "deed",
+        mode: "create",
+        x: quickDeed.coordinate.x,
+        y: quickDeed.coordinate.y
+      });
+    }
+
+    window.addEventListener("pointermove", handleQuickDeedDrag);
+    window.addEventListener("pointerup", endQuickDeedDrag);
+    window.addEventListener("pointercancel", endQuickDeedDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handleQuickDeedDrag);
+      window.removeEventListener("pointerup", endQuickDeedDrag);
+      window.removeEventListener("pointercancel", endQuickDeedDrag);
+    };
+  }, [selectCoordinate, visualMap]);
 
   useEffect(() => {
     function handlePathPointDrag(event: PointerEvent) {
@@ -677,6 +886,56 @@ export default function MapWorkspace({
       window.removeEventListener("pointermove", handlePathPointDrag);
       window.removeEventListener("pointerup", endPathPointDrag);
       window.removeEventListener("pointercancel", endPathPointDrag);
+    };
+  }, [view, visualMap]);
+
+  useEffect(() => {
+    function handleMarkerRelocationDrag(event: PointerEvent) {
+      const drag = markerRelocationDragRef.current;
+
+      if (drag === null || drag.pointerId !== event.pointerId || visualMap === null) {
+        return;
+      }
+
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+
+      if (!isInsideMap(coordinate, visualMap)) {
+        return;
+      }
+
+      setDialog((current) => {
+        if (
+          current === null ||
+          current.mode !== "edit" ||
+          current.marker.id !== drag.markerId ||
+          isPathMarker(current.marker)
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          marker: relocateMarker(current.marker, coordinate)
+        };
+      });
+    }
+
+    function endMarkerRelocationDrag(event: PointerEvent) {
+      const drag = markerRelocationDragRef.current;
+
+      if (drag !== null && drag.pointerId === event.pointerId) {
+        markerRelocationDragRef.current = null;
+      }
+    }
+
+    window.addEventListener("pointermove", handleMarkerRelocationDrag);
+    window.addEventListener("pointerup", endMarkerRelocationDrag);
+    window.addEventListener("pointercancel", endMarkerRelocationDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handleMarkerRelocationDrag);
+      window.removeEventListener("pointerup", endMarkerRelocationDrag);
+      window.removeEventListener("pointercancel", endMarkerRelocationDrag);
     };
   }, [view, visualMap]);
 
@@ -765,20 +1024,43 @@ export default function MapWorkspace({
             ) : null}
           </div>
           <MarkerLayer
+            activeRelocatableMarkerId={dialog?.mode === "edit" && !isPathMarker(dialog.marker) ? dialog.marker.id : null}
             highlightedMarkerIds={highlightedMarkerIds}
             mapSize={mapSize}
             markerColors={markerColors}
             markerOpacities={markerOpacities}
-            markers={displayedMarkers}
+            markers={displayedMarkersWithEditPreview}
             onContextMenu={handleMarkerContextMenu}
             onHoverEnd={() => setHoveredMarker(null)}
             onHoverMove={(marker, event) => {
+              const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+              const markersUnderPointer = visualMap !== null && isInsideMap(coordinate, visualMap)
+                ? getHoverMarkersAtCoordinate(
+                    displayedMarkersWithEditPreview,
+                    markerVisibility,
+                    roadwayEditMode,
+                    coordinate,
+                    mapSize
+                  )
+                : [];
+              const hoverMarkers = getUniqueMarkers(markersUnderPointer.length === 0
+                ? [marker]
+                : [...markersUnderPointer, marker]
+              ).filter((hoverMarker) => canUseMarkerDetails(hoverMarker, roadwayEditMode));
+
+              if (hoverMarkers.length === 0) {
+                setHoveredMarker(null);
+                return;
+              }
+
               setHoveredMarker({
-                marker,
+                coordinate,
+                markers: hoverMarkers,
                 screenX: event.clientX,
                 screenY: event.clientY
               });
             }}
+            onMarkerPointerDown={handleMarkerRelocationPointerDown}
             roadwayEditMode={roadwayEditMode}
             view={view}
             visibility={markerVisibility}
@@ -796,15 +1078,23 @@ export default function MapWorkspace({
               view={view}
             />
           ) : null}
+          {quickDeedDraft !== null ? (
+            <QuickDeedDraftLayer
+              color={markerColors.deeds}
+              draft={quickDeedDraft}
+              opacity={markerOpacities.deeds}
+              view={view}
+            />
+          ) : null}
           <DeedNameLayer
             hiddenDeedLabelId={hiddenDeedLabelId}
-            markers={displayedMarkers}
+            markers={displayedMarkersWithEditPreview}
             view={view}
             visibility={markerVisibility}
           />
           <TowerNameLayer
             hiddenTowerLabelId={hiddenTowerLabelId}
-            markers={displayedMarkers}
+            markers={displayedMarkersWithEditPreview}
             view={view}
             visibility={markerVisibility}
           />
@@ -878,8 +1168,8 @@ export default function MapWorkspace({
           })}
         />
       ) : null}
-      {hoveredMarker !== null && canUseMarkerDetails(hoveredMarker.marker, roadwayEditMode) ? (
-        <MarkerHoverDetails hoveredMarker={hoveredMarker} />
+      {hoveredMarker !== null && hoveredMarker.markers.some((marker) => canUseMarkerDetails(marker, roadwayEditMode)) ? (
+        <MarkerHoverDetails hoveredMarker={hoveredMarker} markerColors={markerColors} />
       ) : null}
       {dialog !== null && map !== null ? (
         <MarkerDialog
@@ -891,6 +1181,7 @@ export default function MapWorkspace({
           onClose={() => {
             setDialog(null);
             setFormError(null);
+            setQuickDeedDraft(null);
           }}
           onDisbandDeed={(marker) => void disbandDeedRequest(
             marker,
@@ -899,7 +1190,11 @@ export default function MapWorkspace({
             setDialog,
             setFormError
           )}
-          onSubmit={(event) => void submitMarkerForm(event, dialog, map.id, updateMarkers, setDialog, setFormError)}
+          onSubmit={(event) => void submitMarkerForm(event, dialog, map.id, updateMarkers, setDialog, setFormError).then((saved) => {
+            if (saved) {
+              setQuickDeedDraft(null);
+            }
+          })}
           viewerIsAdmin={viewer?.isAdmin ?? false}
         />
       ) : null}
@@ -954,10 +1249,23 @@ export default function MapWorkspace({
             routeDistance={routePlannerPoints === null ? null : getRouteDistanceTiles(routePlannerPoints)}
           />
           {initialEventFeed !== undefined && map !== null ? (
-            <MapEventFeedPanel feed={initialEventFeed} serverName={map.name} />
+            <MapEventFeedControl
+              feed={initialEventFeed}
+              isOpen={isEventFeedOpen}
+              onOpenChange={setIsEventFeedOpen}
+              serverName={map.name}
+            />
           ) : null}
         </div>
       ) : null}
+      <a
+        className="map-support-link"
+        href="https://ko-fi.com/poindexter8085"
+        rel="noreferrer"
+        target="_blank"
+      >
+        support me and hosting/development costs
+      </a>
     </main>
   );
 }
@@ -1349,6 +1657,37 @@ function MapLegendControl({
   );
 }
 
+function MapEventFeedControl({
+  feed,
+  isOpen,
+  onOpenChange,
+  serverName
+}: {
+  feed: WurmMapsEventFeed | null;
+  isOpen: boolean;
+  onOpenChange(isOpen: boolean): void;
+  serverName: string;
+}) {
+  const buttonLabel = `${serverName} events`;
+
+  return (
+    <div className="map-event-feed-control">
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label={buttonLabel}
+        className={isOpen ? "map-event-feed-button is-active" : "map-event-feed-button"}
+        onClick={() => onOpenChange(!isOpen)}
+        title={buttonLabel}
+        type="button"
+      >
+        <span aria-hidden="true" className="map-event-feed-button-icon" />
+      </button>
+      {isOpen ? <MapEventFeedPanel feed={feed} serverName={serverName} /> : null}
+    </div>
+  );
+}
+
 function MapEventFeedPanel({
   feed,
   serverName
@@ -1362,7 +1701,7 @@ function MapEventFeedPanel({
     .slice(0, EVENT_FEED_DISPLAY_LIMIT) ?? [];
 
   return (
-    <section aria-label={`${serverName} event feed`} className="map-event-feed-panel">
+    <section aria-label={`${serverName} event feed`} className="map-event-feed-panel" role="dialog">
       <div className="map-event-feed-header">
         <strong>{serverName} Events</strong>
         <span>{feed === null ? "Unavailable" : formatServerStatus(feed.serverStatus.status)}</span>
@@ -1862,6 +2201,33 @@ function RoutePlannerLayer({
   );
 }
 
+function QuickDeedDraftLayer({
+  color,
+  draft,
+  opacity,
+  view
+}: {
+  color: string;
+  draft: QuickDeedDraftState;
+  opacity: number;
+  view: ViewState;
+}) {
+  const rect = getCoordinateRect(draft.start, draft.end);
+
+  return (
+    <div
+      aria-label="Quick deed draft"
+      className="map-quick-deed-draft"
+      data-testid="quick-deed-draft"
+      style={{
+        ...getScreenRectStyle(rect, view),
+        backgroundColor: color,
+        opacity: percentageToOpacity(opacity)
+      }}
+    />
+  );
+}
+
 function CoordinateCopyRow({
   coordinate,
   label
@@ -1958,7 +2324,7 @@ function MarkerDialog({
     <section className="map-marker-dialog" role="dialog" aria-label={title}>
       <DialogHeader title={title} onClose={onClose} />
       <form className="map-marker-form" onSubmit={onSubmit}>
-        <div className="map-position-fields">
+        <div className="map-position-fields" key={`${coordinate.x}:${coordinate.y}`}>
           <label>
             <span>X</span>
             <input name="x" required type="number" defaultValue={coordinate.x} min={0} max={map.widthPx - 1} />
@@ -1989,8 +2355,44 @@ function MarkerDialog({
   );
 }
 
-function MarkerHoverDetails({ hoveredMarker }: { hoveredMarker: HoveredMarkerState }) {
-  const title = getMarkerHoverTitle(hoveredMarker.marker);
+function MarkerHoverDetails({
+  hoveredMarker,
+  markerColors
+}: {
+  hoveredMarker: HoveredMarkerState;
+  markerColors: MarkerColors;
+}) {
+  if (hoveredMarker.markers.length > 1) {
+    const title = `Map items at ${hoveredMarker.coordinate.x}, ${hoveredMarker.coordinate.y}`;
+
+    return (
+      <section
+        aria-label={title}
+        className="map-hover-details"
+        role="tooltip"
+        style={getHoverDetailsStyle(hoveredMarker.screenX, hoveredMarker.screenY)}
+      >
+        <strong>{title}</strong>
+        <div className="map-hover-pill-stack">
+          {hoveredMarker.markers.map((marker) => (
+            <HoverMarkerPill
+              key={marker.id}
+              marker={marker}
+              markerColors={markerColors}
+            />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  const marker = hoveredMarker.markers[0];
+
+  if (marker === undefined) {
+    return null;
+  }
+
+  const title = getMarkerHoverTitle(marker);
 
   return (
     <section
@@ -2000,8 +2402,32 @@ function MarkerHoverDetails({ hoveredMarker }: { hoveredMarker: HoveredMarkerSta
       style={getHoverDetailsStyle(hoveredMarker.screenX, hoveredMarker.screenY)}
     >
       <strong>{title}</strong>
-      <MarkerHoverDetailsList marker={hoveredMarker.marker} />
+      <MarkerHoverDetailsList marker={marker} />
     </section>
+  );
+}
+
+function HoverMarkerPill({
+  marker,
+  markerColors
+}: {
+  marker: WorkspaceMarker;
+  markerColors: MarkerColors;
+}) {
+  const description = getMarkerHoverDescription(marker);
+
+  return (
+    <div
+      className="map-hover-marker-pill"
+      data-testid="hover-marker-pill"
+      style={getMarkerContextRowStyle(marker, markerColors)}
+    >
+      <span className="map-hover-marker-pill-title">{getMarkerHoverTitle(marker)}</span>
+      <span className="map-hover-marker-pill-meta">{getMarkerContextMeta(marker)}</span>
+      {description.length === 0 ? null : (
+        <span className="map-hover-marker-pill-description">{description}</span>
+      )}
+    </div>
   );
 }
 
@@ -2130,16 +2556,17 @@ function MarkerFields({
 
   if (markerType === "deed") {
     const deed = marker?.type === "deed" ? marker : null;
+    const initialDimensions = dialog.mode === "create" ? dialog.initialDeedDimensions : undefined;
     return (
       <>
         <label><span>Name</span><input name="name" required defaultValue={deed?.name ?? ""} /></label>
         <label><span>Mayor</span><input name="founder" required defaultValue={deed?.founder ?? ""} /></label>
         <label><span>Founding date</span><input name="foundingDate" type="date" defaultValue={deed?.foundingDate ?? ""} /></label>
         <div className="map-position-fields">
-          <label><span>North</span><input name="north" required type="number" min={0} defaultValue={deed?.north ?? 5} /></label>
-          <label><span>West</span><input name="west" required type="number" min={0} defaultValue={deed?.west ?? 5} /></label>
-          <label><span>East</span><input name="east" required type="number" min={0} defaultValue={deed?.east ?? 5} /></label>
-          <label><span>South</span><input name="south" required type="number" min={0} defaultValue={deed?.south ?? 5} /></label>
+          <label><span>North</span><input name="north" required type="number" min={0} defaultValue={deed?.north ?? initialDimensions?.north ?? 5} /></label>
+          <label><span>West</span><input name="west" required type="number" min={0} defaultValue={deed?.west ?? initialDimensions?.west ?? 5} /></label>
+          <label><span>East</span><input name="east" required type="number" min={0} defaultValue={deed?.east ?? initialDimensions?.east ?? 5} /></label>
+          <label><span>South</span><input name="south" required type="number" min={0} defaultValue={deed?.south ?? initialDimensions?.south ?? 5} /></label>
           <label><span>Perimeter</span><input name="perimeter" required type="number" min={0} max={100} defaultValue={deed?.perimeter ?? 5} /></label>
         </div>
       </>
@@ -2411,7 +2838,7 @@ async function submitMarkerForm(
   setMarkers: (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => void,
   setDialog: (dialog: DialogState | null) => void,
   setFormError: (error: string | null) => void
-): Promise<void> {
+): Promise<boolean> {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
   const markerType = dialog.mode === "create" ? dialog.markerType : dialog.marker.type;
@@ -2419,7 +2846,7 @@ async function submitMarkerForm(
 
   if (!payloadResult.ok) {
     setFormError(payloadResult.error);
-    return;
+    return false;
   }
 
   const url = dialog.mode === "edit"
@@ -2434,13 +2861,14 @@ async function submitMarkerForm(
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
     setFormError(body?.error ?? "Marker could not be saved");
-    return;
+    return false;
   }
 
   const body = (await response.json()) as { marker: WorkspaceMarker };
   setMarkers((current) => upsertMarker(current, body.marker));
   setDialog(null);
   setFormError(null);
+  return true;
 }
 
 async function deleteMarkerRequest(
@@ -2886,6 +3314,55 @@ function getScreenCoordinateStyle(coordinate: MapCoordinate, view: ViewState): C
   };
 }
 
+function getScreenRectStyle(
+  rect: { height: number; width: number; x: number; y: number },
+  view: ViewState
+): CSSProperties {
+  return {
+    height: formatPixels(rect.height * view.zoom),
+    left: formatPixels(view.x + rect.x * view.zoom),
+    top: formatPixels(view.y + rect.y * view.zoom),
+    width: formatPixels(rect.width * view.zoom)
+  };
+}
+
+function getCoordinateRect(start: MapCoordinate, end: MapCoordinate): { height: number; width: number; x: number; y: number } {
+  const minX = Math.min(start.x, end.x);
+  const maxX = Math.max(start.x, end.x);
+  const minY = Math.min(start.y, end.y);
+  const maxY = Math.max(start.y, end.y);
+
+  return {
+    height: maxY - minY + 1,
+    width: maxX - minX + 1,
+    x: minX,
+    y: minY
+  };
+}
+
+function getQuickDeedDialogState(
+  start: MapCoordinate,
+  end: MapCoordinate
+): { coordinate: MapCoordinate; dimensions: DeedDirectionalDimensions } {
+  const rect = getCoordinateRect(start, end);
+  const maxX = rect.x + rect.width - 1;
+  const maxY = rect.y + rect.height - 1;
+  const center = {
+    x: Math.floor((rect.x + maxX) / 2),
+    y: Math.floor((rect.y + maxY) / 2)
+  };
+
+  return {
+    coordinate: center,
+    dimensions: {
+      east: maxX - center.x,
+      north: center.y - rect.y,
+      south: maxY - center.y,
+      west: center.x - rect.x
+    }
+  };
+}
+
 function getPathDraftSvgPoints(points: MapCoordinate[], view: ViewState): string {
   return points.map((point) => {
     const x = view.x + (point.x + 0.5) * view.zoom;
@@ -3108,6 +3585,19 @@ function getMapCoordinate(clientX: number, clientY: number, view: ViewState) {
   };
 }
 
+function getClampedMapCoordinate(clientX: number, clientY: number, view: ViewState, map: WorkspaceMap): MapCoordinate {
+  const coordinate = getMapCoordinate(clientX, clientY, view);
+
+  return {
+    x: clamp(coordinate.x, 0, map.widthPx - 1),
+    y: clamp(coordinate.y, 0, map.heightPx - 1)
+  };
+}
+
+function coordinatesAreEqual(first: MapCoordinate, second: MapCoordinate): boolean {
+  return first.x === second.x && first.y === second.y;
+}
+
 function getUrlCoordinate(map: WorkspaceMap | null, search: string): MapCoordinate | null {
   if (map === null) {
     return null;
@@ -3145,19 +3635,191 @@ function isInsideMap(coordinate: MapCoordinate, map: WorkspaceMap): boolean {
   );
 }
 
-function getVisibleMarkersAtCoordinate(
+function getHoverMarkersAtCoordinate(
   markers: WorkspaceMarker[],
   visibility: MarkerVisibility,
   roadwayEditMode: boolean,
-  x: number,
-  y: number
+  coordinate: MapCoordinate,
+  mapSize: { heightPx: number; widthPx: number }
 ): WorkspaceMarker[] {
-  return markers.filter((marker) => (
-    marker.x === x &&
-    marker.y === y &&
+  const eligibleMarkers = markers.filter((marker) => (
     isMarkerVisible(marker, visibility) &&
     canUseMarkerDetails(marker, roadwayEditMode)
   ));
+  const directMarkers = eligibleMarkers.filter((marker) => isDirectMarkerHit(marker, coordinate));
+  const directMarkerIds = new Set(directMarkers.map((marker) => marker.id));
+  const areaMarkers = eligibleMarkers.filter((marker) => (
+    !directMarkerIds.has(marker.id) &&
+    isMarkerAreaHit(marker, coordinate, visibility, roadwayEditMode, mapSize)
+  ));
+
+  return getUniqueMarkers([...directMarkers, ...areaMarkers]);
+}
+
+function isDirectMarkerHit(marker: WorkspaceMarker, coordinate: MapCoordinate): boolean {
+  if (isPathMarker(marker)) {
+    return false;
+  }
+
+  if (marker.type === "minedoor") {
+    return marker.x === coordinate.x && marker.y === coordinate.y;
+  }
+
+  return Math.abs(marker.x - coordinate.x) <= 1 && Math.abs(marker.y - coordinate.y) <= 1;
+}
+
+function isMarkerAreaHit(
+  marker: WorkspaceMarker,
+  coordinate: MapCoordinate,
+  visibility: MarkerVisibility,
+  roadwayEditMode: boolean,
+  mapSize: { heightPx: number; widthPx: number }
+): boolean {
+  if (isPathMarker(marker)) {
+    return roadwayEditMode && isPathCoordinateHit(marker, coordinate);
+  }
+
+  if (!visibility.overlays) {
+    return false;
+  }
+
+  if (marker.type === "tower") {
+    return isWithinSquare(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, coordinate);
+  }
+
+  if (marker.type === "deed") {
+    return isWithinDeedArea(marker, coordinate) ||
+      (visibility.deedPerimeters && isWithinDeedPerimeter(marker, coordinate));
+  }
+
+  if (marker.type === "rift") {
+    return visibility.riftOverlays && isWithinSquare(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, coordinate);
+  }
+
+  if (marker.type === "locateSoul") {
+    return isWithinLocateSoulOverlay(marker, coordinate, mapSize);
+  }
+
+  return false;
+}
+
+function isWithinSquare(centerX: number, centerY: number, radiusTiles: number, coordinate: MapCoordinate): boolean {
+  return (
+    coordinate.x >= centerX - radiusTiles &&
+    coordinate.x <= centerX + radiusTiles &&
+    coordinate.y >= centerY - radiusTiles &&
+    coordinate.y <= centerY + radiusTiles
+  );
+}
+
+function isWithinDeedArea(marker: Extract<WorkspaceMarker, { type: "deed" }>, coordinate: MapCoordinate): boolean {
+  return (
+    coordinate.x >= marker.x - marker.west &&
+    coordinate.x <= marker.x + marker.east &&
+    coordinate.y >= marker.y - marker.north &&
+    coordinate.y <= marker.y + marker.south
+  );
+}
+
+function isWithinDeedPerimeter(marker: Extract<WorkspaceMarker, { type: "deed" }>, coordinate: MapCoordinate): boolean {
+  const left = marker.x - marker.west - marker.perimeter;
+  const right = marker.x + marker.east + marker.perimeter;
+  const top = marker.y - marker.north - marker.perimeter;
+  const bottom = marker.y + marker.south + marker.perimeter;
+
+  return (
+    coordinate.x >= left &&
+    coordinate.x <= right &&
+    coordinate.y >= top &&
+    coordinate.y <= bottom &&
+    (coordinate.x === left || coordinate.x === right || coordinate.y === top || coordinate.y === bottom)
+  );
+}
+
+function isWithinLocateSoulOverlay(
+  marker: Extract<WorkspaceMarker, { type: "locateSoul" }>,
+  coordinate: MapCoordinate,
+  mapSize: { heightPx: number; widthPx: number }
+): boolean {
+  const geometry = getLocateSoulOverlayGeometry({
+    casterFacing: marker.casterFacing,
+    direction: marker.direction,
+    distanceBand: marker.distanceBand,
+    mapHeightPx: mapSize.heightPx,
+    mapWidthPx: mapSize.widthPx
+  });
+  const markerCenter = { x: marker.x + 0.5, y: marker.y + 0.5 };
+  const coordinateCenter = { x: coordinate.x + 0.5, y: coordinate.y + 0.5 };
+  const deltaX = coordinateCenter.x - markerCenter.x;
+  const deltaY = coordinateCenter.y - markerCenter.y;
+  const distanceTiles = Math.hypot(deltaX, deltaY);
+
+  if (distanceTiles < geometry.minDistanceTiles || distanceTiles > geometry.maxDistanceTiles) {
+    return false;
+  }
+
+  const angleDegrees = normalizeDegrees(Math.atan2(deltaX, -deltaY) * (180 / Math.PI));
+  const angleDifference = getSmallestAngleDifference(angleDegrees, geometry.centerAngleDegrees);
+
+  return angleDifference <= geometry.spanDegrees / 2;
+}
+
+function isPathCoordinateHit(marker: Extract<WorkspaceMarker, { type: PathMarkerType }>, coordinate: MapCoordinate): boolean {
+  if (marker.points.length < 2) {
+    return false;
+  }
+
+  const target = { x: coordinate.x + 0.5, y: coordinate.y + 0.5 };
+  const threshold = Math.max(0.5, marker.width / 2);
+
+  for (let index = 1; index < marker.points.length; index += 1) {
+    const start = marker.points[index - 1];
+    const end = marker.points[index];
+
+    if (
+      start !== undefined &&
+      end !== undefined &&
+      getDistanceToSegment(target, start, end) <= threshold
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function getDistanceToSegment(
+  point: { x: number; y: number },
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+): number {
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+  const segmentLengthSquared = deltaX * deltaX + deltaY * deltaY;
+
+  if (segmentLengthSquared === 0) {
+    return Math.hypot(point.x - start.x, point.y - start.y);
+  }
+
+  const segmentProgress = clamp(
+    ((point.x - start.x) * deltaX + (point.y - start.y) * deltaY) / segmentLengthSquared,
+    0,
+    1
+  );
+  const closestPoint = {
+    x: start.x + segmentProgress * deltaX,
+    y: start.y + segmentProgress * deltaY
+  };
+
+  return Math.hypot(point.x - closestPoint.x, point.y - closestPoint.y);
+}
+
+function normalizeDegrees(value: number): number {
+  return ((value % 360) + 360) % 360;
+}
+
+function getSmallestAngleDifference(firstAngle: number, secondAngle: number): number {
+  return Math.abs(((firstAngle - secondAngle + 540) % 360) - 180);
 }
 
 function isOverlayContextTarget(target: Element): boolean {
@@ -3175,6 +3837,14 @@ function getUniqueMarkers(markers: WorkspaceMarker[]): WorkspaceMarker[] {
     seenIds.add(marker.id);
     return true;
   });
+}
+
+function relocateMarker<TMarker extends WorkspaceMarker>(marker: TMarker, coordinate: MapCoordinate): TMarker {
+  return {
+    ...marker,
+    x: coordinate.x,
+    y: coordinate.y
+  };
 }
 
 function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility): boolean {
@@ -3434,6 +4104,34 @@ function getMarkerHoverTitle(marker: WorkspaceMarker): string {
   }
 
   return `${marker.category} - ${marker.title}`;
+}
+
+function getMarkerHoverDescription(marker: WorkspaceMarker): string {
+  if (marker.type === "rift") {
+    return marker.notes;
+  }
+
+  if (marker.type === "camp") {
+    return marker.notes;
+  }
+
+  if (marker.type === "minedoor") {
+    return marker.notes;
+  }
+
+  if (marker.type === "locateSoul") {
+    return marker.notes;
+  }
+
+  if (isPathMarker(marker)) {
+    return marker.notes;
+  }
+
+  if (marker.type === "note") {
+    return marker.text;
+  }
+
+  return "";
 }
 
 function getMarkerLabel(marker: WorkspaceMarker): string {

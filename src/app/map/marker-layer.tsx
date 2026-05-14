@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, MouseEvent } from "react";
+import type { CSSProperties, MouseEvent, PointerEvent } from "react";
 import {
   RIFT_OVERLAY_DISTANCE_TILES,
   TOWER_PLACEMENT_DISTANCE_TILES,
@@ -19,6 +19,7 @@ import type {
 } from "@/lib/markers/marker-types";
 
 type MarkerLayerProps = {
+  activeRelocatableMarkerId: string | null;
   highlightedMarkerIds: Set<string>;
   mapSize: { heightPx: number; widthPx: number };
   markerColors: MarkerColors;
@@ -27,6 +28,7 @@ type MarkerLayerProps = {
   onContextMenu(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
   onHoverEnd(): void;
   onHoverMove(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
+  onMarkerPointerDown(marker: WorkspaceMarker, event: PointerEvent<Element>): void;
   roadwayEditMode: boolean;
   view: MarkerLayerView;
   visibility: MarkerVisibility;
@@ -39,6 +41,7 @@ type MarkerLayerView = {
 };
 
 export function MarkerLayer({
+  activeRelocatableMarkerId,
   highlightedMarkerIds,
   mapSize,
   markerColors,
@@ -47,19 +50,21 @@ export function MarkerLayer({
   onContextMenu,
   onHoverEnd,
   onHoverMove,
+  onMarkerPointerDown,
   roadwayEditMode,
   view,
   visibility
 }: MarkerLayerProps) {
   return (
     <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
-      {markers.map((marker) => renderMarker(marker, highlightedMarkerIds, mapSize, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, roadwayEditMode, view, visibility))}
+      {markers.map((marker) => renderMarker(marker, activeRelocatableMarkerId, highlightedMarkerIds, mapSize, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, onMarkerPointerDown, roadwayEditMode, view, visibility))}
     </div>
   );
 }
 
 function renderMarker(
   marker: WorkspaceMarker,
+  activeRelocatableMarkerId: string | null,
   highlightedMarkerIds: Set<string>,
   mapSize: { heightPx: number; widthPx: number },
   markerColors: MarkerColors,
@@ -67,11 +72,13 @@ function renderMarker(
   onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
   onHoverEnd: () => void,
   onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
+  onMarkerPointerDown: (marker: WorkspaceMarker, event: PointerEvent<Element>) => void,
   roadwayEditMode: boolean,
   view: MarkerLayerView,
   visibility: MarkerVisibility
 ) {
   const isHighlighted = highlightedMarkerIds.has(marker.id);
+  const isRelocatable = activeRelocatableMarkerId === marker.id;
 
   if (isPathMarker(marker)) {
     if (!isPathVisible(marker, visibility)) {
@@ -127,12 +134,13 @@ function renderMarker(
         ) : null}
         <button
           aria-label={`Tower by ${formatTowerCreator(marker)} at ${marker.x}, ${marker.y}`}
-          className={isHighlighted ? "map-marker map-marker--tower map-search-match" : "map-marker map-marker--tower"}
+          className={getMarkerClassName("map-marker map-marker--tower", isHighlighted, isRelocatable)}
           data-testid={`tower-center-${marker.id}`}
           onContextMenu={(event) => onContextMenu(marker, event)}
           onMouseEnter={(event) => onHoverMove(marker, event)}
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
+          onPointerDown={(event) => onMarkerPointerDown(marker, event)}
           style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.towers, view)}
           type="button"
         />
@@ -199,20 +207,26 @@ function renderMarker(
               </>
             ) : null}
             <span
-              className={isHighlighted ? "map-deed-center map-deed-center--visual map-search-match" : "map-deed-center map-deed-center--visual"}
+              className={getDeedCenterClassName("map-deed-center map-deed-center--visual", isHighlighted, isRelocatable)}
               data-testid={`deed-center-${marker.id}`}
+              onContextMenu={isRelocatable ? (event) => onContextMenu(marker, event) : undefined}
+              onMouseEnter={isRelocatable ? (event) => onHoverMove(marker, event) : undefined}
+              onMouseLeave={isRelocatable ? onHoverEnd : undefined}
+              onMouseMove={isRelocatable ? (event) => onHoverMove(marker, event) : undefined}
+              onPointerDown={isRelocatable ? (event) => onMarkerPointerDown(marker, event) : undefined}
               style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.deeds, view)}
             />
           </>
         ) : (
           <button
             aria-label={`Deed ${marker.name} at ${marker.x}, ${marker.y}`}
-            className={isHighlighted ? "map-deed-center map-deed-center--interactive map-search-match" : "map-deed-center map-deed-center--interactive"}
+            className={getDeedCenterClassName("map-deed-center map-deed-center--interactive", isHighlighted, isRelocatable)}
             data-testid={`deed-center-${marker.id}`}
             onContextMenu={(event) => onContextMenu(marker, event)}
             onMouseEnter={(event) => onHoverMove(marker, event)}
             onMouseLeave={onHoverEnd}
             onMouseMove={(event) => onHoverMove(marker, event)}
+            onPointerDown={(event) => onMarkerPointerDown(marker, event)}
             style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.deeds, view)}
             type="button"
           />
@@ -233,12 +247,13 @@ function renderMarker(
         ) : null}
         <button
           aria-label={`Rift at ${marker.x}, ${marker.y}`}
-          className={isHighlighted ? "map-marker map-marker--rift map-search-match" : "map-marker map-marker--rift"}
+          className={getMarkerClassName("map-marker map-marker--rift", isHighlighted, isRelocatable)}
           data-testid={`rift-marker-${marker.id}`}
           onContextMenu={(event) => onContextMenu(marker, event)}
           onMouseEnter={(event) => onHoverMove(marker, event)}
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
+          onPointerDown={(event) => onMarkerPointerDown(marker, event)}
           style={getRiftMarkerStyle(marker.x, marker.y, markerColors.rifts, view)}
           type="button"
         />
@@ -254,13 +269,14 @@ function renderMarker(
     return (
       <button
         aria-label={`Camp ${marker.campType} at ${marker.x}, ${marker.y}`}
-        className={isHighlighted ? "map-marker map-marker--camp map-search-match" : "map-marker map-marker--camp"}
+        className={getMarkerClassName("map-marker map-marker--camp", isHighlighted, isRelocatable)}
         data-testid={`camp-marker-${marker.id}`}
         key={marker.id}
         onContextMenu={(event) => onContextMenu(marker, event)}
         onMouseEnter={(event) => onHoverMove(marker, event)}
         onMouseLeave={onHoverEnd}
         onMouseMove={(event) => onHoverMove(marker, event)}
+        onPointerDown={(event) => onMarkerPointerDown(marker, event)}
         style={getCampMarkerStyle(marker.x, marker.y, markerColors.camps, view)}
         type="button"
       />
@@ -275,13 +291,14 @@ function renderMarker(
     return (
       <button
         aria-label={`Minedoor at ${marker.x}, ${marker.y}`}
-        className={isHighlighted ? "map-marker map-marker--minedoor map-search-match" : "map-marker map-marker--minedoor"}
+        className={getMarkerClassName("map-marker map-marker--minedoor", isHighlighted, isRelocatable)}
         data-testid={`minedoor-marker-${marker.id}`}
         key={marker.id}
         onContextMenu={(event) => onContextMenu(marker, event)}
         onMouseEnter={(event) => onHoverMove(marker, event)}
         onMouseLeave={onHoverEnd}
         onMouseMove={(event) => onHoverMove(marker, event)}
+        onPointerDown={(event) => onMarkerPointerDown(marker, event)}
         style={getMinedoorMarkerStyle(marker.x, marker.y, markerColors.minedoors, view)}
         type="button"
       />
@@ -343,12 +360,13 @@ function renderMarker(
         ) : null}
         <button
           aria-label={`Locate Soul ${marker.targetName} at ${marker.x}, ${marker.y}`}
-          className={isHighlighted ? "map-marker map-marker--locate-soul map-search-match" : "map-marker map-marker--locate-soul"}
+          className={getMarkerClassName("map-marker map-marker--locate-soul", isHighlighted, isRelocatable)}
           data-testid={`locate-soul-marker-${marker.id}`}
           onContextMenu={(event) => onContextMenu(marker, event)}
           onMouseEnter={(event) => onHoverMove(marker, event)}
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
+          onPointerDown={(event) => onMarkerPointerDown(marker, event)}
           style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.locateSouls, view)}
           type="button"
         />
@@ -363,17 +381,34 @@ function renderMarker(
   return (
     <button
       aria-label={`Note ${marker.category} - ${marker.title} at ${marker.x}, ${marker.y}`}
-      className={isHighlighted ? "map-marker map-marker--note map-search-match" : "map-marker map-marker--note"}
+      className={getMarkerClassName("map-marker map-marker--note", isHighlighted, isRelocatable)}
       data-testid={`note-center-${marker.id}`}
       key={marker.id}
       onContextMenu={(event) => onContextMenu(marker, event)}
       onMouseEnter={(event) => onHoverMove(marker, event)}
       onMouseLeave={onHoverEnd}
       onMouseMove={(event) => onHoverMove(marker, event)}
+      onPointerDown={(event) => onMarkerPointerDown(marker, event)}
       style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.notes, view)}
       type="button"
     />
   );
+}
+
+function getMarkerClassName(baseClassName: string, isHighlighted: boolean, isRelocatable: boolean): string {
+  return [
+    baseClassName,
+    isHighlighted ? "map-search-match" : "",
+    isRelocatable ? "map-marker--relocatable" : ""
+  ].filter(Boolean).join(" ");
+}
+
+function getDeedCenterClassName(baseClassName: string, isHighlighted: boolean, isRelocatable: boolean): string {
+  return [
+    baseClassName,
+    isHighlighted ? "map-search-match" : "",
+    isRelocatable ? "map-deed-center--relocatable" : ""
+  ].filter(Boolean).join(" ");
 }
 
 function getCenterTileStyle(x: number, y: number, view: MarkerLayerView): CSSProperties {

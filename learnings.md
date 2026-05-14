@@ -132,6 +132,50 @@ Prevention:
 
 When adding a marker rendering path, test both geometry and hit testing. Include search aliases for user-facing marker names, including plurals and spaced variants.
 
+### Overlay-Aware Hover And Edit Dragging
+
+Context:
+
+Some markers can sit under larger overlay areas, and users need to adjust marker positions while looking at an edit dialog.
+
+What happened:
+
+Hover details only described the DOM element that caught the pointer event, so a deed/rift/locate overlay could hide the marker underneath. Edit forms also required manual coordinate entry even when the desired move was visual.
+
+Root cause:
+
+The map treated hover as an element event instead of a coordinate query, and edit state did not have a temporary marker preview separate from persisted marker data.
+
+Decision:
+
+Hover details now run a coordinate hit test: direct pips on the tile come first, then overlay or roadway areas covering the tile, and multiple matches render as stacked pills. Marker context menus must use the same helper, so right-clicking an overlay-covered pip shows the same marker set as hover and still lets users edit the hidden pip. While a non-path marker edit dialog is open, dragging that marker's center pip updates only the dialog marker preview and X/Y fields until Save persists the change. Path markers still use their path-point editor.
+
+Prevention:
+
+For map interactions driven by screen coordinates, test with rendered screen positions derived from the marker style or current view, not raw map coordinates. Keep overlay hit testing in one workspace helper so hover, context menus, and future coordinate interactions do not drift by marker type.
+
+### Shift-Drag Deed Drafting
+
+Context:
+
+Adding deeds through the right-click menu is precise but slow when users already know the intended footprint.
+
+What happened:
+
+Users needed a quick gesture that captures deed dimensions from the map without bypassing the existing deed validation and save flow.
+
+Root cause:
+
+The old create path only accepted a single coordinate from the context menu, and map pointer drags always meant pan unless another explicit tool mode was active.
+
+Decision:
+
+Writers can use `Shift + left-drag` on the map to draw an inclusive deed rectangle. The app previews the dragged area, converts the bounds into center `x/y` plus `north/west/east/south`, and opens the normal `Add deed` dialog. The selected footprint stays visible while the dialog is open, then clears when the dialog closes or the deed saves. The gesture works over marker overlays, ignores click-only or same-tile drags, and does not create a marker until Save.
+
+Prevention:
+
+When adding map gestures, keep modifier-driven tools separate from pan state and test both plain-map targets and overlay targets. Any quick-create tool should feed the existing create form unless the product explicitly asks for immediate persistence. Visual draft state should survive the create dialog long enough for users to verify their selection, and only clear on explicit close/cancel or successful save.
+
 ### Rift Overlay Settings
 
 Context:
@@ -350,7 +394,7 @@ For map-level tools, test both plain map clicks and clicks over marker overlay e
 
 Decision:
 
-The map legend is a local bottom-left popup next to the route planner. It lists tower, deed, note, rift, camp, minedoor, bridge, canal, and highway symbols, and each symbol reads from the current marker color settings instead of hardcoded duplicate colors.
+The map legend is a local bottom-left popup next to the route planner. It lists tower, deed, note, rift, camp, minedoor, bridge, canal, and highway symbols, and each symbol reads from the current marker color settings instead of hardcoded duplicate colors. Bottom-left popups should open to the right of their icon instead of above the stack so they do not cover the buttons users need to close or switch tools.
 
 Prevention:
 
@@ -382,15 +426,15 @@ CSS regression tests should cover both the note shape and the search pulse contr
 
 Context:
 
-Tile highlighting, Roadway Edit Mode, the legend, and route planner are all draggable or floating map tools.
+Tile highlighting, Roadway Edit Mode, the legend, route planner, event feed, and support link are all floating map UI.
 
 Decision:
 
-Use explicit corner stacks for default, unpositioned tools. The lower-right stack places Tile Highlighting above Roadway Edit Mode. The lower-left stack places the legend button above the route planner button. Once a user drags a panel, its saved fixed position overrides the default stack.
+Use explicit corner stacks for default, unpositioned tools. The lower-right stack places Tile Highlighting above Roadway Edit Mode. The lower-left stack places the legend button above the route planner button and Events button. The support link is separate fixed bottom-center text so it stays unobtrusive and does not join either tool stack. Once a user drags a panel, its saved fixed position overrides the default stack.
 
 Prevention:
 
-When adding or moving floating map tools, test both DOM order and CSS stack direction. Avoid encoding "above another panel" as a guessed pixel offset when the controls can live in a flex stack.
+When adding or moving floating map tools, test both DOM order and CSS stack direction. Avoid encoding "above another panel" as a guessed pixel offset when the controls can live in a flex stack. Treat non-tool links as separate fixed UI with low visual weight.
 
 ### Roadway Edit Mode
 
@@ -604,11 +648,11 @@ The endpoint is public JSON but still an external implementation detail. Letting
 
 Decision:
 
-Fetch WurmMaps event/status data server-side, normalize it into a small read-only event feed, decode simple HTML entities, sort newest-first, cap the payload to 30 entries, and render it below the bottom-left legend and route planner controls. Do not import WurmMaps marker or path data as part of the event feed.
+Fetch WurmMaps event/status data server-side, normalize it into a small read-only event feed, decode simple HTML entities, sort newest-first, cap the payload to 30 entries, and keep it minimized behind a bottom-left Events button below the legend and route planner controls. Do not import WurmMaps marker or path data as part of the event feed.
 
 Prevention:
 
-Keep external feed parsing in a dedicated module with tests. Route and page code should consume normalized data only, and feed failures must not block normal map loading.
+Keep external feed parsing in a dedicated module with tests. Route and page code should consume normalized data only, and feed failures must not block normal map loading. Bottom-left status panels should default to compact buttons and pop out to the right unless users explicitly open them, so persistent map tools do not obscure the map or their own toggle buttons.
 
 ### Self-Service Password Changes
 

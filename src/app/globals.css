@@ -196,12 +196,23 @@ body {
 
 .map-marker-group .map-marker,
 .map-marker-group .map-deed-overlay,
-.map-marker-group .map-deed-center--interactive {
+.map-marker-group .map-deed-center--interactive,
+.map-marker-group .map-deed-center--relocatable {
   pointer-events: auto;
 }
 
 .map-marker-layer > .map-marker {
   pointer-events: auto;
+}
+
+.map-marker--relocatable,
+.map-deed-center--relocatable {
+  cursor: grab;
+}
+
+.map-marker--relocatable:active,
+.map-deed-center--relocatable:active {
+  cursor: grabbing;
 }
 
 .map-path-svg {
@@ -231,6 +242,14 @@ body {
 .map-path-draft-layer {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+}
+
+.map-quick-deed-draft {
+  position: absolute;
+  z-index: 8;
+  border: 1px solid #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.65), 0 0 0 1px rgba(15, 23, 42, 0.65);
   pointer-events: none;
 }
 
@@ -723,6 +742,35 @@ body {
   text-align: right;
 }
 
+.map-hover-pill-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.map-hover-marker-pill {
+  display: grid;
+  gap: 2px;
+  border-left: 3px solid var(--map-context-marker-color, #60a5fa);
+  border-radius: 999px;
+  padding: 5px 10px 5px 9px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.map-hover-marker-pill-title {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.map-hover-marker-pill-meta {
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
+.map-hover-marker-pill-description {
+  color: #f8fafc;
+  font-size: 11px;
+}
+
 .map-hover-note-text {
   color: #ffffff;
 }
@@ -1001,8 +1049,31 @@ body {
   gap: 8px;
 }
 
+.map-support-link {
+  position: fixed;
+  left: 50%;
+  bottom: 6px;
+  z-index: 10;
+  transform: translateX(-50%);
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: #cbd5e1;
+  font-size: 11px;
+  line-height: 1.2;
+  opacity: 0.72;
+  text-decoration: none;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.75);
+}
+
+.map-support-link:hover,
+.map-support-link:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .map-route-planner-control,
-.map-legend-control {
+.map-legend-control,
+.map-event-feed-control {
   position: relative;
   display: flex;
   align-items: center;
@@ -1031,7 +1102,8 @@ body {
   color: #ffffff;
 }
 
-.map-legend-button {
+.map-legend-button,
+.map-event-feed-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1050,6 +1122,12 @@ body {
 .map-legend-button.is-active {
   border-color: rgba(96, 165, 250, 0.88);
   background: rgba(37, 99, 235, 0.32);
+  color: #ffffff;
+}
+
+.map-event-feed-button.is-active {
+  border-color: rgba(250, 204, 21, 0.88);
+  background: rgba(202, 138, 4, 0.3);
   color: #ffffff;
 }
 
@@ -1103,6 +1181,32 @@ body {
   width: 12px;
 }
 
+.map-event-feed-button-icon {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 18px;
+}
+
+.map-event-feed-button-icon::before {
+  position: absolute;
+  inset: 2px 3px;
+  border: 2px solid currentColor;
+  border-radius: 3px;
+  content: "";
+}
+
+.map-event-feed-button-icon::after {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 8px;
+  height: 2px;
+  background: currentColor;
+  box-shadow: 0 4px 0 currentColor;
+  content: "";
+}
+
 .map-route-planner-stats {
   display: grid;
   gap: 1px;
@@ -1121,8 +1225,8 @@ body {
 
 .map-legend-panel {
   position: absolute;
-  left: 0;
-  bottom: calc(100% + 8px);
+  left: calc(100% + 8px);
+  bottom: 0;
   display: grid;
   gap: 8px;
   width: 190px;
@@ -1196,6 +1300,9 @@ body {
 }
 
 .map-event-feed-panel {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 0;
   display: grid;
   gap: 8px;
   width: min(320px, calc(100vw - 32px));
@@ -1325,6 +1432,7 @@ body {
 .map-settings-button:focus-visible,
 .map-route-planner-button:focus-visible,
 .map-legend-button:focus-visible,
+.map-event-feed-button:focus-visible,
 .map-roadway-edit-toggle input:focus-visible,
 .map-account-close:focus-visible,
 .map-account-admin-button:focus-visible {

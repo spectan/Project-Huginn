@@ -164,6 +164,29 @@ describe("map overlay styles", () => {
     expect(listBlock).toContain("overflow-y: auto");
   });
 
+  it("opens legend and event panels to the right of their bottom-left buttons", () => {
+    const legendBlock = getStandaloneCssBlock(".map-legend-panel");
+    const eventFeedBlock = getStandaloneCssBlock(".map-event-feed-panel");
+
+    expect(legendBlock).toContain("left: calc(100% + 8px)");
+    expect(legendBlock).toContain("bottom: 0");
+    expect(eventFeedBlock).toContain("left: calc(100% + 8px)");
+    expect(eventFeedBlock).toContain("bottom: 0");
+    expect(legendBlock).not.toContain("bottom: calc(100% + 8px)");
+    expect(eventFeedBlock).not.toContain("bottom: calc(100% + 8px)");
+  });
+
+  it("keeps the support link unobtrusive at the bottom center", () => {
+    const supportLinkBlock = getStandaloneCssBlock(".map-support-link");
+
+    expect(supportLinkBlock).toContain("position: fixed");
+    expect(supportLinkBlock).toContain("left: 50%");
+    expect(supportLinkBlock).toContain("bottom: 6px");
+    expect(supportLinkBlock).toContain("transform: translateX(-50%)");
+    expect(supportLinkBlock).toContain("font-size: 11px");
+    expect(supportLinkBlock).toContain("opacity: 0.72");
+  });
+
   it("uses configurable grid colors with black grid edging", () => {
     const sectorBlock = getStandaloneCssBlock(".map-sector-grid");
     const missionBlock = getStandaloneCssBlock(".map-mission-grid");
