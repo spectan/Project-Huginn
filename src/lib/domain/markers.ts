@@ -24,15 +24,17 @@ export type TowerInput = {
   damage: string;
   makerName: string;
   makerNumber: string;
+  planned?: boolean;
 };
 
 export type TowerMarkerInput = {
   x: number;
   y: number;
-  qlHundredths: number;
-  damageHundredths: number;
+  qlHundredths: number | null;
+  damageHundredths: number | null;
   makerName: string;
   makerNumber: string;
+  planned: boolean;
 };
 
 export type CampType = "Rift" | "Goblin";
@@ -172,6 +174,14 @@ export function formatTowerCreator(input: { makerName: string; makerNumber: stri
   const makerName = input.makerName.trim();
   const makerNumber = input.makerNumber.trim();
 
+  if (makerName === "" && makerNumber === "") {
+    return "Unknown";
+  }
+
+  if (makerName === "") {
+    return `Unknown ${makerNumber}`;
+  }
+
   if (makerNumber === "") {
     return `${makerName} - ???`;
   }
@@ -188,17 +198,17 @@ export function validateTowerInput(
     return coordinate;
   }
 
-  const ql = parseQualityLevelHundredths(input.ql);
+  const ql = parseOptionalTowerHundredths(input.ql, parseQualityLevelHundredths);
   if (!ql.ok) {
     return ql;
   }
 
-  const damage = parseDamageHundredths(input.damage);
+  const damage = parseOptionalTowerHundredths(input.damage, parseDamageHundredths);
   if (!damage.ok) {
     return damage;
   }
 
-  const makerName = normalizeRequiredText(input.makerName, "Creator name");
+  const makerName = normalizeOptionalText(input.makerName, "Creator name", MAX_NAME_LENGTH);
   if (!makerName.ok) {
     return makerName;
   }
@@ -214,8 +224,16 @@ export function validateTowerInput(
     qlHundredths: ql.value,
     damageHundredths: damage.value,
     makerName: makerName.value,
-    makerNumber
+    makerNumber,
+    planned: input.planned === true
   });
+}
+
+function parseOptionalTowerHundredths(
+  input: string,
+  parser: (input: string) => Result<number>
+): Result<number | null> {
+  return input.trim() === "" ? ok(null) : parser(input);
 }
 
 export function validateDeedInput(

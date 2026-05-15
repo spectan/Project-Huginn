@@ -167,10 +167,11 @@ model Tower {
   map              Map       @relation(fields: [mapId], references: [id], onDelete: Cascade)
   x                Int
   y                Int
-  qlHundredths     Int
-  damageHundredths Int
+  qlHundredths     Int?
+  damageHundredths Int?
   makerName        String
   makerNumber      String
+  planned          Boolean   @default(false)
   createdByUserId  String?
   createdBy        User?     @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUserId  String?

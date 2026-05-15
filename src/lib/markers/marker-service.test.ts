@@ -12,17 +12,37 @@ const writer = {
   accessLevel: "WRITE",
   approvalStatus: "APPROVED",
   id: "writer-id",
-  isAdmin: false
+  isAdmin: false,
+  username: "Writer"
 } as const;
 
 const reader = {
   accessLevel: "READ",
   approvalStatus: "APPROVED",
   id: "reader-id",
-  isAdmin: false
+  isAdmin: false,
+  username: "Reader"
 } as const;
 
-function createDependencies(): MarkerServiceDependencies {
+function createDependencies(): MarkerServiceDependencies & { auditEvents: unknown[] } {
+  type ModifierFields = {
+    createdBy?: { username: string } | null;
+    createdByUserId?: string;
+    updatedBy?: { username: string } | null;
+    updatedByUserId?: string;
+  };
+  const usersById = new Map<string, string>([
+    [writer.id, writer.username],
+    [reader.id, reader.username]
+  ]);
+  const userSummary = (userId: string | undefined) => (
+    userId === undefined ? null : { username: usersById.get(userId) ?? "Unknown" }
+  );
+  const withModifierUsers = <T extends ModifierFields>(record: T): T => ({
+    ...record,
+    createdBy: userSummary(record.createdByUserId),
+    updatedBy: userSummary(record.updatedByUserId)
+  });
   const mapLayers = [
     {
       heightPx: 2048,
@@ -51,17 +71,18 @@ function createDependencies(): MarkerServiceDependencies {
     name: "Celebration",
     widthPx: 2048
   });
-  const towers = new Map<string, {
-    damageHundredths: number;
+  const towers = new Map<string, ModifierFields & {
+    damageHundredths: number | null;
     id: string;
     makerName: string;
     makerNumber: string;
     mapId: string;
-    qlHundredths: number;
+    planned: boolean;
+    qlHundredths: number | null;
     x: number;
     y: number;
   }>();
-  const notes = new Map<string, {
+  const notes = new Map<string, ModifierFields & {
     category: string;
     id: string;
     mapId: string;
@@ -75,7 +96,7 @@ function createDependencies(): MarkerServiceDependencies {
     mapId: string;
     name: string;
   }>();
-  const rifts = new Map<string, {
+  const rifts = new Map<string, ModifierFields & {
     arrivalDate: Date | null;
     estimatedRiftTime: Date | null;
     id: string;
@@ -84,7 +105,7 @@ function createDependencies(): MarkerServiceDependencies {
     x: number;
     y: number;
   }>();
-  const camps = new Map<string, {
+  const camps = new Map<string, ModifierFields & {
     campType: "Rift" | "Goblin";
     id: string;
     mapId: string;
@@ -92,7 +113,7 @@ function createDependencies(): MarkerServiceDependencies {
     x: number;
     y: number;
   }>();
-  const minedoors = new Map<string, {
+  const minedoors = new Map<string, ModifierFields & {
     id: string;
     mapId: string;
     notes: string;
@@ -100,7 +121,7 @@ function createDependencies(): MarkerServiceDependencies {
     x: number;
     y: number;
   }>();
-  const locateSouls = new Map<string, {
+  const locateSouls = new Map<string, ModifierFields & {
     casterFacing: "north" | "northeast" | "east" | "southeast" | "south" | "southwest" | "west" | "northwest";
     direction: "ahead" | "aheadRight" | "right" | "behindRight" | "behind" | "behindLeft" | "left" | "aheadLeft";
     distanceBand: "0" | "1-3" | "4-5" | "6-9" | "10-19" | "20-49" | "50-199" | "200-499" | "500-999" | "1000+" | "2000+";
@@ -111,7 +132,7 @@ function createDependencies(): MarkerServiceDependencies {
     x: number;
     y: number;
   }>();
-  const paths = new Map<string, {
+  const paths = new Map<string, ModifierFields & {
     id: string;
     mapId: string;
     name: string;
@@ -122,7 +143,7 @@ function createDependencies(): MarkerServiceDependencies {
     x: number;
     y: number;
   }>();
-  const deeds = new Map<string, {
+  const deeds = new Map<string, ModifierFields & {
     east: number;
     foundingDate: Date | null;
     founder: string;
@@ -145,53 +166,55 @@ function createDependencies(): MarkerServiceDependencies {
   let minedoorCount = 0;
   let locateSoulCount = 0;
   let pathCount = 0;
+  const auditEvents: unknown[] = [];
 
   return {
+    auditEvents,
     createLocateSoul: async (data) => {
       locateSoulCount += 1;
-      const locateSoul = { ...data, id: `locate-soul-${locateSoulCount}` };
+      const locateSoul = withModifierUsers({ ...data, id: `locate-soul-${locateSoulCount}` });
       locateSouls.set(locateSoul.id, locateSoul);
       return locateSoul;
     },
     createPath: async (data) => {
       pathCount += 1;
-      const path = { ...data, id: `path-${pathCount}` };
+      const path = withModifierUsers({ ...data, id: `path-${pathCount}` });
       paths.set(path.id, path);
       return path;
     },
     createCamp: async (data) => {
       campCount += 1;
-      const camp = { ...data, id: `camp-${campCount}` };
+      const camp = withModifierUsers({ ...data, id: `camp-${campCount}` });
       camps.set(camp.id, camp);
       return camp;
     },
     createDeed: async (data) => {
       deedCount += 1;
-      const deed = { ...data, id: `deed-${deedCount}` };
+      const deed = withModifierUsers({ ...data, id: `deed-${deedCount}` });
       deeds.set(deed.id, deed);
       return deed;
     },
     createNote: async (data) => {
       noteCount += 1;
-      const note = { ...data, id: `note-${noteCount}` };
+      const note = withModifierUsers({ ...data, id: `note-${noteCount}` });
       notes.set(note.id, note);
       return note;
     },
     createMinedoor: async (data) => {
       minedoorCount += 1;
-      const minedoor = { ...data, id: `minedoor-${minedoorCount}` };
+      const minedoor = withModifierUsers({ ...data, id: `minedoor-${minedoorCount}` });
       minedoors.set(minedoor.id, minedoor);
       return minedoor;
     },
     createRift: async (data) => {
       riftCount += 1;
-      const rift = { ...data, id: `rift-${riftCount}` };
+      const rift = withModifierUsers({ ...data, id: `rift-${riftCount}` });
       rifts.set(rift.id, rift);
       return rift;
     },
     createTower: async (data) => {
       towerCount += 1;
-      const tower = { ...data, id: `tower-${towerCount}` };
+      const tower = withModifierUsers({ ...data, id: `tower-${towerCount}` });
       towers.set(tower.id, tower);
       return tower;
     },
@@ -217,7 +240,7 @@ function createDependencies(): MarkerServiceDependencies {
       }
 
       noteCount += 1;
-      const note = { ...input.note, id: `note-${noteCount}` };
+      const note = withModifierUsers({ ...input.note, id: `note-${noteCount}` });
       notes.set(note.id, note);
       deeds.delete(input.deedId);
 
@@ -327,7 +350,9 @@ function createDependencies(): MarkerServiceDependencies {
       towers: Array.from(towers.values()).filter((tower) => tower.mapId === mapId)
     }),
     now: () => new Date("2026-05-10T00:00:00.000Z"),
-    recordAudit: async () => undefined,
+    recordAudit: async (input) => {
+      auditEvents.push(input);
+    },
     softDeleteCamp: async (id) => {
       const camp = camps.get(id);
       camps.delete(id);
@@ -375,7 +400,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       deeds.set(id, updated);
       return updated;
     },
@@ -386,7 +411,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       camps.set(id, updated);
       return updated;
     },
@@ -397,7 +422,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       minedoors.set(id, updated);
       return updated;
     },
@@ -408,7 +433,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       locateSouls.set(id, updated);
       return updated;
     },
@@ -419,7 +444,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       notes.set(id, updated);
       return updated;
     },
@@ -430,7 +455,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       paths.set(id, updated);
       return updated;
     },
@@ -441,7 +466,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       rifts.set(id, updated);
       return updated;
     },
@@ -452,7 +477,7 @@ function createDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      const updated = { ...existing, ...data };
+      const updated = withModifierUsers({ ...existing, ...data });
       towers.set(id, updated);
       return updated;
     }
@@ -460,7 +485,7 @@ function createDependencies(): MarkerServiceDependencies {
 }
 
 describe("marker service", () => {
-  let deps: MarkerServiceDependencies;
+  let deps: MarkerServiceDependencies & { auditEvents: unknown[] };
 
   beforeEach(() => {
     deps = createDependencies();
@@ -473,6 +498,7 @@ describe("marker service", () => {
         damage: "0.25",
         makerName: "Mako",
         makerNumber: "945",
+        planned: true,
         ql: "89.50",
         type: "tower",
         x: 25,
@@ -486,9 +512,44 @@ describe("marker service", () => {
       value: {
         damage: "0.25",
         id: "tower-1",
+        lastModifiedBy: "Writer",
         makerName: "Mako",
         makerNumber: "945",
+        planned: true,
         ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      }
+    });
+  });
+
+  it("creates a planned tower marker without detail fields", async () => {
+    const result = await createMarker({
+      actor: writer,
+      input: {
+        damage: "",
+        makerName: "",
+        makerNumber: "",
+        planned: true,
+        ql: "",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        damage: "",
+        id: "tower-1",
+        lastModifiedBy: "Writer",
+        makerName: "",
+        makerNumber: "",
+        planned: true,
+        ql: "",
         type: "tower",
         x: 25,
         y: 30
@@ -542,6 +603,7 @@ describe("marker service", () => {
         foundingDate: "2026-05-10",
         founder: "Founder",
         id: "deed-1",
+        lastModifiedBy: "Writer",
         name: "Oak Harbour",
         north: 5,
         perimeter: 5,
@@ -574,6 +636,7 @@ describe("marker service", () => {
         arrivalDate: "2026-05-10",
         estimatedRiftTime: "2026-05-10T18:30",
         id: "rift-1",
+        lastModifiedBy: "Writer",
         notes: "Bring cotton",
         type: "rift",
         x: 100,
@@ -600,6 +663,7 @@ describe("marker service", () => {
       value: {
         campType: "Goblin",
         id: "camp-1",
+        lastModifiedBy: "Writer",
         notes: "",
         type: "camp",
         x: 100,
@@ -625,6 +689,7 @@ describe("marker service", () => {
       ok: true,
       value: {
         id: "minedoor-1",
+        lastModifiedBy: "Writer",
         notes: "Hidden entrance",
         strength: "73ql",
         type: "minedoor",
@@ -657,6 +722,7 @@ describe("marker service", () => {
         direction: "aheadLeft",
         distanceBand: "50-199",
         id: "locate-soul-1",
+        lastModifiedBy: "Writer",
         notes: "Corpse result",
         targetName: "Funkiey",
         type: "locateSoul",
@@ -687,6 +753,7 @@ describe("marker service", () => {
       ok: true,
       value: {
         id: "path-1",
+        lastModifiedBy: "Writer",
         name: "Cedar Bridge",
         notes: "Two lanes",
         points: [
@@ -726,8 +793,10 @@ describe("marker service", () => {
           {
             damage: "0.25",
             id: "tower-1",
+            lastModifiedBy: "Writer",
             makerName: "Mako",
             makerNumber: "945",
+            planned: false,
             ql: "89.50",
             type: "tower",
             x: 25,
@@ -761,6 +830,9 @@ describe("marker service", () => {
         }
       }
     });
+    expect(deps.auditEvents).not.toContainEqual(expect.objectContaining({
+      action: "MARKER_LIST_VIEW"
+    }));
   });
 
   it("updates existing notes with validation", async () => {
@@ -802,6 +874,7 @@ describe("marker service", () => {
       value: {
         category: "Landmarks",
         id: "note-1",
+        lastModifiedBy: "Writer",
         text: "Updated note",
         title: "Updated title",
         type: "note",
@@ -886,6 +959,7 @@ describe("marker service", () => {
     });
     expect(result.value.marker).toMatchObject({
       category: "Abandoned Deed",
+      lastModifiedBy: "Writer",
       title: "Oak Harbour",
       type: "note",
       x: 500,

@@ -7,13 +7,14 @@ services:
       db:
         condition: service_healthy
     environment:
-      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       DATABASE_URL: postgresql://${POSTGRES_USER:-wurm}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/${POSTGRES_DB:-wurm_map_util}?schema=public
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD is required}
       INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
       MAP_STORAGE_PATH: /app/map-storage
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      WURMMAPS_EVENT_FEED_TIMEOUT_MS: ${WURMMAPS_EVENT_FEED_TIMEOUT_MS:-3000}
+      WURMMAPS_STAT_DELEGATE_BASE_URL: ${WURMMAPS_STAT_DELEGATE_BASE_URL:-https://wurmmaps.xyz/APIs/stat-delegate.php}
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

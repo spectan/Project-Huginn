@@ -30,8 +30,10 @@ export type WorkspaceServer = {
 export type TowerWorkspaceMarker = {
   damage: string;
   id: string;
+  lastModifiedBy?: string;
   makerName: string;
   makerNumber: string;
+  planned?: boolean;
   ql: string;
   type: "tower";
   x: number;
@@ -43,6 +45,7 @@ export type DeedWorkspaceMarker = {
   foundingDate: string | null;
   founder: string;
   id: string;
+  lastModifiedBy?: string;
   name: string;
   north: number;
   perimeter: number;
@@ -56,6 +59,7 @@ export type DeedWorkspaceMarker = {
 export type NoteWorkspaceMarker = {
   category: string;
   id: string;
+  lastModifiedBy?: string;
   text: string;
   title: string;
   type: "note";
@@ -67,6 +71,7 @@ export type RiftWorkspaceMarker = {
   arrivalDate: string | null;
   estimatedRiftTime: string | null;
   id: string;
+  lastModifiedBy?: string;
   notes: string;
   type: "rift";
   x: number;
@@ -76,6 +81,7 @@ export type RiftWorkspaceMarker = {
 export type CampWorkspaceMarker = {
   campType: "Rift" | "Goblin";
   id: string;
+  lastModifiedBy?: string;
   notes: string;
   type: "camp";
   x: number;
@@ -84,6 +90,7 @@ export type CampWorkspaceMarker = {
 
 export type MinedoorWorkspaceMarker = {
   id: string;
+  lastModifiedBy?: string;
   notes: string;
   strength: string;
   type: "minedoor";
@@ -96,6 +103,7 @@ export type LocateSoulWorkspaceMarker = {
   direction: LocateSoulDirection;
   distanceBand: LocateSoulDistanceBandKey;
   id: string;
+  lastModifiedBy?: string;
   notes: string;
   targetName: string;
   type: "locateSoul";
@@ -105,6 +113,7 @@ export type LocateSoulWorkspaceMarker = {
 
 export type PathWorkspaceMarker = {
   id: string;
+  lastModifiedBy?: string;
   name: string;
   notes: string;
   points: Array<{ x: number; y: number }>;
@@ -139,6 +148,7 @@ export type MarkerVisibility = {
   missionGrid: boolean;
   notes: boolean;
   overlays: boolean;
+  plannedTowers: boolean;
   riftOverlays: boolean;
   sectorGrid: boolean;
   towers: boolean;

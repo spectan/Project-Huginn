@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   WURMMAPS_EVENT_FEED_LIMIT,
   fetchWurmMapsEventFeed,
@@ -6,6 +6,18 @@ import {
 } from "./event-feed";
 
 describe("WurmMaps event feed", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    delete process.env.WURMMAPS_EVENT_FEED_TIMEOUT_MS;
+    delete process.env.WURMMAPS_STAT_DELEGATE_BASE_URL;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.WURMMAPS_EVENT_FEED_TIMEOUT_MS;
+    delete process.env.WURMMAPS_STAT_DELEGATE_BASE_URL;
+  });
+
   it("normalizes event sections into one newest-first feed", () => {
     const result = normalizeWurmMapsEventFeed({
       "Deed Events": [
@@ -146,6 +158,46 @@ describe("WurmMaps event feed", () => {
         cache: "no-store"
       })
     );
+  });
+
+  it("uses the configured stat delegate base URL", async () => {
+    process.env.WURMMAPS_STAT_DELEGATE_BASE_URL = "https://maps.example.test/feed";
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({}), {
+      status: 200
+    })) as unknown as typeof fetch;
+
+    const result = await fetchWurmMapsEventFeed("Celebration", {
+      fetchImpl: fetchMock,
+      now: () => new Date("2026-05-13T04:00:00.000Z")
+    });
+
+    expect(result.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://maps.example.test/feed?map=celebration",
+      expect.objectContaining({
+        cache: "no-store"
+      })
+    );
+  });
+
+  it("times out unavailable stat delegate requests", async () => {
+    vi.useFakeTimers();
+    process.env.WURMMAPS_EVENT_FEED_TIMEOUT_MS = "50";
+    const fetchMock = vi.fn((_url, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+    })) as unknown as typeof fetch;
+
+    const resultPromise = fetchWurmMapsEventFeed("Celebration", {
+      fetchImpl: fetchMock,
+      now: () => new Date("2026-05-13T04:00:00.000Z")
+    });
+
+    await vi.advanceTimersByTimeAsync(50);
+
+    await expect(resultPromise).resolves.toEqual({
+      error: "WurmMaps event feed is unavailable",
+      ok: false
+    });
   });
 
   it("returns an error when WurmMaps returns a non-JSON or non-OK response", async () => {

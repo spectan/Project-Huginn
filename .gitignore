@@ -33,6 +33,12 @@ postgres-data/
 # local raw map source files
 Celebration-classic*.png
 
+# local project notes
+architecture.md
+docs/
+design.md
+learnings.md
+
 # package manager logs
 npm-debug.log*
 yarn-debug.log*
@@ -42,6 +48,7 @@ pnpm-debug.log*
 # editor and OS files
 .vscode/
 .idea/
+.claude/
 .DS_Store
 Thumbs.db
 

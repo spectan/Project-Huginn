@@ -9,6 +9,12 @@ describe("user map settings", () => {
   it("returns defaults for missing or invalid persisted settings", () => {
     expect(parseUserMapSettings(null)).toEqual(DEFAULT_USER_MAP_SETTINGS);
     expect(parseUserMapSettings("invalid")).toEqual(DEFAULT_USER_MAP_SETTINGS);
+    expect(DEFAULT_USER_MAP_SETTINGS.searchLinesEnabled).toBe(false);
+    expect(DEFAULT_USER_MAP_SETTINGS.routePlannerSpeedKmh).toBe(0);
+    expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.deeds).toBe(100);
+    expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.riftOverlays).toBe(100);
+    expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.towers).toBe(100);
+    expect(DEFAULT_USER_MAP_SETTINGS.markerVisibility.plannedTowers).toBe(true);
   });
 
   it("merges partial persisted settings over defaults", () => {
@@ -32,12 +38,15 @@ describe("user map settings", () => {
         highways: false,
         locateSouls: false,
         minedoors: false,
+        plannedTowers: false,
         riftOverlays: false
       },
       roadwayEditPanelPosition: {
         left: 300.2,
         top: 500.8
       },
+      routePlannerSpeedKmh: 12.4,
+      searchLinesEnabled: true,
       tileHighlight: {
         selection: "Clay"
       }
@@ -64,12 +73,15 @@ describe("user map settings", () => {
         highways: false,
         locateSouls: false,
         minedoors: false,
+        plannedTowers: false,
         riftOverlays: false
       },
       roadwayEditPanelPosition: {
         left: 300,
         top: 501
       },
+      routePlannerSpeedKmh: 12,
+      searchLinesEnabled: true,
       tileHighlight: {
         ...DEFAULT_USER_MAP_SETTINGS.tileHighlight,
         selection: "Clay"
@@ -210,6 +222,28 @@ describe("user map settings", () => {
     }).eventFeedPanelSize).toEqual(DEFAULT_USER_MAP_SETTINGS.eventFeedPanelSize);
   });
 
+  it("keeps valid search line and route speed preferences and rejects invalid ones", () => {
+    expect(parseUserMapSettings({
+      routePlannerSpeedKmh: 45.6,
+      searchLinesEnabled: true
+    })).toMatchObject({
+      routePlannerSpeedKmh: 46,
+      searchLinesEnabled: true
+    });
+
+    expect(parseUserMapSettings({
+      routePlannerSpeedKmh: -12,
+      searchLinesEnabled: "yes"
+    })).toMatchObject({
+      routePlannerSpeedKmh: 0,
+      searchLinesEnabled: DEFAULT_USER_MAP_SETTINGS.searchLinesEnabled
+    });
+
+    expect(parseUserMapSettings({
+      routePlannerSpeedKmh: 99
+    }).routePlannerSpeedKmh).toBe(60);
+  });
+
   it("merges incoming partial settings into current settings", () => {
     const current = parseUserMapSettings({
       markerColors: {
@@ -237,6 +271,8 @@ describe("user map settings", () => {
         left: 75,
         top: 90
       },
+      routePlannerSpeedKmh: 27,
+      searchLinesEnabled: true,
       tileHighlightPanelPosition: null
     })).toEqual({
       ...current,
@@ -252,6 +288,8 @@ describe("user map settings", () => {
         left: 75,
         top: 90
       },
+      routePlannerSpeedKmh: 27,
+      searchLinesEnabled: true,
       tileHighlightPanelPosition: null
     });
   });

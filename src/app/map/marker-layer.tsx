@@ -116,6 +116,34 @@ function renderMarker(
       return null;
     }
 
+    const towerColor = markerColors.towers;
+    const towerOpacity = markerOpacities.towers;
+    const isPlannedTower = marker.planned === true;
+
+    if (isPlannedTower && !visibility.plannedTowers) {
+      return null;
+    }
+
+    const protectionBorderStyles = getSquareEdgeStyles(
+      marker.x,
+      marker.y,
+      TOWER_PROTECTION_DISTANCE_TILES,
+      towerColor,
+      towerOpacity,
+      view,
+      1,
+      isPlannedTower
+    );
+    const placementBorderStyles = getSquareEdgeStyles(
+      marker.x,
+      marker.y,
+      TOWER_PLACEMENT_DISTANCE_TILES,
+      towerColor,
+      towerOpacity,
+      view,
+      0.5
+    );
+
     return (
       <div className="map-marker-group" key={marker.id}>
         {visibility.overlays ? (
@@ -123,12 +151,60 @@ function renderMarker(
             <span
               className="map-tower-zone map-tower-zone--placement"
               data-testid={`tower-placement-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, markerColors.towers, markerOpacities.towers, view)}
+              style={getTowerOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, towerOpacity, view)}
             />
             <span
-              className="map-tower-zone map-tower-zone--protection"
+              className="map-tower-zone-edge map-tower-zone-edge--placement"
+              data-testid={`tower-placement-border-top-${marker.id}`}
+              style={placementBorderStyles.top}
+            />
+            <span
+              className="map-tower-zone-edge map-tower-zone-edge--placement"
+              data-testid={`tower-placement-border-bottom-${marker.id}`}
+              style={placementBorderStyles.bottom}
+            />
+            <span
+              className="map-tower-zone-edge map-tower-zone-edge--placement"
+              data-testid={`tower-placement-border-left-${marker.id}`}
+              style={placementBorderStyles.left}
+            />
+            <span
+              className="map-tower-zone-edge map-tower-zone-edge--placement"
+              data-testid={`tower-placement-border-right-${marker.id}`}
+              style={placementBorderStyles.right}
+            />
+            <span
+              className={isPlannedTower ? "map-tower-zone map-tower-zone--protection is-planned" : "map-tower-zone map-tower-zone--protection"}
               data-testid={`tower-protection-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, TOWER_PROTECTION_DISTANCE_TILES, markerColors.towers, markerOpacities.towers, view)}
+              style={getTowerOverlayStyle(
+                marker.x,
+                marker.y,
+                TOWER_PROTECTION_DISTANCE_TILES,
+                towerOpacity,
+                view,
+                isPlannedTower,
+                towerColor
+              )}
+            />
+            <span
+              className={getTowerProtectionEdgeClassName(isPlannedTower)}
+              data-testid={`tower-protection-border-top-${marker.id}`}
+              style={protectionBorderStyles.top}
+            />
+            <span
+              className={getTowerProtectionEdgeClassName(isPlannedTower)}
+              data-testid={`tower-protection-border-bottom-${marker.id}`}
+              style={protectionBorderStyles.bottom}
+            />
+            <span
+              className={getTowerProtectionEdgeClassName(isPlannedTower)}
+              data-testid={`tower-protection-border-left-${marker.id}`}
+              style={protectionBorderStyles.left}
+            />
+            <span
+              className={getTowerProtectionEdgeClassName(isPlannedTower)}
+              data-testid={`tower-protection-border-right-${marker.id}`}
+              style={protectionBorderStyles.right}
             />
           </>
         ) : null}
@@ -141,7 +217,7 @@ function renderMarker(
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
           onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-          style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.towers, view)}
+          style={getOpaqueCenterTileStyle(marker.x, marker.y, towerColor, view)}
           type="button"
         />
       </div>
@@ -161,6 +237,7 @@ function renderMarker(
         y: marker.y - marker.north
       }, view)
     };
+    const deedBorderStyles = getDeedBorderStyles(marker, markerColors.deeds, markerOpacities.deeds, view);
     const deedPerimeterStyles = getDeedPerimeterStyles(marker, markerColors.deeds, markerOpacities.deeds, view);
 
     return (
@@ -177,10 +254,29 @@ function renderMarker(
               onMouseMove={(event) => onHoverMove(marker, event)}
               style={{
                 ...deedOverlayStyle,
-                backgroundColor: markerColors.deeds,
                 opacity: percentageToOpacity(markerOpacities.deeds)
               }}
               type="button"
+            />
+            <span
+              className="map-deed-border"
+              data-testid={`deed-border-top-${marker.id}`}
+              style={deedBorderStyles.top}
+            />
+            <span
+              className="map-deed-border"
+              data-testid={`deed-border-bottom-${marker.id}`}
+              style={deedBorderStyles.bottom}
+            />
+            <span
+              className="map-deed-border"
+              data-testid={`deed-border-left-${marker.id}`}
+              style={deedBorderStyles.left}
+            />
+            <span
+              className="map-deed-border"
+              data-testid={`deed-border-right-${marker.id}`}
+              style={deedBorderStyles.right}
             />
             {visibility.deedPerimeters ? (
               <>
@@ -236,14 +332,45 @@ function renderMarker(
   }
 
   if (marker.type === "rift") {
+    const riftBorderStyles = getSquareEdgeStyles(
+      marker.x,
+      marker.y,
+      RIFT_OVERLAY_DISTANCE_TILES,
+      markerColors.rifts,
+      markerOpacities.riftOverlays,
+      view
+    );
+
     return (
       <div className="map-marker-group" key={marker.id}>
         {visibility.overlays && visibility.riftOverlays ? (
-          <span
-            className="map-rift-overlay"
-            data-testid={`rift-overlay-${marker.id}`}
-            style={getOverlayStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, markerColors.rifts, markerOpacities.riftOverlays, view)}
-          />
+          <>
+            <span
+              className="map-rift-overlay"
+              data-testid={`rift-overlay-${marker.id}`}
+              style={getOverlayStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, markerOpacities.riftOverlays, view)}
+            />
+            <span
+              className="map-rift-border"
+              data-testid={`rift-overlay-border-top-${marker.id}`}
+              style={riftBorderStyles.top}
+            />
+            <span
+              className="map-rift-border"
+              data-testid={`rift-overlay-border-bottom-${marker.id}`}
+              style={riftBorderStyles.bottom}
+            />
+            <span
+              className="map-rift-border"
+              data-testid={`rift-overlay-border-left-${marker.id}`}
+              style={riftBorderStyles.left}
+            />
+            <span
+              className="map-rift-border"
+              data-testid={`rift-overlay-border-right-${marker.id}`}
+              style={riftBorderStyles.right}
+            />
+          </>
         ) : null}
         <button
           aria-label={`Rift at ${marker.x}, ${marker.y}`}
@@ -669,15 +796,35 @@ function getOverlayStyle(
   x: number,
   y: number,
   distance: number,
-  color: string,
   opacity: number,
   view: MarkerLayerView
 ): CSSProperties {
   return {
     ...getSquareStyle(x, y, distance, view),
-    backgroundColor: color,
     opacity: percentageToOpacity(opacity)
   };
+}
+
+function getTowerOverlayStyle(
+  x: number,
+  y: number,
+  distance: number,
+  opacity: number,
+  view: MarkerLayerView,
+  isPlanned = false,
+  color = "#ffffff"
+): CSSProperties {
+  return {
+    ...getSquareStyle(x, y, distance, view),
+    ...(isPlanned ? getPlannedTowerOverlayStripeStyle(color) : {}),
+    opacity: percentageToOpacity(opacity)
+  };
+}
+
+function getTowerProtectionEdgeClassName(isPlanned: boolean): string {
+  return isPlanned
+    ? "map-tower-zone-edge map-tower-zone-edge--protection is-planned"
+    : "map-tower-zone-edge map-tower-zone-edge--protection";
 }
 
 function getSquareStyle(x: number, y: number, distance: number, view: MarkerLayerView): CSSProperties {
@@ -716,39 +863,177 @@ function getDeedHeight(marker: Extract<WorkspaceMarker, { type: "deed" }>): numb
   return marker.north + marker.south + 1;
 }
 
+function getDeedBorderStyles(
+  marker: Extract<WorkspaceMarker, { type: "deed" }>,
+  color: string,
+  opacity: number,
+  view: MarkerLayerView
+): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+  return getRectEdgeStyles({
+    color,
+    height: getDeedHeight(marker),
+    opacity,
+    view,
+    width: getDeedWidth(marker),
+    x: marker.x - marker.west,
+    y: marker.y - marker.north
+  });
+}
+
 function getDeedPerimeterStyles(
   marker: Extract<WorkspaceMarker, { type: "deed" }>,
   color: string,
   opacity: number,
   view: MarkerLayerView
 ): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
-  const x = marker.x - marker.west - marker.perimeter;
-  const y = marker.y - marker.north - marker.perimeter;
-  const width = getDeedWidth(marker) + marker.perimeter * 2;
-  const height = getDeedHeight(marker) + marker.perimeter * 2;
+  return getRectEdgeStyles({
+    color,
+    edgeThicknessTiles: 0.5,
+    height: getDeedHeight(marker) + marker.perimeter * 2,
+    opacity,
+    view,
+    width: getDeedWidth(marker) + marker.perimeter * 2,
+    x: marker.x - marker.west - marker.perimeter,
+    y: marker.y - marker.north - marker.perimeter
+  });
+}
+
+function getSquareEdgeStyles(
+  x: number,
+  y: number,
+  distance: number,
+  color: string,
+  opacity: number,
+  view: MarkerLayerView,
+  edgeThicknessTiles = 1,
+  isPlanned = false
+): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+  const size = distance * 2 + 1;
+
+  return getRectEdgeStyles({
+    color,
+    edgeThicknessTiles,
+    height: size,
+    opacity,
+    view,
+    width: size,
+    x: x - distance,
+    y: y - distance,
+    ...(isPlanned ? { backgroundExtras: getPlannedTowerEdgeStripeStyle(color) } : {})
+  });
+}
+
+function getRectEdgeStyles({
+  backgroundExtras,
+  color,
+  edgeThicknessTiles = 1,
+  height,
+  opacity,
+  view,
+  width,
+  x,
+  y
+}: {
+  backgroundExtras?: CSSProperties;
+  color: string;
+  edgeThicknessTiles?: number;
+  height: number;
+  opacity: number;
+  view: MarkerLayerView;
+  width: number;
+  x: number;
+  y: number;
+}): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
   const edgeStyle = {
+    ...backgroundExtras,
     backgroundColor: color,
     opacity: percentageToOpacity(opacity)
   };
+  const edgeThickness = Math.min(1, Math.max(0.1, edgeThicknessTiles));
+  const edgeInset = (1 - edgeThickness) / 2;
+  const edgeLengthWidth = Math.max(edgeThickness, width - edgeInset * 2);
+  const edgeLengthHeight = Math.max(edgeThickness, height - edgeInset * 2);
 
   return {
     bottom: {
-      ...getScreenRectStyle({ height: 1, width, x, y: y + height - 1 }, view),
+      ...getScreenRectStyle({
+        height: edgeThickness,
+        width: edgeLengthWidth,
+        x: x + edgeInset,
+        y: y + height - 1 + edgeInset
+      }, view),
       ...edgeStyle
     },
     left: {
-      ...getScreenRectStyle({ height, width: 1, x, y }, view),
+      ...getScreenRectStyle({
+        height: edgeLengthHeight,
+        width: edgeThickness,
+        x: x + edgeInset,
+        y: y + edgeInset
+      }, view),
       ...edgeStyle
     },
     right: {
-      ...getScreenRectStyle({ height, width: 1, x: x + width - 1, y }, view),
+      ...getScreenRectStyle({
+        height: edgeLengthHeight,
+        width: edgeThickness,
+        x: x + width - 1 + edgeInset,
+        y: y + edgeInset
+      }, view),
       ...edgeStyle
     },
     top: {
-      ...getScreenRectStyle({ height: 1, width, x, y }, view),
+      ...getScreenRectStyle({
+        height: edgeThickness,
+        width: edgeLengthWidth,
+        x: x + edgeInset,
+        y: y + edgeInset
+      }, view),
       ...edgeStyle
     }
   };
+}
+
+function getPlannedTowerOverlayStripeStyle(color: string): CSSProperties {
+  const stripeColor = getAlphaColor(color, 0.18);
+
+  return {
+    backgroundImage: `repeating-linear-gradient(135deg, ${stripeColor} 0px, ${stripeColor} 8px, transparent 8px, transparent 16px)`
+  };
+}
+
+function getPlannedTowerEdgeStripeStyle(color: string): CSSProperties {
+  return {
+    backgroundImage: `repeating-linear-gradient(135deg, ${color} 0px, ${color} 8px, rgba(15, 23, 42, 0.72) 8px, rgba(15, 23, 42, 0.72) 16px)`
+  };
+}
+
+function getAlphaColor(color: string, alpha: number): string {
+  const trimmed = color.trim();
+  const fullHex = trimmed.match(/^#([0-9a-f]{6})$/i);
+
+  if (fullHex?.[1] !== undefined) {
+    const value = fullHex[1];
+    const red = Number.parseInt(value.slice(0, 2), 16);
+    const green = Number.parseInt(value.slice(2, 4), 16);
+    const blue = Number.parseInt(value.slice(4, 6), 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  }
+
+  const shortHex = trimmed.match(/^#([0-9a-f]{3})$/i);
+
+  if (shortHex?.[1] !== undefined) {
+    const value = shortHex[1];
+    const redHex = value.slice(0, 1);
+    const greenHex = value.slice(1, 2);
+    const blueHex = value.slice(2, 3);
+    const red = Number.parseInt(redHex + redHex, 16);
+    const green = Number.parseInt(greenHex + greenHex, 16);
+    const blue = Number.parseInt(blueHex + blueHex, 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  }
+
+  return `rgba(255, 255, 255, ${alpha})`;
 }
 
 function formatPixels(value: number): string {

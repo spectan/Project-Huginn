@@ -11,21 +11,27 @@ const mapWithLayers = {
   }
 };
 
+const markerUserRelations = {
+  createdBy: { select: { username: true } },
+  updatedBy: { select: { username: true } }
+};
+
 export function createMarkerDependencies(): MarkerServiceDependencies {
   return {
-    createCamp: async (input) => prisma.camp.create({ data: input }),
-    createDeed: async (input) => prisma.deed.create({ data: input }),
-    createLocateSoul: async (input) => prisma.locateSoul.create({ data: input }),
-    createMinedoor: async (input) => prisma.minedoor.create({ data: input }),
-    createNote: async (input) => prisma.note.create({ data: input }),
+    createCamp: async (input) => prisma.camp.create({ data: input, include: markerUserRelations }),
+    createDeed: async (input) => prisma.deed.create({ data: input, include: markerUserRelations }),
+    createLocateSoul: async (input) => prisma.locateSoul.create({ data: input, include: markerUserRelations }),
+    createMinedoor: async (input) => prisma.minedoor.create({ data: input, include: markerUserRelations }),
+    createNote: async (input) => prisma.note.create({ data: input, include: markerUserRelations }),
     createPath: async (input) => prisma.pathMarker.create({
       data: {
         ...input,
         points: input.points as Prisma.InputJsonValue
-      }
+      },
+      include: markerUserRelations
     }).then(normalizePathRecord),
-    createRift: async (input) => prisma.rift.create({ data: input }),
-    createTower: async (input) => prisma.tower.create({ data: input }),
+    createRift: async (input) => prisma.rift.create({ data: input, include: markerUserRelations }),
+    createTower: async (input) => prisma.tower.create({ data: input, include: markerUserRelations }),
     disbandDeed: async (input) => prisma.$transaction(async (transaction) => {
       const deed = await transaction.deed.findFirst({
         where: { deletedAt: null, id: input.deedId }
@@ -50,7 +56,8 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
         }
       });
       const note = await transaction.note.create({
-        data: input.note
+        data: input.note,
+        include: markerUserRelations
       });
       const deletedDeed = await transaction.deed.update({
         data: {
@@ -64,15 +71,15 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       return { category, deletedDeed, note };
     }),
     findCamp: async (id) => prisma.camp.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     findDeed: async (id) => prisma.deed.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     findLocateSoul: async (id) => prisma.locateSoul.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     findMap: async (mapId) => prisma.map.findFirst({
@@ -80,56 +87,64 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       where: { id: mapId, isActive: true }
     }),
     findMinedoor: async (id) => prisma.minedoor.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     findNote: async (id) => prisma.note.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     findPath: async (id) => prisma.pathMarker.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }).then((path) => path === null ? null : normalizePathRecord(path)),
     findRift: async (id) => prisma.rift.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     findTower: async (id) => prisma.tower.findFirst({
-      include: { map: true },
+      include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
     }),
     listActiveMarkers: async (mapId) => {
       const [towers, deeds, notes, rifts, camps, minedoors, locateSouls, paths] = await Promise.all([
         prisma.tower.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.deed.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.note.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.rift.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.camp.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.minedoor.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.locateSoul.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         }),
         prisma.pathMarker.findMany({
+          include: markerUserRelations,
           orderBy: { createdAt: "asc" },
           where: { deletedAt: null, mapId }
         })
@@ -224,22 +239,27 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
     },
     updateDeed: async (id, input) => prisma.deed.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     }),
     updateCamp: async (id, input) => prisma.camp.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     }),
     updateMinedoor: async (id, input) => prisma.minedoor.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     }),
     updateLocateSoul: async (id, input) => prisma.locateSoul.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     }),
     updateNote: async (id, input) => prisma.note.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     }),
     updatePath: async (id, input) => prisma.pathMarker.update({
@@ -247,14 +267,17 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
         ...input,
         points: input.points as Prisma.InputJsonValue
       },
+      include: markerUserRelations,
       where: { id }
     }).then(normalizePathRecord),
     updateRift: async (id, input) => prisma.rift.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     }),
     updateTower: async (id, input) => prisma.tower.update({
       data: input,
+      include: markerUserRelations,
       where: { id }
     })
   };

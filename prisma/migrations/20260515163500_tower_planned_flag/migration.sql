@@ -1,0 +1,1 @@
+ALTER TABLE "towers" ADD COLUMN "planned" BOOLEAN NOT NULL DEFAULT false;

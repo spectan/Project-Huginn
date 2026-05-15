@@ -10,7 +10,6 @@ import {
   listNoteCategories
 } from "@/lib/markers/database";
 import { listMarkers } from "@/lib/markers/marker-service";
-import { fetchWurmMapsEventFeed } from "@/lib/wurmmaps/event-feed";
 import MapWorkspace from "./map-workspace";
 
 type MapPageProps = {
@@ -27,7 +26,6 @@ export default async function MapPage({ searchParams }: MapPageProps) {
 
   return (
     <MapWorkspace
-      initialEventFeed={workspace?.eventFeed}
       initialMarkers={workspace?.markers ?? []}
       initialNoteCategories={workspace?.noteCategories ?? []}
       initialSettings={workspace?.settings}
@@ -67,15 +65,13 @@ async function getWorkspaceData(
     return null;
   }
 
-  const [eventFeed, noteCategories, settings] = await Promise.all([
-    getReadableWurmMapsEventFeed(map.name),
+  const [noteCategories, settings] = await Promise.all([
     listNoteCategories(map.id),
     getReadableUserMapSettings(viewer, map.id)
   ]);
 
   return {
     ...result.value,
-    eventFeed,
     noteCategories,
     servers,
     settings
@@ -92,9 +88,4 @@ async function getReadableUserMapSettings(
   );
 
   return result.ok ? result.value : DEFAULT_USER_MAP_SETTINGS;
-}
-
-async function getReadableWurmMapsEventFeed(serverName: string) {
-  const result = await fetchWurmMapsEventFeed(serverName);
-  return result.ok ? result.value : null;
 }

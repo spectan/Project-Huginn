@@ -2,7 +2,9 @@ import { err, ok, type Result } from "@/lib/domain/result";
 
 export const WURMMAPS_EVENT_FEED_LIMIT = 30;
 
-const WURMMAPS_STAT_DELEGATE_BASE_URL = "https://wurmmaps.xyz/APIs/stat-delegate.php";
+const DEFAULT_WURMMAPS_STAT_DELEGATE_BASE_URL = "https://wurmmaps.xyz/APIs/stat-delegate.php";
+const DEFAULT_WURMMAPS_EVENT_FEED_TIMEOUT_MS = 3000;
+const MAX_WURMMAPS_EVENT_FEED_TIMEOUT_MS = 30000;
 const EVENT_SECTIONS: Array<{
   kind: WurmMapsEventKind;
   label: string;
@@ -69,15 +71,19 @@ export async function fetchWurmMapsEventFeed(
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
   const serverSlug = getWurmMapsServerSlug(serverName);
-  const sourceUrl = `${WURMMAPS_STAT_DELEGATE_BASE_URL}?map=${encodeURIComponent(serverSlug)}`;
+  const sourceUrl = getWurmMapsStatDelegateUrl(serverSlug);
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), getWurmMapsEventFeedTimeoutMs());
 
   try {
     const response = await fetchImpl(sourceUrl, {
       cache: "no-store",
       headers: {
         accept: "application/json"
-      }
+      },
+      signal: abortController.signal
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return err("WurmMaps event feed is unavailable");
@@ -91,6 +97,8 @@ export async function fetchWurmMapsEventFeed(
     });
   } catch {
     return err("WurmMaps event feed is unavailable");
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
@@ -116,6 +124,24 @@ export function normalizeWurmMapsEventFeed(
 
 function getWurmMapsServerSlug(serverName: string): string {
   return serverName.trim().toLowerCase();
+}
+
+function getWurmMapsStatDelegateUrl(serverSlug: string): string {
+  const baseUrl = process.env.WURMMAPS_STAT_DELEGATE_BASE_URL?.trim() ||
+    DEFAULT_WURMMAPS_STAT_DELEGATE_BASE_URL;
+  const url = new URL(baseUrl);
+  url.searchParams.set("map", serverSlug);
+  return url.toString();
+}
+
+function getWurmMapsEventFeedTimeoutMs(): number {
+  const configured = Number.parseInt(process.env.WURMMAPS_EVENT_FEED_TIMEOUT_MS ?? "", 10);
+
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_WURMMAPS_EVENT_FEED_TIMEOUT_MS;
+  }
+
+  return Math.min(configured, MAX_WURMMAPS_EVENT_FEED_TIMEOUT_MS);
 }
 
 function parseEventSection(

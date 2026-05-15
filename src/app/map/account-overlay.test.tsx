@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountOverlay, type AccountViewer } from "./account-overlay";
@@ -40,8 +40,14 @@ describe("AccountOverlay", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mako" }));
 
     expect(screen.getByRole("dialog", { name: "Account settings" })).toBeTruthy();
-    expect(screen.getByText("Read access")).toBeTruthy();
-    expect(screen.getByText("Write access")).toBeTruthy();
+    const permissionsGroup = screen.getByRole("group", { name: "Permissions" });
+    expect(screen.queryByText("Status")).toBeNull();
+    expect(within(permissionsGroup).getByText("Read/Write")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Allowed")).toBeTruthy();
+    expect(within(permissionsGroup).queryByText("Read")).toBeNull();
+    expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
+    expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
+    expect(screen.getByText("Project Huginn - v1.1.0")).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Overlays" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Towers" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Deeds" })).toBeNull();
@@ -60,6 +66,12 @@ describe("AccountOverlay", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
 
+    const permissionsGroup = screen.getByRole("group", { name: "Permissions" });
+    expect(within(permissionsGroup).getByText("Read/Write")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Admin")).toBeTruthy();
+    expect(within(permissionsGroup).getAllByText("Allowed")).toHaveLength(2);
+    expect(within(permissionsGroup).queryByText("Read")).toBeNull();
+    expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
     expect(screen.getByRole("link", { name: "Accounts 3 pending" }).getAttribute("href")).toBe(
       "/admin/accounts"
     );

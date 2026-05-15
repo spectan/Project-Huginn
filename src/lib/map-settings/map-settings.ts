@@ -22,6 +22,8 @@ export type UserMapSettings = {
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
   roadwayEditPanelPosition: TileHighlightPanelPosition | null;
+  routePlannerSpeedKmh: number;
+  searchLinesEnabled: boolean;
   tileHighlight: TileHighlightSettings;
   tileHighlightPanelPosition: TileHighlightPanelPosition | null;
 };
@@ -39,6 +41,7 @@ export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
   missionGrid: false,
   notes: true,
   overlays: true,
+  plannedTowers: true,
   riftOverlays: true,
   sectorGrid: false,
   towers: true,
@@ -63,14 +66,14 @@ export const DEFAULT_MARKER_COLORS: MarkerColors = {
 export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
   bridges: 50,
   canals: 50,
-  deeds: 50,
+  deeds: 100,
   highways: 50,
   locateSouls: 50,
   missionGrid: 50,
   notes: 50,
-  riftOverlays: 50,
+  riftOverlays: 100,
   sectorGrid: 50,
-  towers: 50
+  towers: 100
 };
 
 export const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
@@ -95,6 +98,8 @@ export const DEFAULT_USER_MAP_SETTINGS: UserMapSettings = {
   markerOpacities: DEFAULT_MARKER_OPACITIES,
   markerVisibility: DEFAULT_MARKER_VISIBILITY,
   roadwayEditPanelPosition: null,
+  routePlannerSpeedKmh: 0,
+  searchLinesEnabled: false,
   tileHighlight: DEFAULT_TILE_HIGHLIGHT,
   tileHighlightPanelPosition: null
 };
@@ -112,6 +117,7 @@ const MARKER_VISIBILITY_KEYS = [
   "missionGrid",
   "notes",
   "overlays",
+  "plannedTowers",
   "riftOverlays",
   "sectorGrid",
   "towers",
@@ -175,6 +181,8 @@ function parseUserMapSettingsWithFallback(
       source.roadwayEditPanelPosition,
       fallback.roadwayEditPanelPosition
     ),
+    routePlannerSpeedKmh: parseRoutePlannerSpeed(source.routePlannerSpeedKmh, fallback.routePlannerSpeedKmh),
+    searchLinesEnabled: parseBoolean(source.searchLinesEnabled, fallback.searchLinesEnabled),
     tileHighlight: parseTileHighlight(source.tileHighlight, fallback.tileHighlight),
     tileHighlightPanelPosition: parsePanelPosition(
       source.tileHighlightPanelPosition,
@@ -285,6 +293,18 @@ function parseOpacity(input: unknown, fallback: number): number {
   }
 
   return clamp(Math.round(input), 0, 100);
+}
+
+function parseRoutePlannerSpeed(input: unknown, fallback: number): number {
+  if (typeof input !== "number" || !Number.isFinite(input)) {
+    return fallback;
+  }
+
+  return clamp(Math.round(input), 0, 60);
+}
+
+function parseBoolean(input: unknown, fallback: boolean): boolean {
+  return typeof input === "boolean" ? input : fallback;
 }
 
 function clamp(value: number, min: number, max: number): number {

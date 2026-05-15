@@ -72,20 +72,29 @@ type MapLayerRecord = {
   widthPx: number;
 };
 
+type UserSummaryRecord = {
+  username: string;
+};
+
+type MarkerModifierRecord = {
+  createdBy?: UserSummaryRecord | null;
+  updatedBy?: UserSummaryRecord | null;
+};
+
 type TowerRecord = TowerMarkerInput & {
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type DeedRecord = DeedMarkerInput & {
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type NoteRecord = NoteMarkerInput & {
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type NoteCategoryRecord = {
   id: string;
@@ -96,18 +105,18 @@ type NoteCategoryRecord = {
 type RiftRecord = RiftMarkerInput & {
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type CampRecord = Omit<CampMarkerInput, "campType"> & {
   campType: string;
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type MinedoorRecord = MinedoorMarkerInput & {
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type LocateSoulRecord = Omit<LocateSoulMarkerInput, "casterFacing" | "direction" | "distanceBand"> & {
   casterFacing: string;
@@ -115,13 +124,13 @@ type LocateSoulRecord = Omit<LocateSoulMarkerInput, "casterFacing" | "direction"
   distanceBand: string;
   id: string;
   mapId: string;
-};
+} & MarkerModifierRecord;
 
 type PathRecord = Omit<PathMarkerInput, "pathType"> & {
   id: string;
   mapId: string;
   pathType: string;
-};
+} & MarkerModifierRecord;
 
 type MarkerWithMap<T> = T & {
   map: MapRecord;
@@ -131,8 +140,7 @@ type MarkerAuditAction =
   | "FAILED_AUTHORIZATION"
   | "MARKER_CREATED"
   | "MARKER_UPDATED"
-  | "MARKER_DELETED"
-  | "MARKER_LIST_VIEW";
+  | "MARKER_DELETED";
 
 type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "MAP";
 
@@ -146,21 +154,21 @@ type MarkerAuditInput = {
 };
 
 export type MarkerServiceDependencies = {
-  createCamp(input: CampMarkerInput & { createdByUserId: string; mapId: string }): Promise<CampRecord>;
-  createDeed(input: DeedMarkerInput & { createdByUserId: string; mapId: string }): Promise<DeedRecord>;
-  createLocateSoul(input: LocateSoulMarkerInput & { createdByUserId: string; mapId: string }): Promise<LocateSoulRecord>;
-  createMinedoor(input: MinedoorMarkerInput & { createdByUserId: string; mapId: string }): Promise<MinedoorRecord>;
-  createNote(input: NoteMarkerInput & { createdByUserId: string; mapId: string }): Promise<NoteRecord>;
-  createPath(input: PathMarkerInput & { createdByUserId: string; mapId: string }): Promise<PathRecord>;
-  createRift(input: RiftMarkerInput & { createdByUserId: string; mapId: string }): Promise<RiftRecord>;
-  createTower(input: TowerMarkerInput & { createdByUserId: string; mapId: string }): Promise<TowerRecord>;
+  createCamp(input: CampMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<CampRecord>;
+  createDeed(input: DeedMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<DeedRecord>;
+  createLocateSoul(input: LocateSoulMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<LocateSoulRecord>;
+  createMinedoor(input: MinedoorMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<MinedoorRecord>;
+  createNote(input: NoteMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<NoteRecord>;
+  createPath(input: PathMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<PathRecord>;
+  createRift(input: RiftMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<RiftRecord>;
+  createTower(input: TowerMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<TowerRecord>;
   disbandDeed(input: {
     actorUserId: string;
     categoryName: string;
     deedId: string;
     deletedAt: Date;
     deleteExpiresAt: Date;
-    note: NoteMarkerInput & { createdByUserId: string; mapId: string };
+    note: NoteMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string };
   }): Promise<{
     category: NoteCategoryRecord;
     deletedDeed: DeedRecord;
@@ -243,6 +251,7 @@ export type CreateMarkerInput =
       damage: string;
       makerName: string;
       makerNumber: string;
+      planned?: boolean;
       ql: string;
       x: number;
       y: number;
@@ -313,25 +322,6 @@ export async function listMarkers(
 
   const markers = await dependencies.listActiveMarkers(map.id);
 
-  await recordAudit(dependencies, {
-    action: "MARKER_LIST_VIEW",
-    actorUserId: input.actor.id,
-    mapId: map.id,
-    metadata: {
-      markerCount:
-        markers.towers.length +
-        markers.deeds.length +
-        markers.notes.length +
-        markers.rifts.length +
-        markers.camps.length +
-        markers.minedoors.length +
-        markers.locateSouls.length +
-        markers.paths.length
-    },
-    targetId: map.id,
-    targetType: "MAP"
-  });
-
   return ok({
     map: serializeMap(map),
     markers: [
@@ -379,7 +369,8 @@ export async function createMarker(
     const created = await dependencies.createTower({
       ...tower.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializeTower(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -396,7 +387,8 @@ export async function createMarker(
     const created = await dependencies.createDeed({
       ...deed.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializeDeed(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -413,7 +405,8 @@ export async function createMarker(
     const created = await dependencies.createRift({
       ...rift.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializeRift(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -430,7 +423,8 @@ export async function createMarker(
     const created = await dependencies.createCamp({
       ...camp.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializeCamp(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -447,7 +441,8 @@ export async function createMarker(
     const created = await dependencies.createMinedoor({
       ...minedoor.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializeMinedoor(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -464,7 +459,8 @@ export async function createMarker(
     const created = await dependencies.createLocateSoul({
       ...locateSoul.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializeLocateSoul(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -481,7 +477,8 @@ export async function createMarker(
     const created = await dependencies.createPath({
       ...path.value,
       createdByUserId: input.actor.id,
-      mapId: map.id
+      mapId: map.id,
+      updatedByUserId: input.actor.id
     });
     const marker = serializePath(created);
     await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -501,7 +498,8 @@ export async function createMarker(
   const created = await dependencies.createNote({
     ...note.value,
     createdByUserId: input.actor.id,
-    mapId: map.id
+    mapId: map.id,
+    updatedByUserId: input.actor.id
   });
   const marker = serializeNote(created);
   await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
@@ -783,7 +781,8 @@ export async function disbandDeedMarker(
     note: {
       ...note.value,
       createdByUserId: input.actor.id,
-      mapId: existing.mapId
+      mapId: existing.mapId,
+      updatedByUserId: input.actor.id
     }
   });
 
@@ -827,6 +826,7 @@ function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
       damage: getString(input, "damage"),
       makerName: getString(input, "makerName"),
       makerNumber: getString(input, "makerNumber"),
+      planned: getBoolean(input, "planned"),
       ql: getString(input, "ql"),
       type: "tower",
       x: getNumber(input, "x"),
@@ -936,6 +936,15 @@ function getNumber(input: object, key: string): number {
   return typeof value === "number" ? value : Number.NaN;
 }
 
+function getBoolean(input: object, key: string): boolean {
+  if (!(key in input)) {
+    return false;
+  }
+
+  const value = input[key as keyof typeof input];
+  return value === true;
+}
+
 export async function deleteMarker(
   input: { actor: Actor; markerId: string; markerType: MarkerType },
   dependencies: MarkerServiceDependencies
@@ -1017,15 +1026,21 @@ function serializeMapLayers(map: MapRecord): WorkspaceMap["layers"] {
 
 function serializeTower(tower: TowerRecord): TowerWorkspaceMarker {
   return {
-    damage: formatHundredths(tower.damageHundredths),
+    damage: formatOptionalHundredths(tower.damageHundredths),
     id: tower.id,
+    lastModifiedBy: getLastModifiedBy(tower),
     makerName: tower.makerName,
     makerNumber: tower.makerNumber,
-    ql: formatHundredths(tower.qlHundredths),
+    planned: tower.planned,
+    ql: formatOptionalHundredths(tower.qlHundredths),
     type: "tower",
     x: tower.x,
     y: tower.y
   };
+}
+
+function formatOptionalHundredths(value: number | null): string {
+  return value === null ? "" : formatHundredths(value);
 }
 
 function serializeDeed(deed: DeedRecord): DeedWorkspaceMarker {
@@ -1034,6 +1049,7 @@ function serializeDeed(deed: DeedRecord): DeedWorkspaceMarker {
     foundingDate: formatOptionalDate(deed.foundingDate),
     founder: deed.founder,
     id: deed.id,
+    lastModifiedBy: getLastModifiedBy(deed),
     name: deed.name,
     north: deed.north,
     perimeter: deed.perimeter,
@@ -1072,10 +1088,15 @@ function formatOptionalDate(value: Date | null): string | null {
   return value === null ? null : value.toISOString().slice(0, 10);
 }
 
+function getLastModifiedBy(marker: MarkerModifierRecord): string {
+  return marker.updatedBy?.username ?? marker.createdBy?.username ?? "Unknown";
+}
+
 function serializeNote(note: NoteRecord): NoteWorkspaceMarker {
   return {
     category: note.category,
     id: note.id,
+    lastModifiedBy: getLastModifiedBy(note),
     text: note.text,
     title: note.title,
     type: "note",
@@ -1089,6 +1110,7 @@ function serializeRift(rift: RiftRecord): RiftWorkspaceMarker {
     arrivalDate: formatOptionalDate(rift.arrivalDate),
     estimatedRiftTime: formatOptionalDateTime(rift.estimatedRiftTime),
     id: rift.id,
+    lastModifiedBy: getLastModifiedBy(rift),
     notes: rift.notes,
     type: "rift",
     x: rift.x,
@@ -1100,6 +1122,7 @@ function serializeCamp(camp: CampRecord): CampWorkspaceMarker {
   return {
     campType: camp.campType === "Goblin" ? "Goblin" : "Rift",
     id: camp.id,
+    lastModifiedBy: getLastModifiedBy(camp),
     notes: camp.notes,
     type: "camp",
     x: camp.x,
@@ -1110,6 +1133,7 @@ function serializeCamp(camp: CampRecord): CampWorkspaceMarker {
 function serializeMinedoor(minedoor: MinedoorRecord): MinedoorWorkspaceMarker {
   return {
     id: minedoor.id,
+    lastModifiedBy: getLastModifiedBy(minedoor),
     notes: minedoor.notes,
     strength: minedoor.strength,
     type: "minedoor",
@@ -1124,6 +1148,7 @@ function serializeLocateSoul(locateSoul: LocateSoulRecord): LocateSoulWorkspaceM
     direction: normalizeStoredLocateSoulDirection(locateSoul.direction),
     distanceBand: normalizeStoredLocateSoulDistanceBand(locateSoul.distanceBand),
     id: locateSoul.id,
+    lastModifiedBy: getLastModifiedBy(locateSoul),
     notes: locateSoul.notes,
     targetName: locateSoul.targetName,
     type: "locateSoul",
@@ -1147,6 +1172,7 @@ function normalizeStoredLocateSoulDistanceBand(value: string): LocateSoulWorkspa
 function serializePath(path: PathRecord): PathWorkspaceMarker {
   return {
     id: path.id,
+    lastModifiedBy: getLastModifiedBy(path),
     name: path.name,
     notes: path.notes,
     points: path.points,

@@ -16,12 +16,13 @@ cp .env.example .env
 Set production values in `.env`:
 
 ```bash
-AUTH_SECRET=<long-random-secret>
 POSTGRES_PASSWORD=<long-random-password>
 INITIAL_ADMIN_USERNAME=<admin-username>
 INITIAL_ADMIN_PASSWORD=<admin-password>
 POSTGRES_DB=wurm_map_util
 POSTGRES_USER=wurm
+WURMMAPS_EVENT_FEED_TIMEOUT_MS=3000
+WURMMAPS_STAT_DELEGATE_BASE_URL=https://wurmmaps.xyz/APIs/stat-delegate.php
 ```
 
 ## First Deploy

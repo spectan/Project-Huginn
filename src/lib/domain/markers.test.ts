@@ -26,7 +26,8 @@ describe("validateTowerInput", () => {
           ql: "89.50",
           damage: "0.25",
           makerName: " Mako ",
-          makerNumber: "945"
+          makerNumber: "945",
+          planned: true
         },
         bounds
       )
@@ -38,7 +39,57 @@ describe("validateTowerInput", () => {
         qlHundredths: 8950,
         damageHundredths: 25,
         makerName: "Mako",
-        makerNumber: "945"
+        makerNumber: "945",
+        planned: true
+      }
+    });
+  });
+
+  it("defaults towers to not planned", () => {
+    expect(
+      validateTowerInput(
+        {
+          x: 25,
+          y: 30,
+          ql: "89.50",
+          damage: "0.25",
+          makerName: "Mako",
+          makerNumber: ""
+        },
+        bounds
+      )
+    ).toMatchObject({
+      ok: true,
+      value: {
+        planned: false
+      }
+    });
+  });
+
+  it("allows blank tower details", () => {
+    expect(
+      validateTowerInput(
+        {
+          x: 25,
+          y: 30,
+          ql: "",
+          damage: "",
+          makerName: "",
+          makerNumber: "",
+          planned: true
+        },
+        bounds
+      )
+    ).toEqual({
+      ok: true,
+      value: {
+        x: 25,
+        y: 30,
+        qlHundredths: null,
+        damageHundredths: null,
+        makerName: "",
+        makerNumber: "",
+        planned: true
       }
     });
   });
@@ -64,7 +115,8 @@ describe("validateTowerInput", () => {
         qlHundredths: 8950,
         damageHundredths: 25,
         makerName: "Mako",
-        makerNumber: ""
+        makerNumber: "",
+        planned: false
       }
     });
   });
@@ -116,6 +168,7 @@ describe("validateTowerInput", () => {
 
 describe("formatTowerCreator", () => {
   it("shows unknown numbers for incomplete tower creator identities", () => {
+    expect(formatTowerCreator({ makerName: "", makerNumber: "" })).toBe("Unknown");
     expect(formatTowerCreator({ makerName: "Mako", makerNumber: "" })).toBe("Mako - ???");
     expect(formatTowerCreator({ makerName: "Kichi", makerNumber: "1" })).toBe("Kichi 1");
     expect(formatTowerCreator({ makerName: "Kichi", makerNumber: "42" })).toBe("Kichi 42");

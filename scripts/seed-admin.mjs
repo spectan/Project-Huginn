@@ -1,17 +1,18 @@
 import argon2 from "argon2";
 import { PrismaClient } from "@prisma/client";
+import { validateInitialAdminPassword } from "./seed-admin-config.mjs";
 
 const prisma = new PrismaClient();
 
 const username = process.env.INITIAL_ADMIN_USERNAME ?? "admin";
-const password = process.env.INITIAL_ADMIN_PASSWORD;
+const password = validateInitialAdminPassword(process.env.INITIAL_ADMIN_PASSWORD);
 
-if (password === undefined || password.length < 12) {
-  console.error("INITIAL_ADMIN_PASSWORD must be set to at least 12 characters");
+if (!password.ok) {
+  console.error(password.error);
   process.exit(1);
 }
 
-const passwordHash = await argon2.hash(password);
+const passwordHash = await argon2.hash(password.value);
 
 const servers = [
   {

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { APP_VERSION_LABEL } from "@/lib/app-version";
+import { canAdminister, canReadMap, canWriteMarkers } from "@/lib/domain/permissions";
 
 export type AccountViewer = {
   approvalStatus: "PENDING" | "APPROVED" | "REJECTED";
@@ -66,24 +68,7 @@ export function AccountOverlay({ isOpen, onOpenChange, viewer }: AccountOverlayP
               x
             </button>
           </div>
-          <dl className="map-account-list">
-            <div>
-              <dt>Status</dt>
-              <dd>{formatApprovalStatus(viewer.approvalStatus)}</dd>
-            </div>
-            <div>
-              <dt>Read access</dt>
-              <dd>{viewer.permissions === "NONE" ? "Disabled" : "Enabled"}</dd>
-            </div>
-            <div>
-              <dt>Write access</dt>
-              <dd>{viewer.permissions === "WRITE" ? "Enabled" : "Disabled"}</dd>
-            </div>
-            <div>
-              <dt>Admin</dt>
-              <dd>{viewer.isAdmin ? "Enabled" : "Disabled"}</dd>
-            </div>
-          </dl>
+          <AccountPermissions viewer={viewer} />
           {viewer.isAdmin ? (
             <>
               <a
@@ -123,8 +108,62 @@ export function AccountOverlay({ isOpen, onOpenChange, viewer }: AccountOverlayP
           <button className="map-account-logout" onClick={() => void logout()} type="button">
             Log out
           </button>
+          <p className="map-account-version">{APP_VERSION_LABEL}</p>
         </section>
       ) : null}
+    </div>
+  );
+}
+
+function AccountPermissions({ viewer }: { viewer: AccountViewer }) {
+  const access = {
+    accessLevel: viewer.permissions,
+    approvalStatus: viewer.approvalStatus,
+    isAdmin: viewer.isAdmin
+  };
+  const permissionRows = getAccountPermissionRows(access);
+
+  return (
+    <fieldset className="map-account-permissions">
+      <legend>Permissions</legend>
+      <dl className="map-account-list map-account-permissions-list">
+        {permissionRows.map((row) => (
+          <PermissionRow allowed={row.allowed} key={row.label} label={row.label} />
+        ))}
+      </dl>
+    </fieldset>
+  );
+}
+
+function getAccountPermissionRows(access: {
+  accessLevel: AccountViewer["permissions"];
+  approvalStatus: AccountViewer["approvalStatus"];
+  isAdmin: boolean;
+}): Array<{ allowed: boolean; label: string }> {
+  const rows: Array<{ allowed: boolean; label: string }> = [];
+
+  if (canWriteMarkers(access)) {
+    rows.push({ allowed: true, label: "Read/Write" });
+  } else if (canReadMap(access)) {
+    rows.push({ allowed: true, label: "Read" });
+  } else {
+    rows.push({ allowed: false, label: "Read" });
+  }
+
+  if (canAdminister(access)) {
+    rows.push({ allowed: true, label: "Admin" });
+  }
+
+  return rows;
+}
+
+function PermissionRow({ allowed, label }: { allowed: boolean; label: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd className={allowed ? "map-account-permission--allowed" : "map-account-permission--denied"}>
+        {allowed ? "Allowed" : "Denied"}
+      </dd>
     </div>
   );
 }
@@ -291,16 +330,4 @@ async function submitPasswordChangeForm(
 async function logout(): Promise<void> {
   await fetch("/api/auth/logout", { method: "POST" });
   window.location.reload();
-}
-
-function formatApprovalStatus(status: AccountViewer["approvalStatus"]): string {
-  if (status === "APPROVED") {
-    return "Approved";
-  }
-
-  if (status === "REJECTED") {
-    return "Rejected";
-  }
-
-  return "Pending";
 }

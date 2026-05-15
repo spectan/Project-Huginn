@@ -30,7 +30,6 @@ import {
   parseLocateSoulMessage
 } from "@/lib/domain/locate-soul";
 import {
-  TILE_HIGHLIGHT_GROUPS,
   buildTileHighlightOutlineMask,
   getTileHighlightTargetColors,
   isTileHighlightSelection,
@@ -76,12 +75,21 @@ const SERVER_VIEWPORT_SNAPSHOT = `${FALLBACK_MAP_SIZE_PX}x${FALLBACK_MAP_SIZE_PX
 const SECTOR_GRID_LEFT_OFFSET_PX = -16;
 const SECTOR_GRID_TOP_OFFSET_PX = 18;
 const EVENT_FEED_DISPLAY_LIMIT = 30;
+const MAP_TIP_INTERVAL_MS = 15000;
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
 const TILE_SIZE_METERS = 4;
+const TOWER_AUTOPLANNER_SPACING_TILES = TOWER_PLACEMENT_DISTANCE_TILES * 2;
 const DEFAULT_NOTE_CATEGORIES: NoteCategory[] = [
   { id: "default-category-general", name: "General" }
 ];
+const MAP_FOOTER_TIPS = [
+  "You can quick-plan deeds by holding down shift and click-dragging a box of whatever size.",
+  "You can quick-plan towers by opening an existing tower, checking the \"Planned\" box, and clicking around while holding down the CTRL key.",
+  "All colours and opacities can be configured in the settings cogwheel in the top right.",
+  "You can change the map type by interacting with the drop-down under the search bar that says \"Terrain\". You can change servers here too!",
+  "Did you know that accidentally deleted items can be recovered for up to 72 hours? Contact an administrator!"
+] as const;
 const SERVER_CLUSTER_ORDER = [
   "Epic",
   "North Freedom Isles",
@@ -145,16 +153,6 @@ type LongPressState = {
   startClientY: number;
   timeoutId: number;
   view: ViewState;
-};
-
-type FloatingPanelDragState = {
-  height: number;
-  pointerId: number;
-  startClientX: number;
-  startClientY: number;
-  startLeft: number;
-  startTop: number;
-  width: number;
 };
 
 type ViewportSize = {
@@ -347,12 +345,23 @@ export default function MapWorkspace({
   const [quickDeedDraft, setQuickDeedDraft] = useState<QuickDeedDraftState | null>(null);
   const [routePlannerEnabled, setRoutePlannerEnabled] = useState(false);
   const [routePlannerPoints, setRoutePlannerPoints] = useState<MapCoordinate[] | null>(null);
+  const [routePlannerSpeedKmh, setRoutePlannerSpeedKmh] = useState(initialSettings.routePlannerSpeedKmh);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isEventFeedOpen, setIsEventFeedOpen] = useState(false);
+  const [eventFeedState, setEventFeedState] = useState<{
+    feed: WurmMapsEventFeed | null;
+    mapId: string | null;
+  }>({
+    feed: initialEventFeed ?? null,
+    mapId: map?.id ?? null
+  });
+  const [isEventFeedLoading, setIsEventFeedLoading] = useState(false);
+  const [footerTipIndex, setFooterTipIndex] = useState(0);
   const [noteCategories, setNoteCategories] = useState<NoteCategory[]>(
     Array.from(initialNoteCategories.length === 0 ? DEFAULT_NOTE_CATEGORIES : initialNoteCategories)
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchLinesEnabled, setSearchLinesEnabled] = useState(initialSettings.searchLinesEnabled);
   const dragRef = useRef<DragState | null>(null);
   const activeTouchPointersRef = useRef<Map<number, TouchPointerState>>(new Map());
   const pinchZoomRef = useRef<PinchZoomState | null>(null);
@@ -388,6 +397,8 @@ export default function MapWorkspace({
   const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
   const hiddenTowerLabelId = hoveredMarkers.find((marker) => marker.type === "tower")?.id ?? null;
   const renderedSelectedCoordinate = selectedCoordinate ?? urlCoordinate;
+  const eventFeedMapId = map?.id ?? null;
+  const eventFeed = eventFeedState.mapId === eventFeedMapId ? eventFeedState.feed : initialEventFeed ?? null;
   const canViewMap = map !== null && viewer !== null && canReadMap({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
@@ -404,6 +415,8 @@ export default function MapWorkspace({
     markerOpacities,
     markerVisibility,
     roadwayEditPanelPosition,
+    routePlannerSpeedKmh,
+    searchLinesEnabled,
     tileHighlight,
     tileHighlightPanelPosition
   }), [
@@ -412,6 +425,8 @@ export default function MapWorkspace({
     markerOpacities,
     markerVisibility,
     roadwayEditPanelPosition,
+    routePlannerSpeedKmh,
+    searchLinesEnabled,
     tileHighlight,
     tileHighlightPanelPosition
   ]);
@@ -428,6 +443,8 @@ export default function MapWorkspace({
     setMarkerOpacities(DEFAULT_USER_MAP_SETTINGS.markerOpacities);
     setMarkerVisibility(DEFAULT_USER_MAP_SETTINGS.markerVisibility);
     setRoadwayEditPanelPosition(DEFAULT_USER_MAP_SETTINGS.roadwayEditPanelPosition);
+    setRoutePlannerSpeedKmh(DEFAULT_USER_MAP_SETTINGS.routePlannerSpeedKmh);
+    setSearchLinesEnabled(DEFAULT_USER_MAP_SETTINGS.searchLinesEnabled);
     setTileHighlight(DEFAULT_USER_MAP_SETTINGS.tileHighlight);
     setTileHighlightPanelPosition(DEFAULT_USER_MAP_SETTINGS.tileHighlightPanelPosition);
   }, []);
@@ -444,6 +461,48 @@ export default function MapWorkspace({
       return !current;
     });
   }, []);
+
+  const showNextFooterTip = useCallback(() => {
+    setFooterTipIndex((current) => (current + 1) % MAP_FOOTER_TIPS.length);
+  }, []);
+
+  const loadEventFeed = useCallback(async () => {
+    if (map === null) {
+      return;
+    }
+
+    setIsEventFeedLoading(true);
+
+    try {
+      const response = await fetch(`/api/maps/${map.id}/events`);
+
+      if (!response.ok) {
+        setEventFeedState({ feed: null, mapId: map.id });
+        return;
+      }
+
+      const body = (await response.json().catch(() => null)) as { feed?: WurmMapsEventFeed } | null;
+      setEventFeedState({ feed: body?.feed ?? null, mapId: map.id });
+    } catch {
+      setEventFeedState({ feed: null, mapId: map.id });
+    } finally {
+      setIsEventFeedLoading(false);
+    }
+  }, [map]);
+
+  const handleEventFeedOpenChange = useCallback((isOpen: boolean) => {
+    setIsEventFeedOpen(isOpen);
+
+    if (isOpen && eventFeed === null && !isEventFeedLoading) {
+      void loadEventFeed();
+    }
+  }, [eventFeed, isEventFeedLoading, loadEventFeed]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(showNextFooterTip, MAP_TIP_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
+  }, [showNextFooterTip]);
 
   const createNoteCategory = useCallback(async (name: string): Promise<NoteCategory | null> => {
     if (map === null) {
@@ -797,7 +856,7 @@ export default function MapWorkspace({
         return;
       }
 
-      if (!routePlannerEnabled && isInteractivePanTarget(event.target)) {
+      if (!event.ctrlKey && !routePlannerEnabled && isInteractivePanTarget(event.target)) {
         return;
       }
 
@@ -932,7 +991,7 @@ export default function MapWorkspace({
     [dialog]
   );
 
-  const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; pointerId: number; pointerType?: string }) => {
+  const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; ctrlKey?: boolean; pointerId: number; pointerType?: string }) => {
     const drag = dragRef.current;
 
     if (drag === null) {
@@ -959,6 +1018,37 @@ export default function MapWorkspace({
     });
 
     if (isInsideMap(coordinate, visualMap)) {
+      const autoplanSourceTower = getAutoplannerSourceTower(dialog);
+
+      if (
+        event.ctrlKey === true &&
+        canWriteMapMarkers &&
+        map !== null &&
+        autoplanSourceTower !== null &&
+        !routePlannerEnabled &&
+        pathDraftRef.current === null
+      ) {
+        const targetCoordinate = getAutoplannedTowerCoordinate(autoplanSourceTower, coordinate, visualMap);
+
+        if (targetCoordinate === null) {
+          setFormError("Planned tower target must stay inside the map");
+          return;
+        }
+
+        if (hasTowerAtCoordinate(markers, targetCoordinate, autoplanSourceTower.id)) {
+          setFormError(`A tower already exists at ${targetCoordinate.x}, ${targetCoordinate.y}`);
+          return;
+        }
+
+        void createAutoplannedTower(
+          targetCoordinate,
+          map.id,
+          updateMarkers,
+          setFormError
+        );
+        return;
+      }
+
       if (routePlannerEnabled) {
         setRoutePlannerPoints((current) => current === null ? current : appendRoutePlannerPoint(current, coordinate));
         return;
@@ -980,7 +1070,7 @@ export default function MapWorkspace({
 
       selectCoordinate(coordinate);
     }
-  }, [canViewMap, routePlannerEnabled, selectCoordinate, showTouchMarkerDetails, visualMap]);
+  }, [canViewMap, canWriteMapMarkers, dialog, map, markers, routePlannerEnabled, selectCoordinate, showTouchMarkerDetails, updateMarkers, visualMap]);
 
   useEffect(() => {
     function handleNativePointerDown(event: PointerEvent) {
@@ -1012,7 +1102,7 @@ export default function MapWorkspace({
         return;
       }
 
-      if (!routePlannerEnabled && isInteractivePanTarget(event.target)) {
+      if (!event.ctrlKey && !routePlannerEnabled && isInteractivePanTarget(event.target)) {
         return;
       }
 
@@ -1428,6 +1518,14 @@ export default function MapWorkspace({
               view={view}
             />
           ) : null}
+          {searchLinesEnabled && searchTerm.length > 0 && renderedSelectedCoordinate !== null ? (
+            <SearchLineLayer
+              markers={displayedMarkersWithEditPreview}
+              markerVisibility={markerVisibility}
+              selectedCoordinate={renderedSelectedCoordinate}
+              view={view}
+            />
+          ) : null}
           {quickDeedDraft !== null ? (
             <QuickDeedDraftLayer
               color={markerColors.deeds}
@@ -1560,32 +1658,20 @@ export default function MapWorkspace({
             markerColors={markerColors}
             markerOpacities={markerOpacities}
             markerVisibility={markerVisibility}
+            roadwayEditMode={roadwayEditMode}
+            searchLinesEnabled={searchLinesEnabled}
             tileHighlight={tileHighlight}
             onMarkerColorsChange={setMarkerColors}
             onMarkerOpacitiesChange={setMarkerOpacities}
             onMarkerVisibilityChange={setMarkerVisibility}
             onOpenChange={(isOpen) => setTopPanel(isOpen ? "settings" : null)}
             onResetSettings={resetUserMapSettings}
+            onRoadwayEditModeChange={setRoadwayEditMode}
+            onSearchLinesEnabledChange={setSearchLinesEnabled}
             onTileHighlightChange={setTileHighlight}
           />
         ) : null}
       </div>
-      {canViewMap ? (
-        <div className="map-right-side-controls">
-          <TileHighlightControl
-            onTileHighlightChange={setTileHighlight}
-            onTileHighlightPanelPositionChange={setTileHighlightPanelPosition}
-            position={tileHighlightPanelPosition}
-            tileHighlight={tileHighlight}
-          />
-          <RoadwayEditModeControl
-            enabled={roadwayEditMode}
-            onEnabledChange={setRoadwayEditMode}
-            onPositionChange={setRoadwayEditPanelPosition}
-            position={roadwayEditPanelPosition}
-          />
-        </div>
-      ) : null}
       {canViewMap ? (
         <div className="map-bottom-left-controls" data-testid="map-bottom-left-controls">
           <MapLegendControl
@@ -1596,13 +1682,16 @@ export default function MapWorkspace({
           <RoutePlannerControl
             enabled={routePlannerEnabled}
             onToggle={toggleRoutePlanner}
+            onSpeedChange={setRoutePlannerSpeedKmh}
             routeDistance={routePlannerPoints === null ? null : getRouteDistanceTiles(routePlannerPoints)}
+            speedKmh={routePlannerSpeedKmh}
           />
-          {initialEventFeed !== undefined && map !== null ? (
+          {map !== null ? (
             <MapEventFeedControl
-              feed={initialEventFeed}
+              feed={eventFeed}
               isOpen={isEventFeedOpen}
-              onOpenChange={setIsEventFeedOpen}
+              isLoading={isEventFeedLoading}
+              onOpenChange={handleEventFeedOpenChange}
               onSizeChange={setEventFeedPanelSize}
               serverName={map.name}
               size={eventFeedPanelSize}
@@ -1610,14 +1699,19 @@ export default function MapWorkspace({
           ) : null}
         </div>
       ) : null}
-      <a
-        className="map-support-link"
-        href="https://ko-fi.com/poindexter8085"
-        rel="noreferrer"
-        target="_blank"
-      >
-        support me and hosting/development costs
-      </a>
+      <div className="map-footer-text">
+        <a
+          className="map-support-link"
+          href="https://ko-fi.com/poindexter8085"
+          rel="noreferrer"
+          target="_blank"
+        >
+          support me and hosting/development costs
+        </a>
+        <button className="map-tip-button" onClick={showNextFooterTip} type="button">
+          Tip: {MAP_FOOTER_TIPS[footerTipIndex]}
+        </button>
+      </div>
     </main>
   );
 }
@@ -1643,18 +1737,112 @@ function MapContextMenu({
         label={`${contextMenu.mapX}, ${contextMenu.mapY}`}
       />
       {canWrite ? (
-        <>
-          <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
-          <button onClick={() => onCreate("deed")} role="menuitem" type="button">Deed</button>
-          <button onClick={() => onCreate("note")} role="menuitem" type="button">Note</button>
-          <button onClick={() => onCreate("rift")} role="menuitem" type="button">Rift</button>
-          <button onClick={() => onCreate("camp")} role="menuitem" type="button">Camp</button>
-          <button onClick={() => onCreate("minedoor")} role="menuitem" type="button">Minedoor</button>
-          <button onClick={() => onCreate("locateSoul")} role="menuitem" type="button">Locate Soul</button>
-          <button onClick={() => onCreate("bridge")} role="menuitem" type="button">Bridge</button>
-          <button onClick={() => onCreate("canal")} role="menuitem" type="button">Canal</button>
-          <button onClick={() => onCreate("highway")} role="menuitem" type="button">Highway</button>
-        </>
+        <AddMarkerMenu onCreate={onCreate} />
+      ) : null}
+    </div>
+  );
+}
+
+type AddMarkerSubmenuId = "misc" | "roadways";
+
+const ROADWAY_ADD_ITEMS: Array<{ label: string; markerType: MarkerType }> = [
+  { label: "Bridge", markerType: "bridge" },
+  { label: "Canal", markerType: "canal" },
+  { label: "Highway", markerType: "highway" }
+];
+
+const MISC_ADD_ITEMS: Array<{ label: string; markerType: MarkerType }> = [
+  { label: "Rift", markerType: "rift" },
+  { label: "Camp", markerType: "camp" },
+  { label: "Minedoor", markerType: "minedoor" },
+  { label: "Locate Soul", markerType: "locateSoul" }
+];
+
+function AddMarkerMenu({
+  coordinate,
+  onCreate
+}: {
+  coordinate?: MapCoordinate;
+  onCreate(markerType: MarkerType): void;
+}) {
+  const [openSubmenu, setOpenSubmenu] = useState<AddMarkerSubmenuId | null>(null);
+  const toggleSubmenu = (submenu: AddMarkerSubmenuId) => {
+    setOpenSubmenu((current) => current === submenu ? null : submenu);
+  };
+
+  return (
+    <div className="map-context-menu-section map-context-add-menu">
+      {coordinate === undefined ? null : <p>Add at {coordinate.x}, {coordinate.y}</p>}
+      <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
+      <button onClick={() => onCreate("deed")} role="menuitem" type="button">Deed</button>
+      <button onClick={() => onCreate("note")} role="menuitem" type="button">Note</button>
+      <AddMarkerSubmenu
+        id="roadways"
+        isOpen={openSubmenu === "roadways"}
+        items={ROADWAY_ADD_ITEMS}
+        label="Roadways"
+        onCreate={onCreate}
+        onToggle={() => toggleSubmenu("roadways")}
+      />
+      <AddMarkerSubmenu
+        id="misc"
+        isOpen={openSubmenu === "misc"}
+        items={MISC_ADD_ITEMS}
+        label="Misc"
+        onCreate={onCreate}
+        onToggle={() => toggleSubmenu("misc")}
+      />
+    </div>
+  );
+}
+
+function AddMarkerSubmenu({
+  id,
+  isOpen,
+  items,
+  label,
+  onCreate,
+  onToggle
+}: {
+  id: AddMarkerSubmenuId;
+  isOpen: boolean;
+  items: Array<{ label: string; markerType: MarkerType }>;
+  label: string;
+  onCreate(markerType: MarkerType): void;
+  onToggle(): void;
+}) {
+  return (
+    <div className="map-context-submenu">
+      <button
+        aria-controls={`map-context-submenu-${id}`}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
+        className="map-context-submenu-trigger"
+        onClick={onToggle}
+        role="menuitem"
+        type="button"
+      >
+        <span>{label}</span>
+        <span aria-hidden="true" className="map-context-submenu-arrow">›</span>
+      </button>
+      {isOpen ? (
+        <div
+          aria-label={label}
+          className="map-context-submenu-panel"
+          id={`map-context-submenu-${id}`}
+          role="menu"
+        >
+          {items.map((item) => (
+            <button
+              key={item.markerType}
+              onClick={() => onCreate(item.markerType)}
+              role="menuitem"
+              type="button"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       ) : null}
     </div>
   );
@@ -1737,207 +1925,6 @@ function MapSelectionControls({
   );
 }
 
-function TileHighlightControl({
-  onTileHighlightChange,
-  onTileHighlightPanelPositionChange,
-  position,
-  tileHighlight
-}: {
-  onTileHighlightChange(settings: TileHighlightSettings): void;
-  onTileHighlightPanelPositionChange(position: TileHighlightPanelPosition): void;
-  position: TileHighlightPanelPosition | null;
-  tileHighlight: TileHighlightSettings;
-}) {
-  const panelRef = useRef<HTMLFieldSetElement | null>(null);
-  const dragRef = useRef<FloatingPanelDragState | null>(null);
-
-  const handleDragStart = useCallback((event: React.PointerEvent<HTMLLegendElement>) => {
-    if (!isPrimaryPointerButton(event.button)) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const panelRect = panelRef.current?.getBoundingClientRect();
-    dragRef.current = {
-      height: panelRect?.height && panelRect.height > 0 ? panelRect.height : 88,
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startLeft: panelRect?.left ?? 0,
-      startTop: panelRect?.top ?? 0,
-      width: panelRect?.width && panelRect.width > 0 ? panelRect.width : 220
-    };
-  }, []);
-
-  useEffect(() => {
-    function handlePanelDrag(event: PointerEvent) {
-      const drag = dragRef.current;
-
-      if (drag === null || event.pointerId !== drag.pointerId) {
-        return;
-      }
-
-      onTileHighlightPanelPositionChange(clampFloatingPanelPosition(
-        drag.startLeft + event.clientX - drag.startClientX,
-        drag.startTop + event.clientY - drag.startClientY,
-        drag.width,
-        drag.height
-      ));
-    }
-
-    function endPanelDrag(event: PointerEvent) {
-      const drag = dragRef.current;
-
-      if (drag !== null && event.pointerId === drag.pointerId) {
-        dragRef.current = null;
-      }
-    }
-
-    window.addEventListener("pointermove", handlePanelDrag);
-    window.addEventListener("pointerup", endPanelDrag);
-    window.addEventListener("pointercancel", endPanelDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePanelDrag);
-      window.removeEventListener("pointerup", endPanelDrag);
-      window.removeEventListener("pointercancel", endPanelDrag);
-    };
-  }, [onTileHighlightPanelPositionChange]);
-
-  return (
-    <fieldset
-      className={position === null ? "map-tile-highlight-controls" : "map-tile-highlight-controls is-positioned"}
-      aria-label="Tile Highlighting"
-      ref={panelRef}
-      style={getFloatingPanelStyle(position)}
-    >
-      <legend
-        className="map-tile-highlight-title"
-        data-testid="tile-highlight-drag-handle"
-        onPointerDown={handleDragStart}
-      >
-        Tile Highlighting
-      </legend>
-      <label className="map-tile-highlight-select">
-        <span>Tile Highlighting</span>
-        <select
-          aria-label="Tile Highlighting"
-          onChange={(event) => onTileHighlightChange({
-            ...tileHighlight,
-            selection: event.target.value
-          })}
-          value={tileHighlight.selection}
-        >
-          <option value="">None</option>
-          {TILE_HIGHLIGHT_GROUPS.map((group) => (
-            <optgroup key={group.label} label={group.label}>
-              {group.options.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </label>
-    </fieldset>
-  );
-}
-
-function RoadwayEditModeControl({
-  enabled,
-  onEnabledChange,
-  onPositionChange,
-  position
-}: {
-  enabled: boolean;
-  onEnabledChange(enabled: boolean): void;
-  onPositionChange(position: TileHighlightPanelPosition): void;
-  position: TileHighlightPanelPosition | null;
-}) {
-  const panelRef = useRef<HTMLFieldSetElement | null>(null);
-  const dragRef = useRef<FloatingPanelDragState | null>(null);
-
-  const handleDragStart = useCallback((event: React.PointerEvent<HTMLLegendElement>) => {
-    if (!isPrimaryPointerButton(event.button)) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const panelRect = panelRef.current?.getBoundingClientRect();
-    dragRef.current = {
-      height: panelRect?.height && panelRect.height > 0 ? panelRect.height : 58,
-      pointerId: event.pointerId,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startLeft: panelRect?.left ?? 0,
-      startTop: panelRect?.top ?? 0,
-      width: panelRect?.width && panelRect.width > 0 ? panelRect.width : 220
-    };
-  }, []);
-
-  useEffect(() => {
-    function handlePanelDrag(event: PointerEvent) {
-      const drag = dragRef.current;
-
-      if (drag === null || event.pointerId !== drag.pointerId) {
-        return;
-      }
-
-      onPositionChange(clampFloatingPanelPosition(
-        drag.startLeft + event.clientX - drag.startClientX,
-        drag.startTop + event.clientY - drag.startClientY,
-        drag.width,
-        drag.height
-      ));
-    }
-
-    function endPanelDrag(event: PointerEvent) {
-      const drag = dragRef.current;
-
-      if (drag !== null && event.pointerId === drag.pointerId) {
-        dragRef.current = null;
-      }
-    }
-
-    window.addEventListener("pointermove", handlePanelDrag);
-    window.addEventListener("pointerup", endPanelDrag);
-    window.addEventListener("pointercancel", endPanelDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePanelDrag);
-      window.removeEventListener("pointerup", endPanelDrag);
-      window.removeEventListener("pointercancel", endPanelDrag);
-    };
-  }, [onPositionChange]);
-
-  return (
-    <fieldset
-      aria-label="Roadway Edit Mode"
-      className={position === null ? "map-roadway-edit-control" : "map-roadway-edit-control is-positioned"}
-      ref={panelRef}
-      style={getFloatingPanelStyle(position)}
-    >
-      <legend
-        className="map-roadway-edit-title"
-        data-testid="roadway-edit-drag-handle"
-        onPointerDown={handleDragStart}
-      >
-        Roadway Edit Mode
-      </legend>
-      <label className="map-roadway-edit-toggle">
-        <input
-          aria-label="Roadway Edit Mode"
-          checked={enabled}
-          onChange={(event) => onEnabledChange(event.target.checked)}
-          type="checkbox"
-        />
-        <span>{enabled ? "Enabled" : "Disabled"}</span>
-      </label>
-    </fieldset>
-  );
-}
-
 function getGroupedServers(servers: readonly WorkspaceServer[]): Array<{
   name: string;
   servers: WorkspaceServer[];
@@ -1980,13 +1967,20 @@ function sortServersByName(servers: readonly WorkspaceServer[]): WorkspaceServer
 
 function RoutePlannerControl({
   enabled,
+  onSpeedChange,
   onToggle,
-  routeDistance
+  routeDistance,
+  speedKmh
 }: {
   enabled: boolean;
+  onSpeedChange(speedKmh: number): void;
   onToggle(): void;
   routeDistance: number | null;
+  speedKmh: number;
 }) {
+  const distanceTiles = routeDistance ?? 0;
+  const distanceMeters = getRouteDistanceMeters(distanceTiles);
+
   return (
     <div className="map-route-planner-control">
       <button
@@ -1999,12 +1993,28 @@ function RoutePlannerControl({
       >
         <span aria-hidden="true" className="map-route-planner-icon" />
       </button>
-      {routeDistance === null ? null : (
-        <div aria-label="Route distance" className="map-route-planner-stats">
-          <span>{formatRouteDistance(routeDistance)} tiles</span>
-          <span>{formatRouteDistance(routeDistance * TILE_SIZE_METERS)} meters</span>
+      {enabled ? (
+        <div className="map-route-planner-popout">
+          <label className="map-route-planner-speed">
+            <span>Speed</span>
+            <input
+              aria-label="Speed"
+              max={60}
+              min={0}
+              onChange={(event) => onSpeedChange(clampRoutePlannerSpeed(Number(event.target.value)))}
+              step={1}
+              type="number"
+              value={speedKmh}
+            />
+            <span>km/h</span>
+          </label>
+          <div aria-label="Route distance" className="map-route-planner-stats">
+            <span>{formatRouteDistance(distanceTiles)} tiles</span>
+            <span>{formatRouteDistance(distanceMeters)} meters</span>
+            <span>Time {formatRouteTravelTime(distanceMeters, speedKmh)}</span>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -2058,6 +2068,7 @@ function MapLegendControl({
 function MapEventFeedControl({
   feed,
   isOpen,
+  isLoading,
   onOpenChange,
   onSizeChange,
   serverName,
@@ -2065,6 +2076,7 @@ function MapEventFeedControl({
 }: {
   feed: WurmMapsEventFeed | null;
   isOpen: boolean;
+  isLoading: boolean;
   onOpenChange(isOpen: boolean): void;
   onSizeChange(size: EventFeedPanelSize): void;
   serverName: string;
@@ -2088,6 +2100,7 @@ function MapEventFeedControl({
       {isOpen ? (
         <MapEventFeedPanel
           feed={feed}
+          isLoading={isLoading}
           onSizeChange={onSizeChange}
           serverName={serverName}
           size={size}
@@ -2099,11 +2112,13 @@ function MapEventFeedControl({
 
 function MapEventFeedPanel({
   feed,
+  isLoading,
   onSizeChange,
   serverName,
   size
 }: {
   feed: WurmMapsEventFeed | null;
+  isLoading: boolean;
   onSizeChange(size: EventFeedPanelSize): void;
   serverName: string;
   size: EventFeedPanelSize;
@@ -2181,9 +2196,11 @@ function MapEventFeedPanel({
     >
       <div className="map-event-feed-header">
         <strong>{serverName} Events</strong>
-        <span>{feed === null ? "Unavailable" : formatServerStatus(feed.serverStatus.status)}</span>
+        <span>{isLoading ? "Loading" : feed === null ? "Unavailable" : formatServerStatus(feed.serverStatus.status)}</span>
       </div>
-      {events.length === 0 ? (
+      {isLoading ? (
+        <p className="map-event-feed-empty">Loading events</p>
+      ) : events.length === 0 ? (
         <p className="map-event-feed-empty">
           {feed === null ? "Events unavailable" : "No recent events"}
         </p>
@@ -2599,19 +2616,10 @@ function MarkerContextMenu({
           onEdit={onEdit}
         />
       ) : null}
-      <div className="map-context-menu-section">
-        <p>Add at {contextMenu.mapX}, {contextMenu.mapY}</p>
-        <button onClick={() => onCreate("tower")} role="menuitem" type="button">Tower</button>
-        <button onClick={() => onCreate("deed")} role="menuitem" type="button">Deed</button>
-        <button onClick={() => onCreate("note")} role="menuitem" type="button">Note</button>
-        <button onClick={() => onCreate("rift")} role="menuitem" type="button">Rift</button>
-        <button onClick={() => onCreate("camp")} role="menuitem" type="button">Camp</button>
-        <button onClick={() => onCreate("minedoor")} role="menuitem" type="button">Minedoor</button>
-        <button onClick={() => onCreate("locateSoul")} role="menuitem" type="button">Locate Soul</button>
-        <button onClick={() => onCreate("bridge")} role="menuitem" type="button">Bridge</button>
-        <button onClick={() => onCreate("canal")} role="menuitem" type="button">Canal</button>
-        <button onClick={() => onCreate("highway")} role="menuitem" type="button">Highway</button>
-      </div>
+      <AddMarkerMenu
+        coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
+        onCreate={onCreate}
+      />
     </div>
   );
 }
@@ -2683,6 +2691,49 @@ function RoutePlannerLayer({
           style={getScreenCoordinateStyle(point, view)}
         />
       ))}
+    </div>
+  );
+}
+
+function SearchLineLayer({
+  markers,
+  markerVisibility,
+  selectedCoordinate,
+  view
+}: {
+  markers: WorkspaceMarker[];
+  markerVisibility: MarkerVisibility;
+  selectedCoordinate: MapCoordinate;
+  view: ViewState;
+}) {
+  const lineMarkers = markers.filter((marker) => !isPathMarker(marker) && isMarkerVisible(marker, markerVisibility));
+
+  if (lineMarkers.length === 0) {
+    return null;
+  }
+
+  const start = getScreenCoordinateCenter(selectedCoordinate, view);
+
+  return (
+    <div aria-hidden="true" className="map-search-line-layer" data-testid="search-line-layer">
+      <svg className="map-search-line-svg">
+        {lineMarkers.map((marker) => {
+          const end = getScreenCoordinateCenter(marker, view);
+
+          return (
+            <line
+              className="map-search-line"
+              data-search-line-id={marker.id}
+              data-testid="search-line"
+              key={marker.id}
+              x1={formatSvgNumber(start.x)}
+              x2={formatSvgNumber(end.x)}
+              y1={formatSvgNumber(start.y)}
+              y2={formatSvgNumber(end.y)}
+            />
+          );
+        })}
+      </svg>
     </div>
   );
 }
@@ -2760,10 +2811,7 @@ function MarkerContextRow({
       data-testid={`context-marker-row-${marker.id}`}
       style={getMarkerContextRowStyle(marker, markerColors)}
     >
-      <span className="map-context-marker-copy">
-        <span className="map-context-marker-title">{getMarkerContextTitle(marker)}</span>
-        <span className="map-context-marker-meta">{getMarkerContextMeta(marker)}</span>
-      </span>
+      <MarkerContextSummary marker={marker} />
       <div className="map-context-marker-actions">
         <button aria-label={`Edit ${label}`} onClick={() => onEdit(marker)} role="menuitem" type="button">
           Edit
@@ -2773,6 +2821,16 @@ function MarkerContextRow({
         </button>
       </div>
     </div>
+  );
+}
+
+function MarkerContextSummary({ marker }: { marker: WorkspaceMarker }) {
+  return (
+    <span className="map-context-marker-copy">
+      <span className="map-context-marker-title">{getMarkerContextTitle(marker)}</span>
+      <span className="map-context-marker-meta">{getMarkerContextMeta(marker)}</span>
+      <span className="map-context-marker-modifier">Last Modified: {getMarkerLastModifiedBy(marker)}</span>
+    </span>
   );
 }
 
@@ -2820,8 +2878,15 @@ function MarkerDialog({
             <input name="y" required type="number" defaultValue={coordinate.y} min={0} max={map.heightPx - 1} />
           </label>
         </div>
+        {dialog.mode === "edit" ? (
+          <div className="map-readonly-field">
+            <span>Last Modified</span>
+            <strong>{getMarkerLastModifiedBy(dialog.marker)}</strong>
+          </div>
+        ) : null}
         <MarkerFields
           dialog={dialog}
+          key={dialog.mode === "edit" ? dialog.marker.id : `${markerType}:${coordinate.x}:${coordinate.y}`}
           markerType={markerType}
           noteCategories={noteCategories}
           onNoteCategoryCreate={onNoteCategoryCreate}
@@ -2900,19 +2965,13 @@ function HoverMarkerPill({
   marker: WorkspaceMarker;
   markerColors: MarkerColors;
 }) {
-  const description = getMarkerHoverDescription(marker);
-
   return (
     <div
-      className="map-hover-marker-pill"
+      className="map-context-marker-row map-hover-marker-pill"
       data-testid="hover-marker-pill"
       style={getMarkerContextRowStyle(marker, markerColors)}
     >
-      <span className="map-hover-marker-pill-title">{getMarkerHoverTitle(marker)}</span>
-      <span className="map-hover-marker-pill-meta">{getMarkerContextMeta(marker)}</span>
-      {description.length === 0 ? null : (
-        <span className="map-hover-marker-pill-description">{description}</span>
-      )}
+      <MarkerContextSummary marker={marker} />
     </div>
   );
 }
@@ -2933,8 +2992,9 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
     return (
       <dl className="map-hover-details-list">
         <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
-        <div><dt>QL</dt><dd>{marker.ql}</dd></div>
-        <div><dt>DMG</dt><dd>{marker.damage}</dd></div>
+        {marker.ql.trim() === "" ? null : <div><dt>QL</dt><dd>{marker.ql}</dd></div>}
+        {marker.damage.trim() === "" ? null : <div><dt>DMG</dt><dd>{marker.damage}</dd></div>}
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
       </dl>
     );
   }
@@ -2947,6 +3007,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
         {marker.foundingDate === null ? null : <div><dt>Founding date</dt><dd>{marker.foundingDate}</dd></div>}
         <div><dt>Dimensions</dt><dd>{formatDeedDimensions(marker)}</dd></div>
         <div><dt>Perimeter</dt><dd>{marker.perimeter} tiles</dd></div>
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
       </dl>
     );
   }
@@ -2957,6 +3018,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
         <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
         {marker.arrivalDate === null ? null : <div><dt>Date of arrival</dt><dd>{marker.arrivalDate}</dd></div>}
         {marker.estimatedRiftTime === null ? null : <div><dt>Estimated rift time</dt><dd>{marker.estimatedRiftTime}</dd></div>}
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
         {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
@@ -2967,6 +3029,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
       <dl className="map-hover-details-list">
         <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
         <div><dt>Type</dt><dd>{marker.campType}</dd></div>
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
         {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
@@ -2977,6 +3040,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
       <dl className="map-hover-details-list">
         <div><dt>Position</dt><dd>{marker.x}, {marker.y}</dd></div>
         {marker.strength.length === 0 ? null : <div><dt>Strength</dt><dd>{marker.strength}</dd></div>}
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
         {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
@@ -2989,6 +3053,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
         <div><dt>Caster facing</dt><dd>{formatLocateSoulCasterFacing(marker.casterFacing)}</dd></div>
         <div><dt>Direction</dt><dd>{formatLocateSoulDirection(marker.direction)}</dd></div>
         <div><dt>Distance</dt><dd>{formatLocateSoulDistanceBand(marker.distanceBand)}</dd></div>
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
         {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
@@ -3000,6 +3065,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
         <div><dt>Start</dt><dd>{marker.x}, {marker.y}</dd></div>
         <div><dt>Points</dt><dd>{marker.points.length}</dd></div>
         <div><dt>Width</dt><dd>{marker.width} tiles</dd></div>
+        <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
         {marker.notes.length === 0 ? null : <div className="map-hover-note-text">{marker.notes}</div>}
       </dl>
     );
@@ -3007,6 +3073,7 @@ function MarkerHoverDetailsList({ marker }: { marker: WorkspaceMarker }) {
 
   return (
     <dl className="map-hover-details-list">
+      <div><dt>Last Modified</dt><dd>{getMarkerLastModifiedBy(marker)}</dd></div>
       <div className="map-hover-note-text">{marker.text}</div>
     </dl>
   );
@@ -3029,13 +3096,17 @@ function MarkerFields({
 
   if (markerType === "tower") {
     const tower = marker?.type === "tower" ? marker : null;
-    const creator = tower === null ? "" : formatTowerCreator(tower);
+    const creator = tower === null ? "" : formatTowerCreatorFormValue(tower);
 
     return (
       <>
-        <label><span>QL</span><input name="ql" required defaultValue={tower?.ql ?? "50.00"} /></label>
-        <label><span>Damage</span><input name="damage" required defaultValue={tower?.damage ?? "0.00"} /></label>
-        <label><span>Creator</span><input name="creator" required defaultValue={creator} /></label>
+        <label><span>QL</span><input name="ql" defaultValue={tower?.ql ?? ""} /></label>
+        <label><span>Damage</span><input name="damage" defaultValue={tower?.damage ?? ""} /></label>
+        <label><span>Creator</span><input name="creator" defaultValue={creator} /></label>
+        <label className="map-checkbox-field">
+          <input name="planned" type="checkbox" defaultChecked={tower?.planned ?? false} />
+          <span>Planned</span>
+        </label>
       </>
     );
   }
@@ -3446,6 +3517,45 @@ async function savePathDraft(
   setFormError(null);
 }
 
+async function createAutoplannedTower(
+  coordinate: MapCoordinate,
+  mapId: string,
+  setMarkers: (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => void,
+  setFormError: (error: string | null) => void
+): Promise<void> {
+  const payload = {
+    damage: "",
+    makerName: "",
+    makerNumber: "",
+    planned: true,
+    ql: "",
+    type: "tower",
+    x: coordinate.x,
+    y: coordinate.y
+  };
+  const response = await fetch(`/api/maps/${mapId}/markers`, {
+    body: JSON.stringify(payload),
+    headers: { "content-type": "application/json" },
+    method: "POST"
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    setFormError(body?.error ?? "Planned tower could not be created");
+    return;
+  }
+
+  const body = (await response.json()) as { marker: WorkspaceMarker };
+
+  if (body.marker.type !== "tower") {
+    setFormError("Planned tower could not be created");
+    return;
+  }
+
+  setMarkers((current) => upsertMarker(current, body.marker));
+  setFormError(null);
+}
+
 async function saveUserMapSettings(mapId: string, settings: UserMapSettings): Promise<void> {
   try {
     await fetch(`/api/maps/${mapId}/settings`, {
@@ -3479,6 +3589,7 @@ function buildMarkerPayload(markerType: MarkerType, formData: FormData): MarkerP
         damage: String(formData.get("damage") ?? ""),
         makerName: creator.makerName,
         makerNumber: creator.makerNumber,
+        planned: formData.get("planned") === "on",
         ql: String(formData.get("ql") ?? "")
       }
     };
@@ -3628,6 +3739,14 @@ function parseCreatorInput(value: string): { makerName: string; makerNumber: str
     makerName,
     makerNumber
   };
+}
+
+function formatTowerCreatorFormValue(input: { makerName: string; makerNumber: string }): string {
+  if (input.makerName === "" && input.makerNumber === "") {
+    return "";
+  }
+
+  return formatTowerCreator(input);
 }
 
 function getMapSize(map: WorkspaceMap | null) {
@@ -3794,9 +3913,18 @@ function getTowerNameLabelStyle(
 }
 
 function getScreenCoordinateStyle(coordinate: MapCoordinate, view: ViewState): CSSProperties {
+  const center = getScreenCoordinateCenter(coordinate, view);
+
   return {
-    left: formatPixels(view.x + (coordinate.x + 0.5) * view.zoom),
-    top: formatPixels(view.y + (coordinate.y + 0.5) * view.zoom)
+    left: formatPixels(center.x),
+    top: formatPixels(center.y)
+  };
+}
+
+function getScreenCoordinateCenter(coordinate: MapCoordinate, view: ViewState): { x: number; y: number } {
+  return {
+    x: view.x + (coordinate.x + 0.5) * view.zoom,
+    y: view.y + (coordinate.y + 0.5) * view.zoom
   };
 }
 
@@ -3908,30 +4036,55 @@ function getRouteDistanceTiles(points: MapCoordinate[]): number {
     const current = points[index];
 
     if (previous !== undefined && current !== undefined) {
-      distance += Math.hypot(current.x - previous.x, current.y - previous.y);
+      // Wurm range math is square, so diagonal movement counts by the larger tile-axis delta.
+      distance += Math.max(Math.abs(current.x - previous.x), Math.abs(current.y - previous.y));
     }
   }
 
   return distance;
 }
 
+function getRouteDistanceMeters(distanceTiles: number): number {
+  return distanceTiles * TILE_SIZE_METERS;
+}
+
+function clampRoutePlannerSpeed(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return clamp(Math.round(value), 0, 60);
+}
+
 function formatRouteDistance(value: number): string {
   return Number.isInteger(value) ? String(value) : Number(value.toFixed(1)).toString();
 }
 
-function formatSvgNumber(value: number): string {
-  return Number(value.toFixed(3)).toString();
-}
-
-function getFloatingPanelStyle(position: TileHighlightPanelPosition | null): CSSProperties | undefined {
-  if (position === null) {
-    return undefined;
+function formatRouteTravelTime(distanceMeters: number, speedKmh: number): string {
+  if (speedKmh <= 0) {
+    return "--";
   }
 
-  return {
-    left: formatPixels(position.left),
-    top: formatPixels(position.top)
-  };
+  const seconds = Math.max(0, Math.round((distanceMeters / 1000 / speedKmh) * 3600));
+
+  if (seconds < 60) {
+    return `${seconds} sec`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  return remainingMinutes === 0 ? `${hours} hr` : `${hours} hr ${remainingMinutes} min`;
+}
+
+function formatSvgNumber(value: number): string {
+  return Number(value.toFixed(3)).toString();
 }
 
 function getEventFeedPanelStyle(size: EventFeedPanelSize): CSSProperties {
@@ -3969,21 +4122,6 @@ function getEventFeedViewportMaxWidth(): number {
 function getEventFeedViewportMaxHeight(): number {
   const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
   return Math.max(MIN_EVENT_FEED_PANEL_SIZE.height, viewportHeight - 32);
-}
-
-function clampFloatingPanelPosition(
-  left: number,
-  top: number,
-  width: number,
-  height: number
-): TileHighlightPanelPosition {
-  const viewportWidth = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerWidth;
-  const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
-
-  return {
-    left: clamp(left, 8, Math.max(8, viewportWidth - width - 8)),
-    top: clamp(top, 8, Math.max(8, viewportHeight - height - 8))
-  };
 }
 
 function useViewportSize(): ViewportSize {
@@ -4106,6 +4244,57 @@ function getMapCoordinate(clientX: number, clientY: number, view: ViewState) {
     x: Math.floor((clientX - view.x) / view.zoom),
     y: Math.floor((clientY - view.y) / view.zoom)
   };
+}
+
+function getAutoplannerSourceTower(dialog: DialogState | null): Extract<WorkspaceMarker, { type: "tower" }> | null {
+  if (
+    dialog === null ||
+    dialog.mode !== "edit" ||
+    dialog.marker.type !== "tower" ||
+    dialog.marker.planned !== true
+  ) {
+    return null;
+  }
+
+  return dialog.marker;
+}
+
+function getAutoplannedTowerCoordinate(
+  sourceTower: Extract<WorkspaceMarker, { type: "tower" }>,
+  clickedCoordinate: MapCoordinate,
+  map: WorkspaceMap
+): MapCoordinate | null {
+  const deltaX = clickedCoordinate.x - sourceTower.x;
+  const deltaY = clickedCoordinate.y - sourceTower.y;
+
+  if (deltaX === 0 && deltaY === 0) {
+    return null;
+  }
+
+  const target = Math.abs(deltaX) >= Math.abs(deltaY)
+    ? {
+        x: sourceTower.x + (deltaX >= 0 ? TOWER_AUTOPLANNER_SPACING_TILES : -TOWER_AUTOPLANNER_SPACING_TILES),
+        y: sourceTower.y
+      }
+    : {
+        x: sourceTower.x,
+        y: sourceTower.y + (deltaY >= 0 ? TOWER_AUTOPLANNER_SPACING_TILES : -TOWER_AUTOPLANNER_SPACING_TILES)
+      };
+
+  return isInsideMap(target, map) ? target : null;
+}
+
+function hasTowerAtCoordinate(
+  markers: WorkspaceMarker[],
+  coordinate: MapCoordinate,
+  sourceTowerId: string
+): boolean {
+  return markers.some((marker) => (
+    marker.type === "tower" &&
+    marker.id !== sourceTowerId &&
+    marker.x === coordinate.x &&
+    marker.y === coordinate.y
+  ));
 }
 
 function getClampedMapCoordinate(clientX: number, clientY: number, view: ViewState, map: WorkspaceMap): MapCoordinate {
@@ -4384,7 +4573,7 @@ function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility):
   }
 
   if (marker.type === "tower") {
-    return visibility.towers;
+    return visibility.towers && (marker.planned !== true || visibility.plannedTowers);
   }
 
   if (marker.type === "deed") {
@@ -4437,6 +4626,7 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
       formatTowerCreator(marker),
       marker.ql,
       marker.damage,
+      marker.planned ? "planned" : "",
       marker.x,
       marker.y
     ].join(" ");
@@ -4620,6 +4810,10 @@ function getMarkerTitle(marker: WorkspaceMarker): string {
   return `Note ${marker.category} - ${marker.title}`;
 }
 
+function getMarkerLastModifiedBy(marker: WorkspaceMarker): string {
+  return marker.lastModifiedBy ?? "Unknown";
+}
+
 function getMarkerHoverTitle(marker: WorkspaceMarker): string {
   if (marker.type === "tower") {
     return `Tower: ${formatTowerCreator(marker)}`;
@@ -4650,34 +4844,6 @@ function getMarkerHoverTitle(marker: WorkspaceMarker): string {
   }
 
   return `${marker.category} - ${marker.title}`;
-}
-
-function getMarkerHoverDescription(marker: WorkspaceMarker): string {
-  if (marker.type === "rift") {
-    return marker.notes;
-  }
-
-  if (marker.type === "camp") {
-    return marker.notes;
-  }
-
-  if (marker.type === "minedoor") {
-    return marker.notes;
-  }
-
-  if (marker.type === "locateSoul") {
-    return marker.notes;
-  }
-
-  if (isPathMarker(marker)) {
-    return marker.notes;
-  }
-
-  if (marker.type === "note") {
-    return marker.text;
-  }
-
-  return "";
 }
 
 function getMarkerLabel(marker: WorkspaceMarker): string {
@@ -4754,7 +4920,7 @@ function getMarkerContextTitle(marker: WorkspaceMarker): string {
 
 function getMarkerContextMeta(marker: WorkspaceMarker): string {
   if (marker.type === "tower") {
-    return `Tower | QL ${marker.ql} | DMG ${marker.damage}`;
+    return getTowerContextMeta(marker);
   }
 
   if (marker.type === "deed") {
@@ -4885,6 +5051,24 @@ function getHoverDetailsStyle(screenX: number, screenY: number): CSSProperties {
     HOVER_DETAILS_MAX_WIDTH_PX,
     HOVER_DETAILS_MAX_HEIGHT_PX
   );
+}
+
+function getTowerContextMeta(marker: Extract<WorkspaceMarker, { type: "tower" }>): string {
+  const parts = ["Tower"];
+
+  if (marker.planned) {
+    parts.push("Planned");
+  }
+
+  if (marker.ql.trim() !== "") {
+    parts.push(`QL ${marker.ql}`);
+  }
+
+  if (marker.damage.trim() !== "") {
+    parts.push(`DMG ${marker.damage}`);
+  }
+
+  return parts.join(" | ");
 }
 
 function getContextMenuStyle(screenX: number, screenY: number): CSSProperties {

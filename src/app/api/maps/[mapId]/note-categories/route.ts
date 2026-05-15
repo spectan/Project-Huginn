@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { MAX_NAME_LENGTH } from "@/lib/domain/constants";
-import { canReadMap } from "@/lib/domain/permissions";
+import { canAdminister, canReadMap } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
 
 type RouteContext = {
@@ -20,10 +20,16 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 
   const { mapId } = await context.params;
+  const map = await findActiveMap(mapId);
+
+  if (map === null) {
+    return NextResponse.json({ error: "Map was not found" }, { status: 404 });
+  }
+
   const categories = await prisma.noteCategory.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true },
-    where: { mapId }
+    where: { mapId: map.id }
   });
 
   return NextResponse.json({ categories });
@@ -32,7 +38,7 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !viewer.isAdmin) {
+  if (viewer === null || !canAdminister(viewer)) {
     return NextResponse.json({ error: "Admin access is required" }, { status: 403 });
   }
 
@@ -44,11 +50,17 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const { mapId } = await context.params;
+  const map = await findActiveMap(mapId);
+
+  if (map === null) {
+    return NextResponse.json({ error: "Map was not found" }, { status: 404 });
+  }
+
   const category = await prisma.noteCategory.upsert({
-    create: { mapId, name },
+    create: { mapId: map.id, name },
     update: {},
     where: {
-      mapId_name: { mapId, name }
+      mapId_name: { mapId: map.id, name }
     }
   });
 
@@ -56,7 +68,7 @@ export async function POST(request: Request, context: RouteContext) {
     actorUserId: viewer.id,
     categoryId: category.id,
     categoryName: category.name,
-    mapId
+    mapId: map.id
   });
 
   return NextResponse.json({
@@ -65,6 +77,16 @@ export async function POST(request: Request, context: RouteContext) {
       name: category.name
     }
   }, { status: 201 });
+}
+
+async function findActiveMap(mapId: string): Promise<{ id: string } | null> {
+  return prisma.map.findFirst({
+    select: { id: true },
+    where: {
+      id: mapId,
+      isActive: true
+    }
+  });
 }
 
 async function readJson(request: Request): Promise<unknown> {

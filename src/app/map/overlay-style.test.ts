@@ -26,6 +26,71 @@ describe("map overlay styles", () => {
     expect(block).toContain("color: #e5e7eb");
   });
 
+  it("renders deed bodies with a very transparent white fill instead of a deed-colored fill", () => {
+    const block = getCssBlock(".map-deed-overlay");
+
+    expect(block).toContain("background: rgba(255, 255, 255, 0.18)");
+    expect(block).not.toContain("radial-gradient");
+    expect(block).not.toContain("#facc15");
+  });
+
+  it("renders tower protection as a deed-like transparent fill instead of a gradient", () => {
+    const block = getStandaloneCssBlock(".map-tower-zone--protection");
+
+    expect(block).toContain("background: rgba(255, 255, 255, 0.18)");
+    expect(block).not.toContain("gradient");
+    expect(block).not.toContain("--map-tower-zone-gradient");
+  });
+
+  it("renders rift bodies with a transparent white fill and separate edge strips", () => {
+    const overlayBlock = getStandaloneCssBlock(".map-rift-overlay");
+    const borderBlock = getStandaloneCssBlock(".map-rift-border");
+
+    expect(overlayBlock).toContain("background: rgba(255, 255, 255, 0.18)");
+    expect(overlayBlock).not.toContain("#ef4444");
+    expect(borderBlock).toContain("pointer-events: none");
+    expect(borderBlock).not.toContain("border:");
+    expect(borderBlock).not.toContain("outline:");
+  });
+
+  it("renders deed borders and perimeters as tile edge strips", () => {
+    const borderBlock = getStandaloneCssBlock(".map-deed-border");
+    const perimeterBlock = getStandaloneCssBlock(".map-deed-perimeter");
+
+    expect(borderBlock).toContain("pointer-events: none");
+    expect(perimeterBlock).toContain("pointer-events: none");
+    expect(borderBlock).not.toContain("border:");
+    expect(perimeterBlock).not.toContain("border:");
+  });
+
+  it("renders tower outlines as non-interactive tile edge strips", () => {
+    const block = getStandaloneCssBlock(".map-tower-zone-edge");
+
+    expect(block).toContain("pointer-events: none");
+    expect(block).not.toContain("border:");
+    expect(block).not.toContain("outline:");
+    expect(block).not.toContain("box-shadow:");
+  });
+
+  it("styles marker modifier text like marker metadata text", () => {
+    const metaBlock = getStandaloneCssBlock(".map-context-marker-meta");
+    const modifierBlock = getStandaloneCssBlock(".map-context-marker-modifier");
+
+    expect(metaBlock).toContain("color: #94a3b8");
+    expect(modifierBlock).toContain("color: #94a3b8");
+    expect(modifierBlock).toContain("font-weight: 700");
+    expect(modifierBlock).not.toContain("color: #cbd5e1");
+  });
+
+  it("styles context add submenus as nested menu groups", () => {
+    const triggerBlock = getStandaloneCssBlock(".map-context-submenu-trigger");
+    const panelBlock = getStandaloneCssBlock(".map-context-submenu-panel");
+
+    expect(triggerBlock).toContain("grid-template-columns: minmax(0, 1fr) 14px");
+    expect(panelBlock).toContain("border-left: 1px solid rgba(148, 163, 184, 0.22)");
+    expect(panelBlock).toContain("padding-left: 8px");
+  });
+
   it("allows direct marker buttons to receive hover and context menu events", () => {
     const block = getStandaloneCssBlock(".map-marker-layer > .map-marker");
 
@@ -103,6 +168,7 @@ describe("map overlay styles", () => {
 
   it("renders settings controls as compact layer rows", () => {
     const controlsBlock = getStandaloneCssBlock(".map-layer-controls");
+    const categoryBlock = getStandaloneCssBlock(".map-layer-category");
     const rowBlock = getStandaloneCssBlock(".map-layer-row");
     const colorBlock = getStandaloneCssBlock(".map-layer-color");
     const settingsPanelBlock = getStandaloneCssBlock(".map-settings-panel");
@@ -112,6 +178,14 @@ describe("map overlay styles", () => {
     expect(controlsBlock).toContain("padding: 6px");
     expect(settingsPanelBlock).toContain("width: min(330px, calc(100vw - 32px))");
     expect(settingsPanelBlock).toContain("padding: 10px");
+    expect(categoryBlock).toContain("grid-column: 1 / -1");
+    expect(categoryBlock).toContain("color: #cbd5e1");
+    expect(categoryBlock).toContain("font-size: 11px");
+    expect(categoryBlock).toContain("cursor: pointer");
+    expect(categoryBlock).toContain("background: rgba(148, 163, 184, 0.12)");
+    expect(categoryBlock).toContain("border: 1px solid rgba(148, 163, 184, 0.24)");
+    expect(categoryBlock).toContain("letter-spacing: 0");
+    expect(categoryBlock).not.toContain("#93c5fd");
     expect(rowBlock).toContain("grid-template-columns: 16px 32px minmax(0, 1fr) minmax(56px, 0.8fr)");
     expect(rowBlock).toContain("min-height: 24px");
     expect(rowBlock).toContain("font-size: 12px");
@@ -123,18 +197,21 @@ describe("map overlay styles", () => {
     expect(globalsCss).not.toContain(".map-color-controls");
   });
 
-  it("stacks default floating map tools in their map corners", () => {
-    const rightControlsBlock = getStandaloneCssBlock(".map-right-side-controls");
+  it("keeps only the bottom-left map tools floating on the map surface", () => {
     const bottomLeftControlsBlock = getStandaloneCssBlock(".map-bottom-left-controls");
-    const roadwayPositionedBlock = getStandaloneCssBlock(".map-roadway-edit-control.is-positioned");
+    const settingsToolGroupBlock = getStandaloneCssBlock(".map-settings-tool-group");
+    const settingsToolSelectBlock = getStandaloneCssBlock(".map-settings-tool-select");
+    const settingsToolSectionBlock = getStandaloneCssBlock(".map-settings-tool-section");
 
-    expect(rightControlsBlock).toContain("position: fixed");
-    expect(rightControlsBlock).toContain("right: 16px");
-    expect(rightControlsBlock).toContain("bottom: 16px");
-    expect(rightControlsBlock).toContain("flex-direction: column");
     expect(bottomLeftControlsBlock).toContain("flex-direction: column");
     expect(bottomLeftControlsBlock).toContain("align-items: flex-start");
-    expect(roadwayPositionedBlock).toContain("position: fixed");
+    expect(settingsToolSectionBlock).toContain("margin-top: 8px");
+    expect(settingsToolSectionBlock).toContain("gap: 6px");
+    expect(settingsToolGroupBlock).toContain("margin: 0");
+    expect(settingsToolSelectBlock).toContain("width: 100%");
+    expect(settingsToolSelectBlock).toContain("min-width: 0");
+    expect(globalsCss).not.toContain(".map-settings-tool-status");
+    expect(globalsCss).not.toContain(".map-settings-tool-legend");
   });
 
   it("keeps map settings opacity sliders contained inside compact rows", () => {
@@ -147,12 +224,32 @@ describe("map overlay styles", () => {
     expect(opacityBlock).toContain("max-width: 100%");
   });
 
+  it("keeps marker form checkboxes compact instead of inheriting full-width input styling", () => {
+    const fieldBlock = getStandaloneCssBlock(".map-marker-form .map-checkbox-field");
+    const block = getStandaloneCssBlock(".map-marker-form .map-checkbox-field input[type=\"checkbox\"]");
+
+    expect(fieldBlock).toContain("display: flex");
+    expect(fieldBlock).toContain("align-items: center");
+    expect(block).toContain("width: 14px");
+    expect(block).toContain("height: 14px");
+    expect(block).toContain("min-height: 0");
+    expect(block).toContain("padding: 0");
+  });
+
   it("keeps locate soul overlays non-interactive so the 3 by 3 pip owns right-click actions", () => {
     const svgBlock = getStandaloneCssBlock(".map-locate-soul-overlay-svg");
     const overlayBlock = getStandaloneCssBlock(".map-locate-soul-overlay");
 
     expect(svgBlock).toContain("pointer-events: none");
     expect(overlayBlock).toContain("pointer-events: none");
+  });
+
+  it("keeps search line overlays non-interactive", () => {
+    const layerBlock = getStandaloneCssBlock(".map-search-line-layer");
+    const lineBlock = getStandaloneCssBlock(".map-search-line");
+
+    expect(layerBlock).toContain("pointer-events: none");
+    expect(lineBlock).toContain("pointer-events: none");
   });
 
   it("keeps the event feed resizable and scrollable", () => {
@@ -195,12 +292,22 @@ describe("map overlay styles", () => {
     expect(eventFeedBlock).not.toContain("bottom: calc(100% + 8px)");
   });
 
+  it("opens the route planner speed popout to the right of its button", () => {
+    const popoutBlock = getStandaloneCssBlock(".map-route-planner-popout");
+    const speedBlock = getStandaloneCssBlock(".map-route-planner-speed");
+    const mobileBlock = getCssBlockInMedia("(max-width: 720px)", ".map-route-planner-popout");
+
+    expect(popoutBlock).toContain("left: calc(100% + 8px)");
+    expect(popoutBlock).toContain("bottom: 0");
+    expect(speedBlock).toContain("grid-template-columns:");
+    expect(mobileBlock).toContain("max-width: calc(100vw - 74px)");
+  });
+
   it("reflows map chrome and popout panels on mobile viewports", () => {
     const searchBlock = getCssBlockInMedia("(max-width: 720px)", ".map-search");
     const selectionBlock = getCssBlockInMedia("(max-width: 720px)", ".map-selection-controls");
     const legendBlock = getCssBlockInMedia("(max-width: 720px)", ".map-legend-panel");
     const eventFeedBlock = getCssBlockInMedia("(max-width: 720px)", ".map-event-feed-panel");
-    const rightControlsBlock = getCssBlockInMedia("(max-width: 720px)", ".map-right-side-controls");
 
     expect(searchBlock).toContain("right: 112px");
     expect(selectionBlock).toContain("grid-template-columns: 1fr");
@@ -210,18 +317,21 @@ describe("map overlay styles", () => {
     expect(eventFeedBlock).toContain("position: fixed");
     expect(eventFeedBlock).toContain("left: 62px");
     expect(eventFeedBlock).toContain("max-height: min(60vh, calc(100vh - 96px))");
-    expect(rightControlsBlock).toContain("bottom: max(22px, env(safe-area-inset-bottom))");
   });
 
-  it("keeps the support link unobtrusive at the bottom center", () => {
+  it("keeps the footer support and tip text unobtrusive at the bottom center", () => {
+    const footerBlock = getStandaloneCssBlock(".map-footer-text");
     const supportLinkBlock = getStandaloneCssBlock(".map-support-link");
+    const tipBlock = getStandaloneCssBlock(".map-tip-button");
 
-    expect(supportLinkBlock).toContain("position: fixed");
-    expect(supportLinkBlock).toContain("left: 50%");
-    expect(supportLinkBlock).toContain("bottom: 6px");
-    expect(supportLinkBlock).toContain("transform: translateX(-50%)");
+    expect(footerBlock).toContain("position: fixed");
+    expect(footerBlock).toContain("left: 50%");
+    expect(footerBlock).toContain("bottom: 6px");
+    expect(footerBlock).toContain("transform: translateX(-50%)");
     expect(supportLinkBlock).toContain("font-size: 11px");
     expect(supportLinkBlock).toContain("opacity: 0.72");
+    expect(tipBlock).toContain("font-size: 11px");
+    expect(tipBlock).toContain("background: transparent");
   });
 
   it("uses configurable grid colors with black grid edging", () => {
