@@ -372,6 +372,43 @@ describe("MapPage", () => {
     expect(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" })).toBeTruthy();
   });
 
+  it("groups server choices by cluster and alphabetizes each cluster", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      servers: [
+        { id: "map-xanadu", name: "Xanadu" },
+        { id: "map-cadence", name: "Cadence" },
+        { id: "map-elevation", name: "Elevation" },
+        { id: "map-celebration", name: "Celebration" },
+        { id: "map-affliction", name: "Affliction" },
+        { id: "map-harmony", name: "Harmony" }
+      ],
+      viewer: approvedViewer
+    }));
+
+    const serverSelect = screen.getByRole("combobox", { name: "Server" });
+    const groups = Array.from(serverSelect.querySelectorAll("optgroup"));
+
+    expect(groups.map((group) => group.label)).toEqual([
+      "Epic",
+      "North Freedom Isles",
+      "Southern Freedom Isles"
+    ]);
+    expect(Array.from(groups[0]?.querySelectorAll("option") ?? []).map((option) => option.textContent)).toEqual([
+      "Affliction",
+      "Elevation"
+    ]);
+    expect(Array.from(groups[1]?.querySelectorAll("option") ?? []).map((option) => option.textContent)).toEqual([
+      "Cadence",
+      "Harmony"
+    ]);
+    expect(Array.from(groups[2]?.querySelectorAll("option") ?? []).map((option) => option.textContent)).toEqual([
+      "Celebration",
+      "Xanadu"
+    ]);
+  });
+
   it("prevents native image dragging so pointer panning owns the interaction", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],

@@ -82,6 +82,29 @@ const TILE_SIZE_METERS = 4;
 const DEFAULT_NOTE_CATEGORIES: NoteCategory[] = [
   { id: "default-category-general", name: "General" }
 ];
+const SERVER_CLUSTER_ORDER = [
+  "Epic",
+  "North Freedom Isles",
+  "Southern Freedom Isles",
+] as const;
+const SERVER_CLUSTERS = new Map<string, typeof SERVER_CLUSTER_ORDER[number]>([
+  ["Celebration", "Southern Freedom Isles"],
+  ["Chaos", "Southern Freedom Isles"],
+  ["Deliverance", "Southern Freedom Isles"],
+  ["Exodus", "Southern Freedom Isles"],
+  ["Independence", "Southern Freedom Isles"],
+  ["Pristine", "Southern Freedom Isles"],
+  ["Release", "Southern Freedom Isles"],
+  ["Xanadu", "Southern Freedom Isles"],
+  ["Cadence", "North Freedom Isles"],
+  ["Defiance", "North Freedom Isles"],
+  ["Harmony", "North Freedom Isles"],
+  ["Melody", "North Freedom Isles"],
+  ["Affliction", "Epic"],
+  ["Desertion", "Epic"],
+  ["Elevation", "Epic"],
+  ["Serenity", "Epic"]
+]);
 const tileSourceImageDataCache = new Map<string, Promise<ImageData>>();
 
 type ViewState = {
@@ -1678,6 +1701,8 @@ function MapSelectionControls({
   selectedServerId: string;
   servers: readonly WorkspaceServer[];
 }) {
+  const groupedServers = getGroupedServers(servers);
+
   return (
     <div className="map-selection-controls">
       <label>
@@ -1687,8 +1712,12 @@ function MapSelectionControls({
           onChange={(event) => onServerChange(event.target.value)}
           value={selectedServerId}
         >
-          {servers.map((server) => (
-            <option key={server.id} value={server.id}>{server.name}</option>
+          {groupedServers.map((group) => (
+            <optgroup key={group.name} label={group.name}>
+              {group.servers.map((server) => (
+                <option key={server.id} value={server.id}>{server.name}</option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </label>
@@ -1907,6 +1936,46 @@ function RoadwayEditModeControl({
       </label>
     </fieldset>
   );
+}
+
+function getGroupedServers(servers: readonly WorkspaceServer[]): Array<{
+  name: string;
+  servers: WorkspaceServer[];
+}> {
+  const serversByCluster = new Map<string, WorkspaceServer[]>();
+  const unclusteredServers: WorkspaceServer[] = [];
+
+  for (const server of servers) {
+    const cluster = SERVER_CLUSTERS.get(server.name);
+
+    if (cluster === undefined) {
+      unclusteredServers.push(server);
+      continue;
+    }
+
+    const currentServers = serversByCluster.get(cluster) ?? [];
+    serversByCluster.set(cluster, [...currentServers, server]);
+  }
+
+  const groups: Array<{ name: string; servers: WorkspaceServer[] }> = SERVER_CLUSTER_ORDER
+    .map((cluster) => ({
+      name: cluster,
+      servers: sortServersByName(serversByCluster.get(cluster) ?? [])
+    }))
+    .filter((group) => group.servers.length > 0);
+
+  if (unclusteredServers.length > 0) {
+    groups.push({
+      name: "Other",
+      servers: sortServersByName(unclusteredServers)
+    });
+  }
+
+  return groups;
+}
+
+function sortServersByName(servers: readonly WorkspaceServer[]): WorkspaceServer[] {
+  return Array.from(servers).sort((first, second) => first.name.localeCompare(second.name));
 }
 
 function RoutePlannerControl({
