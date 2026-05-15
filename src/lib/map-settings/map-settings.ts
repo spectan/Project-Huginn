@@ -11,7 +11,13 @@ export type TileHighlightPanelPosition = {
   top: number;
 };
 
+export type EventFeedPanelSize = {
+  height: number;
+  width: number;
+};
+
 export type UserMapSettings = {
+  eventFeedPanelSize: EventFeedPanelSize;
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
@@ -73,7 +79,18 @@ export const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
   selection: ""
 };
 
+export const MIN_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
+  height: 160,
+  width: 260
+};
+
+export const DEFAULT_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
+  height: 240,
+  width: 320
+};
+
 export const DEFAULT_USER_MAP_SETTINGS: UserMapSettings = {
+  eventFeedPanelSize: DEFAULT_EVENT_FEED_PANEL_SIZE,
   markerColors: DEFAULT_MARKER_COLORS,
   markerOpacities: DEFAULT_MARKER_OPACITIES,
   markerVisibility: DEFAULT_MARKER_VISIBILITY,
@@ -130,6 +147,7 @@ const MARKER_OPACITY_KEYS = [
 ] as const;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const MAX_STORED_PANEL_POSITION_PX = 10000;
+const MAX_STORED_PANEL_SIZE_PX = 10000;
 
 export function parseUserMapSettings(input: unknown): UserMapSettings {
   return parseUserMapSettingsWithFallback(input, DEFAULT_USER_MAP_SETTINGS);
@@ -149,6 +167,7 @@ function parseUserMapSettingsWithFallback(
   const source = isRecord(input) ? input : {};
 
   return {
+    eventFeedPanelSize: parsePanelSize(source.eventFeedPanelSize, fallback.eventFeedPanelSize),
     markerColors: parseMarkerColors(source.markerColors, fallback.markerColors),
     markerOpacities: parseMarkerOpacities(source.markerOpacities, fallback.markerOpacities),
     markerVisibility: parseMarkerVisibility(source.markerVisibility, fallback.markerVisibility),
@@ -209,6 +228,24 @@ function parseTileHighlight(input: unknown, fallback: TileHighlightSettings): Ti
     selection: typeof selection === "string" && (selection === "" || isTileHighlightSelection(selection))
       ? selection
       : fallback.selection
+  };
+}
+
+function parsePanelSize(
+  input: unknown,
+  fallback: EventFeedPanelSize
+): EventFeedPanelSize {
+  if (input === undefined) {
+    return fallback;
+  }
+
+  if (!isRecord(input) || !Number.isFinite(input.width) || !Number.isFinite(input.height)) {
+    return fallback;
+  }
+
+  return {
+    height: clamp(Math.round(Number(input.height)), MIN_EVENT_FEED_PANEL_SIZE.height, MAX_STORED_PANEL_SIZE_PX),
+    width: clamp(Math.round(Number(input.width)), MIN_EVENT_FEED_PANEL_SIZE.width, MAX_STORED_PANEL_SIZE_PX)
   };
 }
 

@@ -141,6 +141,7 @@ Persisted settings include:
 - Tile highlight selection.
 - Tile highlighter panel position.
 - Roadway edit mode panel position.
+- Event feed panel size.
 - Rift overlay visibility and opacity.
 
 Rules:
@@ -559,7 +560,7 @@ Legend:
 Server event feed:
 
 - The bottom-left map tools include a compact Events icon button below the legend and route planner controls.
-- The feed panel is minimized by default. Opening the Events button shows the newest events first, has a visible height for roughly five entries, and scrolls through the latest 30 normalized entries.
+- The feed panel is minimized by default. Opening the Events button shows the newest events first, starts at a compact default size, can be resized from any corner with constrained drag handles, persists that size in user map settings, and scrolls through the latest 30 normalized entries.
 - The feed panel opens to the right of its icon and must not cover the bottom-left button stack.
 - Event feed content is read-only and must not create marker rows, audit events, user map settings, or map-coordinate state.
 
@@ -575,12 +576,20 @@ Tile highlighting:
 
 Client pointer conversion must account for zoom, pan, and image scaling. Server validation must only accept stored map coordinates, not screen coordinates.
 
+Mobile map support:
+
+- The map viewport supports one-finger panning, two-finger pinch zoom, and long-press context menus using the same coordinate conversion as desktop wheel/right-click interactions.
+- Touch long-press opens map actions for empty coordinates and marker actions when visible markers or overlays cover the pressed coordinate.
+- A simple tap on a marker-covered coordinate can surface the same stacked marker details used by hover on desktop.
+- Mobile layout rules keep the search/server/map selectors clear of the top-right account/settings buttons, keep bottom corner tool stacks reachable, and constrain legend/event panels beside the bottom-left icons instead of letting them overflow the viewport.
+
 Context menus:
 
 - Right-click map and marker context menus show a copyable coordinate row at the top.
 - The coordinate row is one button with the coordinate label and copy icon inside it, so either the visible text or icon writes the same shared link for that coordinate to the browser clipboard.
 - Coordinate copy links use the current URL with `x` and `y` search parameters updated, preserving other relevant search parameters.
 - Marker context menus use the same coordinate hit test as hover details. A right-click on an overlay-covered pip should list the direct pip plus every overlay/path area covering that coordinate, in the same marker set users would see while hovering.
+- Context menus and hover/tap detail popups clamp their fixed screen position to the current viewport instead of rendering directly at the pointer coordinate, so edge clicks remain reachable on desktop and mobile.
 
 ## Deleted Marker Cleanup
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -166,6 +166,145 @@ describe("MapPage", () => {
     expect(within(feed).queryByText("Celebration event 4")).toBeNull();
   });
 
+  it("renders saved event feed size and saves resize changes", async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialEventFeed: {
+        events: Array.from({ length: 8 }, (_, index) => ({
+          id: `event-${index}`,
+          kind: "deed" as const,
+          label: "Deed",
+          message: `Celebration event ${index}`,
+          subtype: 1,
+          timestamp: 1778286000 + index
+        })),
+        fetchedAt: "2026-05-13T04:00:00.000Z",
+        serverStatus: {
+          status: "online",
+          uptimeSeconds: 53207,
+          weather: "A light breeze is coming from the south.",
+          wurmTime: "It is 18:30:03 on day of Awakening."
+        },
+        sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
+      },
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        eventFeedPanelSize: {
+          height: 300,
+          width: 460
+        }
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Celebration events" }));
+
+    const feed = screen.getByRole("dialog", { name: "Celebration event feed" });
+    expect(feed.style.width).toBe("460px");
+    expect(feed.style.height).toBe("300px");
+
+    fireEvent.pointerDown(screen.getByTestId("event-feed-resize-handle-bottom-right"), {
+      button: 0,
+      clientX: 200,
+      clientY: 300,
+      pointerId: 31
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 260,
+      clientY: 345,
+      pointerId: 31
+    });
+    fireEvent.pointerUp(window, { pointerId: 31 });
+
+    expect(feed.style.width).toBe("520px");
+    expect(feed.style.height).toBe("345px");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/settings",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+
+    const calls = fetchMock.mock.calls as unknown as Array<[string | URL | Request, RequestInit?]>;
+    const lastCall = calls.at(-1);
+    const requestInit = lastCall?.[1];
+    expect(requestInit).toBeDefined();
+
+    if (requestInit === undefined) {
+      return;
+    }
+
+    expect(JSON.parse(String(requestInit.body))).toMatchObject({
+      eventFeedPanelSize: {
+        height: 345,
+        width: 520
+      }
+    });
+  });
+
+  it("resizes the event feed from a top corner while bottom-aligned", () => {
+    render(React.createElement(MapWorkspace, {
+      initialEventFeed: {
+        events: Array.from({ length: 8 }, (_, index) => ({
+          id: `event-${index}`,
+          kind: "deed" as const,
+          label: "Deed",
+          message: `Celebration event ${index}`,
+          subtype: 1,
+          timestamp: 1778286000 + index
+        })),
+        fetchedAt: "2026-05-13T04:00:00.000Z",
+        serverStatus: {
+          status: "online",
+          uptimeSeconds: 53207,
+          weather: "A light breeze is coming from the south.",
+          wurmTime: "It is 18:30:03 on day of Awakening."
+        },
+        sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
+      },
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        eventFeedPanelSize: {
+          height: 300,
+          width: 460
+        }
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Celebration events" }));
+
+    const feed = screen.getByRole("dialog", { name: "Celebration event feed" });
+    expect(feed.style.width).toBe("460px");
+    expect(feed.style.height).toBe("300px");
+
+    fireEvent.pointerDown(screen.getByTestId("event-feed-resize-handle-top-left"), {
+      button: 0,
+      clientX: 200,
+      clientY: 300,
+      pointerId: 32
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 160,
+      clientY: 245,
+      pointerId: 32
+    });
+    fireEvent.pointerUp(window, { pointerId: 32 });
+
+    expect(feed.style.width).toBe("500px");
+    expect(feed.style.height).toBe("355px");
+  });
+
   it("does not render the map image for anonymous users", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
@@ -272,6 +411,88 @@ describe("MapPage", () => {
     });
 
     await waitFor(() => expect(stage.dataset.zoom).toBe("0.6"));
+  });
+
+  it("zooms the map with a two finger pinch gesture", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const viewport = screen.getByLabelText("Map image area");
+    const stage = screen.getByTestId("map-stage");
+
+    expect(stage.dataset.zoom).toBe("1");
+
+    fireEvent.pointerDown(viewport, {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 101,
+      pointerType: "touch"
+    });
+    fireEvent.pointerDown(viewport, {
+      button: 0,
+      clientX: 200,
+      clientY: 100,
+      pointerId: 102,
+      pointerType: "touch"
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 50,
+      clientY: 100,
+      pointerId: 101,
+      pointerType: "touch"
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 250,
+      clientY: 100,
+      pointerId: 102,
+      pointerType: "touch"
+    });
+
+    await waitFor(() => {
+      expect(Number(stage.dataset.zoom)).toBeGreaterThan(1);
+    });
+
+    fireEvent.pointerUp(window, { pointerId: 101, pointerType: "touch" });
+    fireEvent.pointerUp(window, { pointerId: 102, pointerType: "touch" });
+  });
+
+  it("opens map actions from a touch long press", () => {
+    vi.useFakeTimers();
+
+    try {
+      render(React.createElement(MapWorkspace, {
+        initialMarkers: [],
+        initialNoteCategories: noteCategories,
+        map: activeMap,
+        viewer: approvedViewer
+      }));
+
+      const viewport = screen.getByLabelText("Map image area");
+
+      fireEvent.pointerDown(viewport, {
+        button: 0,
+        clientX: 420,
+        clientY: 520,
+        pointerId: 201,
+        pointerType: "touch"
+      });
+      act(() => {
+        vi.advanceTimersByTime(650);
+      });
+
+      const menu = screen.getByRole("menu", { name: "Map actions" });
+      expect(within(menu).getByRole("menuitem", { name: "Tower" })).toBeTruthy();
+      expect(within(menu).getByRole("menuitem", { name: "Copy link to 420, 520" })).toBeTruthy();
+
+      fireEvent.pointerUp(window, { pointerId: 201, pointerType: "touch" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("scales the map image directly instead of through the marker transform layer", async () => {
@@ -480,6 +701,36 @@ describe("MapPage", () => {
     expect(screen.getByRole("menuitem", { name: "Camp" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Minedoor" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Locate Soul" })).toBeTruthy();
+  });
+
+  it("keeps context menus inside narrow viewport edges", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 390
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 844
+    });
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(Number(stage.dataset.zoom)).toBeLessThan(1));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 382,
+      clientY: 612
+    });
+
+    const menu = screen.getByRole("menu", { name: "Map actions" });
+    expect(menu.style.left).toBe("38px");
+    expect(menu.style.top).toBe("412px");
   });
 
   it("updates the browser URL for read-only map context with coordinate copying only", async () => {
@@ -1195,6 +1446,34 @@ describe("MapPage", () => {
     expect(screen.getByText("11x11")).toBeTruthy();
     expect(screen.getByText("Founding date")).toBeTruthy();
     expect(screen.getByText("2026-05-10")).toBeTruthy();
+  });
+
+  it("keeps hover and tap details inside viewport edges", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          damage: "1.25",
+          id: "tower-1",
+          makerName: "Mako",
+          makerNumber: "945",
+          ql: "88.50",
+          type: "tower",
+          x: 250,
+          y: 300
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.mouseMove(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
+      clientX: 2040,
+      clientY: 2040
+    });
+
+    const details = screen.getByRole("tooltip", { name: "Tower: Mako 945" });
+    expect(details.style.left).toBe("1756px");
+    expect(details.style.top).toBe("1816px");
   });
 
   it("shows stacked hover pills for markers underneath an overlay", () => {

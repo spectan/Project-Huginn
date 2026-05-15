@@ -436,6 +436,50 @@ Prevention:
 
 When adding or moving floating map tools, test both DOM order and CSS stack direction. Avoid encoding "above another panel" as a guessed pixel offset when the controls can live in a flex stack. Treat non-tool links as separate fixed UI with low visual weight.
 
+### Mobile Map Interaction
+
+Context:
+
+Desktop map workflows relied on wheel zoom, hover details, and right-click context menus.
+
+What happened:
+
+Pointer panning worked on touch screens, but there was no mobile replacement for wheel zoom, hover, or right-click. Floating controls and popout panels could also crowd or overflow narrow screens.
+
+Root cause:
+
+Touch input was treated like a single primary pointer. The map did not track multiple active touch pointers for pinch gestures, and context actions were bound only to native context-menu events.
+
+Decision:
+
+Track active touch pointers in the map workspace. A second active touch starts pinch zoom around the touch midpoint, one-finger movement remains pan, and long-press opens the existing coordinate context menu. Tapping a marker-covered coordinate can show the stacked marker details used by desktop hover. CSS uses a 720px mobile breakpoint to keep search, top-right menus, bottom tool icons, lower-right tools, and legend/event panels within the viewport.
+
+Prevention:
+
+When adding map interactions, include both pointer/mouse and touch equivalents in tests. For floating map chrome, add CSS regression checks for narrow viewports so panels stay reachable and do not rely on desktop-only side popouts.
+
+### Fixed Map Popup Positioning
+
+Context:
+
+Map context menus and hover/tap detail panels are fixed-position overlays anchored to the pointer coordinate.
+
+What happened:
+
+Right-clicking or long-pressing near the viewport edge placed the popup at the raw pointer `left/top`, so much of the menu could render off-screen even though CSS constrained its maximum size.
+
+Root cause:
+
+The interaction code treated the clicked map coordinate and the popup screen anchor as the same problem. Coordinate conversion was correct, but popup layout still needed viewport-aware clamping.
+
+Decision:
+
+Keep map coordinates unchanged for actions and links, but clamp the fixed popup `left/top` using the viewport size, popup maximum dimensions, and a small margin. Apply the same helper to map context menus, marker context menus, and hover/tap detail panels.
+
+Prevention:
+
+When adding any fixed overlay anchored to a pointer event, test an edge-click case on a narrow viewport. CSS `max-width` and `max-height` are not enough unless the screen anchor is also bounded.
+
 ### Roadway Edit Mode
 
 Context:
@@ -648,11 +692,11 @@ The endpoint is public JSON but still an external implementation detail. Letting
 
 Decision:
 
-Fetch WurmMaps event/status data server-side, normalize it into a small read-only event feed, decode simple HTML entities, sort newest-first, cap the payload to 30 entries, and keep it minimized behind a bottom-left Events button below the legend and route planner controls. Do not import WurmMaps marker or path data as part of the event feed.
+Fetch WurmMaps event/status data server-side, normalize it into a small read-only event feed, decode simple HTML entities, sort newest-first, cap the payload to 30 entries, and keep it minimized behind a bottom-left Events button below the legend and route planner controls. The feed panel has a persisted, validated size in user map settings and resizes through constrained corner drag handles while the list keeps its internal scroll. Do not import WurmMaps marker or path data as part of the event feed.
 
 Prevention:
 
-Keep external feed parsing in a dedicated module with tests. Route and page code should consume normalized data only, and feed failures must not block normal map loading. Bottom-left status panels should default to compact buttons and pop out to the right unless users explicitly open them, so persistent map tools do not obscure the map or their own toggle buttons.
+Keep external feed parsing in a dedicated module with tests. Route and page code should consume normalized data only, and feed failures must not block normal map loading. Bottom-left status panels should default to compact buttons and pop out to the right unless users explicitly open them, so persistent map tools do not obscure the map or their own toggle buttons. Persist dimensions through the shared settings parser rather than raw local storage so invalid sizes fall back safely.
 
 ### Self-Service Password Changes
 

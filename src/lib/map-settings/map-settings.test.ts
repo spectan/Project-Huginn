@@ -181,6 +181,35 @@ describe("user map settings", () => {
     });
   });
 
+  it("keeps valid event feed panel sizes and rejects invalid ones", () => {
+    expect(parseUserMapSettings({
+      eventFeedPanelSize: {
+        height: 312.2,
+        width: 476.6
+      }
+    }).eventFeedPanelSize).toEqual({
+      height: 312,
+      width: 477
+    });
+
+    expect(parseUserMapSettings({
+      eventFeedPanelSize: {
+        height: 50,
+        width: 100
+      }
+    }).eventFeedPanelSize).toEqual({
+      height: 160,
+      width: 260
+    });
+
+    expect(parseUserMapSettings({
+      eventFeedPanelSize: {
+        height: Number.NaN,
+        width: 480
+      }
+    }).eventFeedPanelSize).toEqual(DEFAULT_USER_MAP_SETTINGS.eventFeedPanelSize);
+  });
+
   it("merges incoming partial settings into current settings", () => {
     const current = parseUserMapSettings({
       markerColors: {
@@ -197,6 +226,10 @@ describe("user map settings", () => {
     });
 
     expect(mergeUserMapSettingsInput(current, {
+      eventFeedPanelSize: {
+        height: 270,
+        width: 410
+      },
       markerOpacities: {
         towers: 35
       },
@@ -210,6 +243,10 @@ describe("user map settings", () => {
       markerOpacities: {
         ...DEFAULT_USER_MAP_SETTINGS.markerOpacities,
         towers: 35
+      },
+      eventFeedPanelSize: {
+        height: 270,
+        width: 410
       },
       roadwayEditPanelPosition: {
         left: 75,

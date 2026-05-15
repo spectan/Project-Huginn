@@ -155,13 +155,32 @@ describe("map overlay styles", () => {
     expect(overlayBlock).toContain("pointer-events: none");
   });
 
-  it("keeps the event feed compact and scrollable", () => {
+  it("keeps the event feed resizable and scrollable", () => {
     const panelBlock = getStandaloneCssBlock(".map-event-feed-panel");
     const listBlock = getStandaloneCssBlock(".map-event-feed-list");
+    const resizeHandleBlock = getStandaloneCssBlock(".map-event-feed-resize-handle");
+    const topLeftHandleBlock = getStandaloneCssBlock(".map-event-feed-resize-handle--top-left");
+    const topRightHandleBlock = getStandaloneCssBlock(".map-event-feed-resize-handle--top-right");
+    const bottomLeftHandleBlock = getStandaloneCssBlock(".map-event-feed-resize-handle--bottom-left");
+    const bottomRightHandleBlock = getStandaloneCssBlock(".map-event-feed-resize-handle--bottom-right");
 
-    expect(panelBlock).toContain("width: min(320px, calc(100vw - 32px))");
-    expect(listBlock).toContain("max-height: 188px");
+    expect(panelBlock).toContain("box-sizing: border-box");
+    expect(panelBlock).toContain("grid-template-rows: auto minmax(0, 1fr)");
+    expect(listBlock).toContain("min-height: 0");
     expect(listBlock).toContain("overflow-y: auto");
+    expect(resizeHandleBlock).toContain("position: absolute");
+    expect(topLeftHandleBlock).toContain("left: 4px");
+    expect(topLeftHandleBlock).toContain("top: 4px");
+    expect(topLeftHandleBlock).toContain("cursor: nwse-resize");
+    expect(topRightHandleBlock).toContain("right: 4px");
+    expect(topRightHandleBlock).toContain("top: 4px");
+    expect(topRightHandleBlock).toContain("cursor: nesw-resize");
+    expect(bottomLeftHandleBlock).toContain("left: 4px");
+    expect(bottomLeftHandleBlock).toContain("bottom: 4px");
+    expect(bottomLeftHandleBlock).toContain("cursor: nesw-resize");
+    expect(bottomRightHandleBlock).toContain("right: 4px");
+    expect(bottomRightHandleBlock).toContain("bottom: 4px");
+    expect(bottomRightHandleBlock).toContain("cursor: nwse-resize");
   });
 
   it("opens legend and event panels to the right of their bottom-left buttons", () => {
@@ -174,6 +193,24 @@ describe("map overlay styles", () => {
     expect(eventFeedBlock).toContain("bottom: 0");
     expect(legendBlock).not.toContain("bottom: calc(100% + 8px)");
     expect(eventFeedBlock).not.toContain("bottom: calc(100% + 8px)");
+  });
+
+  it("reflows map chrome and popout panels on mobile viewports", () => {
+    const searchBlock = getCssBlockInMedia("(max-width: 720px)", ".map-search");
+    const selectionBlock = getCssBlockInMedia("(max-width: 720px)", ".map-selection-controls");
+    const legendBlock = getCssBlockInMedia("(max-width: 720px)", ".map-legend-panel");
+    const eventFeedBlock = getCssBlockInMedia("(max-width: 720px)", ".map-event-feed-panel");
+    const rightControlsBlock = getCssBlockInMedia("(max-width: 720px)", ".map-right-side-controls");
+
+    expect(searchBlock).toContain("right: 112px");
+    expect(selectionBlock).toContain("grid-template-columns: 1fr");
+    expect(legendBlock).toContain("position: fixed");
+    expect(legendBlock).toContain("left: 62px");
+    expect(legendBlock).toContain("bottom: max(22px, env(safe-area-inset-bottom))");
+    expect(eventFeedBlock).toContain("position: fixed");
+    expect(eventFeedBlock).toContain("left: 62px");
+    expect(eventFeedBlock).toContain("max-height: min(60vh, calc(100vh - 96px))");
+    expect(rightControlsBlock).toContain("bottom: max(22px, env(safe-area-inset-bottom))");
   });
 
   it("keeps the support link unobtrusive at the bottom center", () => {

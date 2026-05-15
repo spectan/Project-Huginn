@@ -38,6 +38,8 @@ import {
 } from "@/lib/domain/tile-highlighting";
 import {
   DEFAULT_USER_MAP_SETTINGS,
+  MIN_EVENT_FEED_PANEL_SIZE,
+  type EventFeedPanelSize,
   type TileHighlightPanelPosition,
   type UserMapSettings
 } from "@/lib/map-settings/map-settings";
@@ -61,7 +63,15 @@ import { MarkerLayer } from "./marker-layer";
 const FALLBACK_MAP_SIZE_PX = 2048;
 const MAX_ZOOM = 64;
 const CLICK_DRAG_THRESHOLD_PX = 4;
+const LONG_PRESS_DURATION_MS = 600;
+const PINCH_MIN_DISTANCE_PX = 8;
 const ZOOM_STEP = 1.2;
+const FLOATING_MENU_MARGIN_PX = 12;
+const CONTEXT_MENU_MAX_WIDTH_PX = 340;
+const CONTEXT_MENU_MAX_HEIGHT_PX = 420;
+const HOVER_DETAILS_OFFSET_PX = 14;
+const HOVER_DETAILS_MAX_WIDTH_PX = 280;
+const HOVER_DETAILS_MAX_HEIGHT_PX = 220;
 const SERVER_VIEWPORT_SNAPSHOT = `${FALLBACK_MAP_SIZE_PX}x${FALLBACK_MAP_SIZE_PX}`;
 const SECTOR_GRID_LEFT_OFFSET_PX = -16;
 const SECTOR_GRID_TOP_OFFSET_PX = 18;
@@ -88,6 +98,30 @@ type DragState = {
   startX: number;
   startY: number;
   startZoom: number;
+};
+
+type TouchPointerState = {
+  clientX: number;
+  clientY: number;
+  pointerId: number;
+};
+
+type PinchZoomState = {
+  pointerIds: [number, number];
+  startDistance: number;
+  startMapX: number;
+  startMapY: number;
+  startZoom: number;
+};
+
+type LongPressState = {
+  clientX: number;
+  clientY: number;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  timeoutId: number;
+  view: ViewState;
 };
 
 type FloatingPanelDragState = {
@@ -189,6 +223,31 @@ type QuickDeedDraftState = {
   start: MapCoordinate;
 };
 
+type EventFeedResizeDragState = {
+  horizontalDirection: -1 | 1;
+  maxHeight: number;
+  maxWidth: number;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startHeight: number;
+  startWidth: number;
+  verticalDirection: -1 | 1;
+};
+
+type EventFeedResizeHandleDefinition = {
+  horizontalDirection: -1 | 1;
+  id: "bottom-left" | "bottom-right" | "top-left" | "top-right";
+  verticalDirection: -1 | 1;
+};
+
+const EVENT_FEED_RESIZE_HANDLES: EventFeedResizeHandleDefinition[] = [
+  { horizontalDirection: -1, id: "top-left", verticalDirection: -1 },
+  { horizontalDirection: 1, id: "top-right", verticalDirection: -1 },
+  { horizontalDirection: -1, id: "bottom-left", verticalDirection: 1 },
+  { horizontalDirection: 1, id: "bottom-right", verticalDirection: 1 }
+];
+
 type TopPanelState = "account" | "settings" | null;
 
 type MapWorkspaceProps = {
@@ -250,6 +309,8 @@ export default function MapWorkspace({
   const [markerVisibility, setMarkerVisibility] = useState<MarkerVisibility>(initialSettings.markerVisibility);
   const [markerColors, setMarkerColors] = useState<MarkerColors>(initialSettings.markerColors);
   const [markerOpacities, setMarkerOpacities] = useState<MarkerOpacities>(initialSettings.markerOpacities);
+  const [eventFeedPanelSize, setEventFeedPanelSize] =
+    useState<EventFeedPanelSize>(initialSettings.eventFeedPanelSize);
   const [topPanel, setTopPanel] = useState<TopPanelState>(null);
   const [roadwayEditMode, setRoadwayEditMode] = useState(false);
   const [roadwayEditPanelPosition, setRoadwayEditPanelPosition] =
@@ -270,6 +331,9 @@ export default function MapWorkspace({
   );
   const [searchQuery, setSearchQuery] = useState("");
   const dragRef = useRef<DragState | null>(null);
+  const activeTouchPointersRef = useRef<Map<number, TouchPointerState>>(new Map());
+  const pinchZoomRef = useRef<PinchZoomState | null>(null);
+  const longPressRef = useRef<LongPressState | null>(null);
   const pathPointDragRef = useRef<PathPointDragState | null>(null);
   const markerRelocationDragRef = useRef<MarkerRelocationDragState | null>(null);
   const quickDeedDragRef = useRef<QuickDeedDragState | null>(null);
@@ -312,13 +376,22 @@ export default function MapWorkspace({
     isAdmin: viewer.isAdmin
   });
   const userMapSettings = useMemo<UserMapSettings>(() => ({
+    eventFeedPanelSize,
     markerColors,
     markerOpacities,
     markerVisibility,
     roadwayEditPanelPosition,
     tileHighlight,
     tileHighlightPanelPosition
-  }), [markerColors, markerOpacities, markerVisibility, roadwayEditPanelPosition, tileHighlight, tileHighlightPanelPosition]);
+  }), [
+    eventFeedPanelSize,
+    markerColors,
+    markerOpacities,
+    markerVisibility,
+    roadwayEditPanelPosition,
+    tileHighlight,
+    tileHighlightPanelPosition
+  ]);
 
   const updateMarkers = useCallback(
     (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => {
@@ -327,6 +400,7 @@ export default function MapWorkspace({
     [initialMarkers]
   );
   const resetUserMapSettings = useCallback(() => {
+    setEventFeedPanelSize(DEFAULT_USER_MAP_SETTINGS.eventFeedPanelSize);
     setMarkerColors(DEFAULT_USER_MAP_SETTINGS.markerColors);
     setMarkerOpacities(DEFAULT_USER_MAP_SETTINGS.markerOpacities);
     setMarkerVisibility(DEFAULT_USER_MAP_SETTINGS.markerVisibility);
@@ -455,12 +529,173 @@ export default function MapWorkspace({
   const handleWheel = useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
       event.preventDefault();
+      cancelLongPress(longPressRef);
       setContextMenu(null);
       const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
       zoomAt(view.zoom * factor, event.clientX, event.clientY);
     },
     [view.zoom, zoomAt]
   );
+
+  const getVisibleMarkersAtCoordinate = useCallback(
+    (coordinate: MapCoordinate): WorkspaceMarker[] => getHoverMarkersAtCoordinate(
+      displayedMarkersWithEditPreview,
+      markerVisibility,
+      roadwayEditMode,
+      coordinate,
+      mapSize
+    ),
+    [displayedMarkersWithEditPreview, mapSize, markerVisibility, roadwayEditMode]
+  );
+
+  const showTouchMarkerDetails = useCallback(
+    (coordinate: MapCoordinate, clientX: number, clientY: number): boolean => {
+      const markersAtCoordinate = getVisibleMarkersAtCoordinate(coordinate);
+
+      if (markersAtCoordinate.length === 0) {
+        setHoveredMarker(null);
+        return false;
+      }
+
+      setHoveredMarker({
+        coordinate,
+        markers: markersAtCoordinate,
+        screenX: clientX,
+        screenY: clientY
+      });
+      return true;
+    },
+    [getVisibleMarkersAtCoordinate]
+  );
+
+  const openCoordinateContextMenu = useCallback(
+    (clientX: number, clientY: number, contextView: ViewState): boolean => {
+      if (!canViewMap || visualMap === null) {
+        return false;
+      }
+
+      const coordinate = getMapCoordinate(clientX, clientY, contextView);
+
+      if (!isInsideMap(coordinate, visualMap)) {
+        return false;
+      }
+
+      const markersAtCoordinate = getVisibleMarkersAtCoordinate(coordinate);
+      selectCoordinate(coordinate);
+      setHoveredMarker(null);
+
+      if (canWriteMapMarkers && markersAtCoordinate.length > 0) {
+        setContextMenu({
+          mapX: coordinate.x,
+          mapY: coordinate.y,
+          markers: markersAtCoordinate,
+          mode: "marker",
+          screenX: clientX,
+          screenY: clientY,
+          view: contextView
+        });
+        return true;
+      }
+
+      setContextMenu({
+        mapX: coordinate.x,
+        mapY: coordinate.y,
+        mode: "map",
+        screenX: clientX,
+        screenY: clientY,
+        view: contextView
+      });
+      return true;
+    },
+    [canViewMap, canWriteMapMarkers, getVisibleMarkersAtCoordinate, selectCoordinate, visualMap]
+  );
+
+  const startLongPress = useCallback(
+    (event: { clientX: number; clientY: number; pointerId: number; pointerType?: string }, contextView: ViewState) => {
+      if (event.pointerType !== "touch") {
+        return;
+      }
+
+      const currentLongPress = longPressRef.current;
+
+      if (currentLongPress?.pointerId === event.pointerId) {
+        return;
+      }
+
+      cancelLongPress(longPressRef);
+
+      const longPress: LongPressState = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        timeoutId: window.setTimeout(() => {
+          if (longPressRef.current?.pointerId !== event.pointerId) {
+            return;
+          }
+
+          longPressRef.current = null;
+          dragRef.current = null;
+          pinchZoomRef.current = null;
+          setIsDragging(false);
+          void openCoordinateContextMenu(longPress.clientX, longPress.clientY, longPress.view);
+        }, LONG_PRESS_DURATION_MS),
+        view: contextView
+      };
+
+      longPressRef.current = longPress;
+    },
+    [openCoordinateContextMenu]
+  );
+
+  const trackTouchPointer = useCallback((event: { clientX: number; clientY: number; pointerId: number; pointerType?: string }) => {
+    if (event.pointerType !== "touch") {
+      return;
+    }
+
+    activeTouchPointersRef.current.set(event.pointerId, {
+      clientX: event.clientX,
+      clientY: event.clientY,
+      pointerId: event.pointerId
+    });
+  }, []);
+
+  const startPinchZoomIfReady = useCallback((): boolean => {
+    const pointers = Array.from(activeTouchPointersRef.current.values());
+
+    if (pointers.length < 2) {
+      return false;
+    }
+
+    const firstPointer = pointers[0];
+    const secondPointer = pointers[1];
+
+    if (firstPointer === undefined || secondPointer === undefined) {
+      return false;
+    }
+
+    const startDistance = getPointerDistance(firstPointer, secondPointer);
+
+    if (startDistance < PINCH_MIN_DISTANCE_PX) {
+      return false;
+    }
+
+    const center = getPointerCenter(firstPointer, secondPointer);
+    pinchZoomRef.current = {
+      pointerIds: [firstPointer.pointerId, secondPointer.pointerId],
+      startDistance,
+      startMapX: (center.clientX - view.x) / view.zoom,
+      startMapY: (center.clientY - view.y) / view.zoom,
+      startZoom: view.zoom
+    };
+    dragRef.current = null;
+    setIsDragging(false);
+    cancelLongPress(longPressRef);
+    setContextMenu(null);
+    setHoveredMarker(null);
+    return true;
+  }, [view.x, view.y, view.zoom]);
 
   const startQuickDeedDrag = useCallback(
     (event: {
@@ -517,6 +752,19 @@ export default function MapWorkspace({
         return;
       }
 
+      trackTouchPointer(event);
+
+      if (event.pointerType === "touch") {
+        if (activeTouchPointersRef.current.size >= 2) {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture?.(event.pointerId);
+          startPinchZoomIfReady();
+          return;
+        }
+
+        startLongPress(event, view);
+      }
+
       if (startQuickDeedDrag(event)) {
         event.currentTarget.setPointerCapture?.(event.pointerId);
         return;
@@ -544,7 +792,7 @@ export default function MapWorkspace({
       };
       setIsDragging(true);
     },
-    [canWriteMapMarkers, routePlannerEnabled, startQuickDeedDrag, view.x, view.y, view.zoom]
+    [canWriteMapMarkers, routePlannerEnabled, startLongPress, startPinchZoomIfReady, startQuickDeedDrag, trackTouchPointer, view]
   );
 
   const handleContextMenu = useCallback(
@@ -661,7 +909,7 @@ export default function MapWorkspace({
     [dialog]
   );
 
-  const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; pointerId: number }) => {
+  const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; pointerId: number; pointerType?: string }) => {
     const drag = dragRef.current;
 
     if (drag === null) {
@@ -703,9 +951,13 @@ export default function MapWorkspace({
         return;
       }
 
+      if (event.pointerType === "touch" && showTouchMarkerDetails(coordinate, event.clientX, event.clientY)) {
+        return;
+      }
+
       selectCoordinate(coordinate);
     }
-  }, [canViewMap, routePlannerEnabled, selectCoordinate, visualMap]);
+  }, [canViewMap, routePlannerEnabled, selectCoordinate, showTouchMarkerDetails, visualMap]);
 
   useEffect(() => {
     function handleNativePointerDown(event: PointerEvent) {
@@ -715,6 +967,18 @@ export default function MapWorkspace({
 
       if (!(event.target instanceof Element) || event.target.closest(".map-viewport") === null) {
         return;
+      }
+
+      trackTouchPointer(event);
+
+      if (event.pointerType === "touch") {
+        if (activeTouchPointersRef.current.size >= 2) {
+          event.preventDefault();
+          startPinchZoomIfReady();
+          return;
+        }
+
+        startLongPress(event, view);
       }
 
       if (startQuickDeedDrag(event)) {
@@ -748,10 +1012,59 @@ export default function MapWorkspace({
     return () => {
       window.removeEventListener("pointerdown", handleNativePointerDown);
     };
-  }, [canWriteMapMarkers, routePlannerEnabled, startQuickDeedDrag, view.x, view.y, view.zoom]);
+  }, [canWriteMapMarkers, routePlannerEnabled, startLongPress, startPinchZoomIfReady, startQuickDeedDrag, trackTouchPointer, view]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
+      if (event.pointerType === "touch" && activeTouchPointersRef.current.has(event.pointerId)) {
+        activeTouchPointersRef.current.set(event.pointerId, {
+          clientX: event.clientX,
+          clientY: event.clientY,
+          pointerId: event.pointerId
+        });
+
+        const longPress = longPressRef.current;
+
+        if (
+          longPress !== null &&
+          longPress.pointerId === event.pointerId &&
+          Math.hypot(event.clientX - longPress.startClientX, event.clientY - longPress.startClientY) > CLICK_DRAG_THRESHOLD_PX
+        ) {
+          cancelLongPress(longPressRef);
+        }
+
+        const pinchZoom = pinchZoomRef.current;
+
+        if (pinchZoom !== null && pinchZoom.pointerIds.includes(event.pointerId)) {
+          const firstPointer = activeTouchPointersRef.current.get(pinchZoom.pointerIds[0]);
+          const secondPointer = activeTouchPointersRef.current.get(pinchZoom.pointerIds[1]);
+
+          if (firstPointer !== undefined && secondPointer !== undefined) {
+            const distance = getPointerDistance(firstPointer, secondPointer);
+
+            if (distance >= PINCH_MIN_DISTANCE_PX) {
+              const center = getPointerCenter(firstPointer, secondPointer);
+              const minZoom = getFitZoom(viewport, mapSize);
+              const nextZoom = pinchZoom.startZoom * (distance / pinchZoom.startDistance);
+
+              if (nextZoom <= minZoom) {
+                setManualView(getFitView(viewport, mapSize));
+              } else {
+                const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
+
+                setManualView({
+                  x: center.clientX - pinchZoom.startMapX * zoom,
+                  y: center.clientY - pinchZoom.startMapY * zoom,
+                  zoom
+                });
+              }
+            }
+          }
+
+          return;
+        }
+      }
+
       const drag = dragRef.current;
 
       if (drag === null || drag.pointerId !== event.pointerId) {
@@ -775,6 +1088,20 @@ export default function MapWorkspace({
     }
 
     function endDrag(event: PointerEvent) {
+      if (event.pointerType === "touch") {
+        activeTouchPointersRef.current.delete(event.pointerId);
+        cancelLongPress(longPressRef);
+
+        const pinchZoom = pinchZoomRef.current;
+
+        if (pinchZoom !== null && pinchZoom.pointerIds.includes(event.pointerId)) {
+          pinchZoomRef.current = null;
+          dragRef.current = null;
+          setIsDragging(false);
+          return;
+        }
+      }
+
       finishPointerDrag(event);
     }
 
@@ -787,7 +1114,7 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [finishPointerDrag]);
+  }, [finishPointerDrag, mapSize, viewport]);
 
   useEffect(() => {
     function handleQuickDeedDrag(event: PointerEvent) {
@@ -1253,7 +1580,9 @@ export default function MapWorkspace({
               feed={initialEventFeed}
               isOpen={isEventFeedOpen}
               onOpenChange={setIsEventFeedOpen}
+              onSizeChange={setEventFeedPanelSize}
               serverName={map.name}
+              size={eventFeedPanelSize}
             />
           ) : null}
         </div>
@@ -1284,7 +1613,7 @@ function MapContextMenu({
       aria-label="Map actions"
       className="map-context-menu"
       role="menu"
-      style={{ left: `${contextMenu.screenX}px`, top: `${contextMenu.screenY}px` }}
+      style={getContextMenuStyle(contextMenu.screenX, contextMenu.screenY)}
     >
       <CoordinateCopyRow
         coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
@@ -1661,12 +1990,16 @@ function MapEventFeedControl({
   feed,
   isOpen,
   onOpenChange,
-  serverName
+  onSizeChange,
+  serverName,
+  size
 }: {
   feed: WurmMapsEventFeed | null;
   isOpen: boolean;
   onOpenChange(isOpen: boolean): void;
+  onSizeChange(size: EventFeedPanelSize): void;
   serverName: string;
+  size: EventFeedPanelSize;
 }) {
   const buttonLabel = `${serverName} events`;
 
@@ -1683,25 +2016,100 @@ function MapEventFeedControl({
       >
         <span aria-hidden="true" className="map-event-feed-button-icon" />
       </button>
-      {isOpen ? <MapEventFeedPanel feed={feed} serverName={serverName} /> : null}
+      {isOpen ? (
+        <MapEventFeedPanel
+          feed={feed}
+          onSizeChange={onSizeChange}
+          serverName={serverName}
+          size={size}
+        />
+      ) : null}
     </div>
   );
 }
 
 function MapEventFeedPanel({
   feed,
-  serverName
+  onSizeChange,
+  serverName,
+  size
 }: {
   feed: WurmMapsEventFeed | null;
+  onSizeChange(size: EventFeedPanelSize): void;
   serverName: string;
+  size: EventFeedPanelSize;
 }) {
+  const resizeDragRef = useRef<EventFeedResizeDragState | null>(null);
   const events = feed?.events
     .slice()
     .sort((left, right) => right.timestamp - left.timestamp || right.id.localeCompare(left.id))
     .slice(0, EVENT_FEED_DISPLAY_LIMIT) ?? [];
+  const handleResizeStart = useCallback((
+    handle: EventFeedResizeHandleDefinition,
+    event: React.PointerEvent<HTMLDivElement>
+  ) => {
+    if (!isPrimaryPointerButton(event.button)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    resizeDragRef.current = {
+      horizontalDirection: handle.horizontalDirection,
+      maxHeight: getEventFeedViewportMaxHeight(),
+      maxWidth: getEventFeedViewportMaxWidth(),
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startHeight: size.height,
+      startWidth: size.width,
+      verticalDirection: handle.verticalDirection
+    };
+  }, [size.height, size.width]);
+
+  useEffect(() => {
+    function handleResizeDrag(event: PointerEvent) {
+      const drag = resizeDragRef.current;
+
+      if (drag === null || drag.pointerId !== event.pointerId) {
+        return;
+      }
+
+      onSizeChange(clampEventFeedPanelSize(
+        drag.startWidth + (event.clientX - drag.startClientX) * drag.horizontalDirection,
+        drag.startHeight + (event.clientY - drag.startClientY) * drag.verticalDirection,
+        drag.maxWidth,
+        drag.maxHeight
+      ));
+    }
+
+    function endResizeDrag(event: PointerEvent) {
+      const drag = resizeDragRef.current;
+
+      if (drag !== null && drag.pointerId === event.pointerId) {
+        resizeDragRef.current = null;
+      }
+    }
+
+    window.addEventListener("pointermove", handleResizeDrag);
+    window.addEventListener("pointerup", endResizeDrag);
+    window.addEventListener("pointercancel", endResizeDrag);
+
+    return () => {
+      window.removeEventListener("pointermove", handleResizeDrag);
+      window.removeEventListener("pointerup", endResizeDrag);
+      window.removeEventListener("pointercancel", endResizeDrag);
+    };
+  }, [onSizeChange]);
 
   return (
-    <section aria-label={`${serverName} event feed`} className="map-event-feed-panel" role="dialog">
+    <section
+      aria-label={`${serverName} event feed`}
+      className="map-event-feed-panel"
+      role="dialog"
+      style={getEventFeedPanelStyle(size)}
+    >
       <div className="map-event-feed-header">
         <strong>{serverName} Events</strong>
         <span>{feed === null ? "Unavailable" : formatServerStatus(feed.serverStatus.status)}</span>
@@ -1717,6 +2125,15 @@ function MapEventFeedPanel({
           ))}
         </ol>
       )}
+      {EVENT_FEED_RESIZE_HANDLES.map((handle) => (
+        <div
+          aria-hidden="true"
+          className={`map-event-feed-resize-handle map-event-feed-resize-handle--${handle.id}`}
+          data-testid={`event-feed-resize-handle-${handle.id}`}
+          key={handle.id}
+          onPointerDown={(event) => handleResizeStart(handle, event)}
+        />
+      ))}
     </section>
   );
 }
@@ -2102,7 +2519,7 @@ function MarkerContextMenu({
       aria-label="Marker actions"
       className="map-context-menu"
       role="menu"
-      style={{ left: `${contextMenu.screenX}px`, top: `${contextMenu.screenY}px` }}
+      style={getContextMenuStyle(contextMenu.screenX, contextMenu.screenY)}
     >
       {contextMenu.markers.length > 0 ? (
         <MarkerContextRows
@@ -3448,6 +3865,43 @@ function getFloatingPanelStyle(position: TileHighlightPanelPosition | null): CSS
   };
 }
 
+function getEventFeedPanelStyle(size: EventFeedPanelSize): CSSProperties {
+  return {
+    height: formatPixels(size.height),
+    width: formatPixels(size.width)
+  };
+}
+
+function clampEventFeedPanelSize(
+  width: number,
+  height: number,
+  maxWidth = Number.POSITIVE_INFINITY,
+  maxHeight = Number.POSITIVE_INFINITY
+): EventFeedPanelSize {
+  return {
+    height: clamp(
+      Math.round(height),
+      MIN_EVENT_FEED_PANEL_SIZE.height,
+      Math.max(MIN_EVENT_FEED_PANEL_SIZE.height, Math.floor(maxHeight))
+    ),
+    width: clamp(
+      Math.round(width),
+      MIN_EVENT_FEED_PANEL_SIZE.width,
+      Math.max(MIN_EVENT_FEED_PANEL_SIZE.width, Math.floor(maxWidth))
+    )
+  };
+}
+
+function getEventFeedViewportMaxWidth(): number {
+  const viewportWidth = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerWidth;
+  return Math.max(MIN_EVENT_FEED_PANEL_SIZE.width, viewportWidth - 80);
+}
+
+function getEventFeedViewportMaxHeight(): number {
+  const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
+  return Math.max(MIN_EVENT_FEED_PANEL_SIZE.height, viewportHeight - 32);
+}
+
 function clampFloatingPanelPosition(
   left: number,
   top: number,
@@ -4030,8 +4484,31 @@ function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
   event.preventDefault();
 }
 
+function cancelLongPress(ref: { current: LongPressState | null }): void {
+  if (ref.current === null) {
+    return;
+  }
+
+  window.clearTimeout(ref.current.timeoutId);
+  ref.current = null;
+}
+
 function isPrimaryPointerButton(button: number | undefined): boolean {
   return button === undefined || button === 0;
+}
+
+function getPointerDistance(first: TouchPointerState, second: TouchPointerState): number {
+  return Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY);
+}
+
+function getPointerCenter(
+  first: TouchPointerState,
+  second: TouchPointerState
+): { clientX: number; clientY: number } {
+  return {
+    clientX: (first.clientX + second.clientX) / 2,
+    clientY: (first.clientY + second.clientY) / 2
+  };
 }
 
 function isInteractivePanTarget(target: EventTarget | null): boolean {
@@ -4333,9 +4810,43 @@ function getMarkerTypeTitle(markerType: MarkerType): string {
 }
 
 function getHoverDetailsStyle(screenX: number, screenY: number): CSSProperties {
+  return getBoundedFixedPosition(
+    screenX + HOVER_DETAILS_OFFSET_PX,
+    screenY + HOVER_DETAILS_OFFSET_PX,
+    HOVER_DETAILS_MAX_WIDTH_PX,
+    HOVER_DETAILS_MAX_HEIGHT_PX
+  );
+}
+
+function getContextMenuStyle(screenX: number, screenY: number): CSSProperties {
+  return getBoundedFixedPosition(
+    screenX,
+    screenY,
+    CONTEXT_MENU_MAX_WIDTH_PX,
+    CONTEXT_MENU_MAX_HEIGHT_PX
+  );
+}
+
+function getBoundedFixedPosition(
+  screenX: number,
+  screenY: number,
+  maxWidth: number,
+  maxHeight: number
+): CSSProperties {
+  const viewportWidth = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerWidth;
+  const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
+
   return {
-    left: formatPixels(screenX + 14),
-    top: formatPixels(screenY + 14)
+    left: formatPixels(clamp(
+      screenX,
+      FLOATING_MENU_MARGIN_PX,
+      Math.max(FLOATING_MENU_MARGIN_PX, viewportWidth - maxWidth - FLOATING_MENU_MARGIN_PX)
+    )),
+    top: formatPixels(clamp(
+      screenY,
+      FLOATING_MENU_MARGIN_PX,
+      Math.max(FLOATING_MENU_MARGIN_PX, viewportHeight - maxHeight - FLOATING_MENU_MARGIN_PX)
+    ))
   };
 }
 
