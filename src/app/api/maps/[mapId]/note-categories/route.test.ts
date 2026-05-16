@@ -9,7 +9,17 @@ const mocks = vi.hoisted(() => ({
     isAdmin: boolean;
   },
   map: null as null | { id: string },
-  noteCategoryUpsert: vi.fn(async () => ({ id: "category-1", name: "Landmarks" }))
+  noteCategoryUpsert: vi.fn(async (input: unknown) => {
+    void input;
+
+    return {
+      color: null,
+      id: "category-1",
+      markerShape: "circle",
+      name: "Landmarks",
+      pipSize: 3
+    };
+  })
 }));
 
 vi.mock("@/lib/auth/current-viewer", () => ({
@@ -42,7 +52,7 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
     mocks.map = { id: "map-1" };
   });
 
-  it("requires approved admin access", async () => {
+  it("requires approved write access", async () => {
     mocks.currentViewer = {
       accessLevel: "WRITE",
       approvalStatus: "PENDING",
@@ -54,9 +64,42 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
       params: Promise.resolve({ mapId: "map-1" })
     });
 
-    await expect(response.json()).resolves.toEqual({ error: "Admin access is required" });
+    await expect(response.json()).resolves.toEqual({ error: "Write access is required" });
     expect(response.status).toBe(403);
     expect(mocks.noteCategoryUpsert).not.toHaveBeenCalled();
+  });
+
+  it("allows approved writers to create note categories by shared name only", async () => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      id: "writer-1",
+      isAdmin: false
+    };
+
+    const response = await POST(createCategoryRequest({ name: "Landmarks" }), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      category: {
+        color: null,
+        id: "category-1",
+        markerShape: "circle",
+        name: "Landmarks",
+        pipSize: 3
+      }
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.noteCategoryUpsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({
+        name: "Landmarks"
+      })
+    }));
+    const upsertInput = mocks.noteCategoryUpsert.mock.calls[0]?.[0] as { create?: unknown } | undefined;
+    expect(upsertInput?.create).not.toHaveProperty("color");
+    expect(upsertInput?.create).not.toHaveProperty("markerShape");
+    expect(upsertInput?.create).not.toHaveProperty("pipSize");
   });
 
   it("returns 404 instead of upserting categories for inactive or missing maps", async () => {

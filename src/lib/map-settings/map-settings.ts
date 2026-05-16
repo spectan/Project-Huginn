@@ -1,5 +1,12 @@
 import { isTileHighlightSelection } from "@/lib/domain/tile-highlighting";
+import {
+  MAX_NOTE_CATEGORY_PIP_SIZE,
+  MIN_NOTE_CATEGORY_PIP_SIZE,
+  NOTE_CATEGORY_MARKER_SHAPES,
+  type NoteCategoryMarkerShape
+} from "@/lib/domain/note-categories";
 import type {
+  AnnotationWorkspaceMarker,
   MarkerColors,
   MarkerOpacities,
   MarkerVisibility,
@@ -16,11 +23,20 @@ export type EventFeedPanelSize = {
   width: number;
 };
 
+export type NoteCategoryColors = Record<string, string>;
+export type NoteCategoryMarkerShapes = Record<string, NoteCategoryMarkerShape>;
+export type NoteCategoryPipSizes = Record<string, number>;
+export type UserAnnotation = AnnotationWorkspaceMarker;
+
 export type UserMapSettings = {
+  annotations: UserAnnotation[];
   eventFeedPanelSize: EventFeedPanelSize;
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
+  noteCategoryColors: NoteCategoryColors;
+  noteCategoryMarkerShapes: NoteCategoryMarkerShapes;
+  noteCategoryPipSizes: NoteCategoryPipSizes;
   roadwayEditPanelPosition: TileHighlightPanelPosition | null;
   routePlannerSpeedKmh: number;
   searchLinesEnabled: boolean;
@@ -29,6 +45,7 @@ export type UserMapSettings = {
 };
 
 export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
+  annotations: true,
   bridges: true,
   camps: true,
   canals: true,
@@ -49,6 +66,7 @@ export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
 };
 
 export const DEFAULT_MARKER_COLORS: MarkerColors = {
+  annotations: "#38bdf8",
   bridges: "#cc00cc",
   camps: "#facc15",
   canals: "#0055cc",
@@ -64,6 +82,7 @@ export const DEFAULT_MARKER_COLORS: MarkerColors = {
 };
 
 export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
+  annotations: 50,
   bridges: 50,
   canals: 50,
   deeds: 100,
@@ -93,10 +112,14 @@ export const DEFAULT_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
 };
 
 export const DEFAULT_USER_MAP_SETTINGS: UserMapSettings = {
+  annotations: [],
   eventFeedPanelSize: DEFAULT_EVENT_FEED_PANEL_SIZE,
   markerColors: DEFAULT_MARKER_COLORS,
   markerOpacities: DEFAULT_MARKER_OPACITIES,
   markerVisibility: DEFAULT_MARKER_VISIBILITY,
+  noteCategoryColors: {},
+  noteCategoryMarkerShapes: {},
+  noteCategoryPipSizes: {},
   roadwayEditPanelPosition: null,
   routePlannerSpeedKmh: 0,
   searchLinesEnabled: false,
@@ -105,6 +128,7 @@ export const DEFAULT_USER_MAP_SETTINGS: UserMapSettings = {
 };
 
 const MARKER_VISIBILITY_KEYS = [
+  "annotations",
   "bridges",
   "camps",
   "canals",
@@ -125,6 +149,7 @@ const MARKER_VISIBILITY_KEYS = [
 ] as const;
 
 const MARKER_COLOR_KEYS = [
+  "annotations",
   "bridges",
   "camps",
   "canals",
@@ -140,6 +165,7 @@ const MARKER_COLOR_KEYS = [
 ] as const;
 
 const MARKER_OPACITY_KEYS = [
+  "annotations",
   "bridges",
   "canals",
   "deeds",
@@ -154,6 +180,9 @@ const MARKER_OPACITY_KEYS = [
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const MAX_STORED_PANEL_POSITION_PX = 10000;
 const MAX_STORED_PANEL_SIZE_PX = 10000;
+const MAX_ANNOTATION_TITLE_LENGTH = 120;
+const MAX_ANNOTATION_TEXT_LENGTH = 2000;
+const MAX_STORED_ANNOTATION_COORDINATE = 100000;
 
 export function parseUserMapSettings(input: unknown): UserMapSettings {
   return parseUserMapSettingsWithFallback(input, DEFAULT_USER_MAP_SETTINGS);
@@ -173,10 +202,17 @@ function parseUserMapSettingsWithFallback(
   const source = isRecord(input) ? input : {};
 
   return {
+    annotations: parseAnnotations(source.annotations, fallback.annotations),
     eventFeedPanelSize: parsePanelSize(source.eventFeedPanelSize, fallback.eventFeedPanelSize),
     markerColors: parseMarkerColors(source.markerColors, fallback.markerColors),
     markerOpacities: parseMarkerOpacities(source.markerOpacities, fallback.markerOpacities),
     markerVisibility: parseMarkerVisibility(source.markerVisibility, fallback.markerVisibility),
+    noteCategoryColors: parseNoteCategoryColors(source.noteCategoryColors, fallback.noteCategoryColors),
+    noteCategoryMarkerShapes: parseNoteCategoryMarkerShapes(
+      source.noteCategoryMarkerShapes,
+      fallback.noteCategoryMarkerShapes
+    ),
+    noteCategoryPipSizes: parseNoteCategoryPipSizes(source.noteCategoryPipSizes, fallback.noteCategoryPipSizes),
     roadwayEditPanelPosition: parsePanelPosition(
       source.roadwayEditPanelPosition,
       fallback.roadwayEditPanelPosition
@@ -189,6 +225,51 @@ function parseUserMapSettingsWithFallback(
       fallback.tileHighlightPanelPosition
     )
   };
+}
+
+function parseAnnotations(input: unknown, fallback: UserAnnotation[]): UserAnnotation[] {
+  if (input === undefined) {
+    return fallback;
+  }
+
+  if (!Array.isArray(input)) {
+    return fallback;
+  }
+
+  const annotations: UserAnnotation[] = [];
+  const seenIds = new Set<string>();
+
+  for (const entry of input) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+
+    const id = typeof entry.id === "string" ? entry.id.trim() : "";
+    const title = typeof entry.title === "string" ? entry.title.trim() : "";
+    const text = typeof entry.text === "string" ? entry.text.trim() : "";
+
+    if (
+      id.length === 0 ||
+      seenIds.has(id) ||
+      title.length === 0 ||
+      !Number.isFinite(entry.x) ||
+      !Number.isFinite(entry.y)
+    ) {
+      continue;
+    }
+
+    seenIds.add(id);
+    annotations.push({
+      id,
+      text: text.slice(0, MAX_ANNOTATION_TEXT_LENGTH),
+      title: title.slice(0, MAX_ANNOTATION_TITLE_LENGTH),
+      type: "annotation",
+      x: clamp(Math.round(Number(entry.x)), 0, MAX_STORED_ANNOTATION_COORDINATE),
+      y: clamp(Math.round(Number(entry.y)), 0, MAX_STORED_ANNOTATION_COORDINATE)
+    });
+  }
+
+  return annotations;
 }
 
 function parseMarkerVisibility(input: unknown, fallback: MarkerVisibility): MarkerVisibility {
@@ -213,6 +294,66 @@ function parseMarkerColors(input: unknown, fallback: MarkerColors): MarkerColors
   }
 
   return colors;
+}
+
+function parseNoteCategoryColors(input: unknown, fallback: NoteCategoryColors): NoteCategoryColors {
+  const source = isRecord(input) ? input : {};
+  const colors = { ...fallback };
+
+  for (const [categoryId, value] of Object.entries(source)) {
+    if (categoryId.length === 0) {
+      continue;
+    }
+
+    const parsedColor = parseHexColor(value, "");
+
+    if (parsedColor.length > 0) {
+      colors[categoryId] = parsedColor;
+    }
+  }
+
+  return colors;
+}
+
+function parseNoteCategoryMarkerShapes(
+  input: unknown,
+  fallback: NoteCategoryMarkerShapes
+): NoteCategoryMarkerShapes {
+  const source = isRecord(input) ? input : {};
+  const markerShapes = { ...fallback };
+
+  for (const [categoryId, value] of Object.entries(source)) {
+    if (categoryId.length === 0) {
+      continue;
+    }
+
+    const markerShape = NOTE_CATEGORY_MARKER_SHAPES.find((shape) => shape === value);
+
+    if (markerShape !== undefined) {
+      markerShapes[categoryId] = markerShape;
+    }
+  }
+
+  return markerShapes;
+}
+
+function parseNoteCategoryPipSizes(input: unknown, fallback: NoteCategoryPipSizes): NoteCategoryPipSizes {
+  const source = isRecord(input) ? input : {};
+  const pipSizes = { ...fallback };
+
+  for (const [categoryId, value] of Object.entries(source)) {
+    if (categoryId.length === 0 || typeof value !== "number" || !Number.isFinite(value)) {
+      continue;
+    }
+
+    pipSizes[categoryId] = clamp(
+      Math.round(value),
+      MIN_NOTE_CATEGORY_PIP_SIZE,
+      MAX_NOTE_CATEGORY_PIP_SIZE
+    );
+  }
+
+  return pipSizes;
 }
 
 function parseMarkerOpacities(input: unknown, fallback: MarkerOpacities): MarkerOpacities {

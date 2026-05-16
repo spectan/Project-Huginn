@@ -1,11 +1,23 @@
 "use client";
 
-import { useState, type ChangeEvent } from "react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
+  DEFAULT_NOTE_CATEGORY_PIP_SIZE,
+  NOTE_CATEGORY_MARKER_SHAPES,
+  type NoteCategoryMarkerShape
+} from "@/lib/domain/note-categories";
 import { TILE_HIGHLIGHT_GROUPS } from "@/lib/domain/tile-highlighting";
+import type {
+  NoteCategoryColors,
+  NoteCategoryMarkerShapes,
+  NoteCategoryPipSizes
+} from "@/lib/map-settings/map-settings";
 import type {
   MarkerColors,
   MarkerOpacities,
   MarkerVisibility,
+  NoteCategory,
   TileHighlightSettings
 } from "@/lib/markers/marker-types";
 
@@ -14,12 +26,24 @@ type MapSettingsOverlayProps = {
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
+  noteCategories: NoteCategory[];
+  noteCategoryColors: NoteCategoryColors;
+  noteCategoryMarkerShapes: NoteCategoryMarkerShapes;
+  noteCategoryPipSizes: NoteCategoryPipSizes;
   roadwayEditMode: boolean;
   searchLinesEnabled: boolean;
   tileHighlight: TileHighlightSettings;
+  viewerCanWrite: boolean;
+  viewerIsAdmin: boolean;
   onMarkerColorsChange(colors: MarkerColors): void;
   onMarkerOpacitiesChange(opacities: MarkerOpacities): void;
   onMarkerVisibilityChange(visibility: MarkerVisibility): void;
+  onNoteCategoryColorChange(categoryId: string, color: string | null): void;
+  onNoteCategoryMarkerShapeChange(categoryId: string, markerShape: NoteCategoryMarkerShape): void;
+  onNoteCategoryPipSizeChange(categoryId: string, pipSize: number): void;
+  onNoteCategoryCreate(input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onNoteCategoryDelete(categoryId: string): Promise<boolean>;
+  onNoteCategoryUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
   onOpenChange(isOpen: boolean): void;
   onResetSettings(): void;
   onRoadwayEditModeChange(enabled: boolean): void;
@@ -29,17 +53,33 @@ type MapSettingsOverlayProps = {
 
 type LayerCategoryId = "markers" | "misc" | "roadways";
 
+type NoteCategoryFormInput = {
+  name: string;
+};
+
 export function MapSettingsOverlay({
   isOpen,
   markerColors,
   markerOpacities,
   markerVisibility,
+  noteCategories,
+  noteCategoryColors,
+  noteCategoryMarkerShapes,
+  noteCategoryPipSizes,
   roadwayEditMode,
   searchLinesEnabled,
   tileHighlight,
+  viewerCanWrite,
+  viewerIsAdmin,
   onMarkerColorsChange,
   onMarkerOpacitiesChange,
   onMarkerVisibilityChange,
+  onNoteCategoryColorChange,
+  onNoteCategoryMarkerShapeChange,
+  onNoteCategoryPipSizeChange,
+  onNoteCategoryCreate,
+  onNoteCategoryDelete,
+  onNoteCategoryUpdate,
   onOpenChange,
   onResetSettings,
   onRoadwayEditModeChange,
@@ -154,6 +194,20 @@ export function MapSettingsOverlay({
             />
             {isLayerCategoryExpanded("markers") ? (
               <>
+                <LayerControlRow
+                  checked={markerVisibility.annotations}
+                  colorLabel="Annotations color"
+                  colorValue={markerColors.annotations}
+                  label="Annotations"
+                  opacityLabel="Annotations opacity"
+                  opacityValue={markerOpacities.annotations}
+                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, annotations: value })}
+                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, annotations: value })}
+                  onToggle={() => onMarkerVisibilityChange({
+                    ...markerVisibility,
+                    annotations: !markerVisibility.annotations
+                  })}
+                />
                 <LayerControlRow
                   checked={markerVisibility.towers}
                   colorLabel="Towers color"
@@ -325,6 +379,21 @@ export function MapSettingsOverlay({
               </>
             ) : null}
           </fieldset>
+          <NoteCategorySettings
+            markerColors={markerColors}
+            noteCategories={noteCategories}
+            noteCategoryColors={noteCategoryColors}
+            noteCategoryMarkerShapes={noteCategoryMarkerShapes}
+            noteCategoryPipSizes={noteCategoryPipSizes}
+            viewerCanWrite={viewerCanWrite}
+            viewerIsAdmin={viewerIsAdmin}
+            onColorChange={onNoteCategoryColorChange}
+            onCreate={onNoteCategoryCreate}
+            onDelete={onNoteCategoryDelete}
+            onMarkerShapeChange={onNoteCategoryMarkerShapeChange}
+            onPipSizeChange={onNoteCategoryPipSizeChange}
+            onUpdate={onNoteCategoryUpdate}
+          />
           <div className="map-settings-tool-section">
             <fieldset className="map-layer-controls map-settings-tool-group">
               <legend>Tile Highlighting</legend>
@@ -406,6 +475,245 @@ function LayerCategory({
   );
 }
 
+function NoteCategorySettings({
+  markerColors,
+  noteCategories,
+  noteCategoryColors,
+  noteCategoryMarkerShapes,
+  noteCategoryPipSizes,
+  viewerCanWrite,
+  viewerIsAdmin,
+  onColorChange,
+  onCreate,
+  onDelete,
+  onMarkerShapeChange,
+  onPipSizeChange,
+  onUpdate
+}: {
+  markerColors: MarkerColors;
+  noteCategories: NoteCategory[];
+  noteCategoryColors: NoteCategoryColors;
+  noteCategoryMarkerShapes: NoteCategoryMarkerShapes;
+  noteCategoryPipSizes: NoteCategoryPipSizes;
+  viewerCanWrite: boolean;
+  viewerIsAdmin: boolean;
+  onColorChange(categoryId: string, color: string | null): void;
+  onCreate(input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onDelete(categoryId: string): Promise<boolean>;
+  onMarkerShapeChange(categoryId: string, markerShape: NoteCategoryMarkerShape): void;
+  onPipSizeChange(categoryId: string, pipSize: number): void;
+  onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+}) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+
+  return (
+    <fieldset className="map-layer-controls map-note-category-controls">
+      <legend className="map-sr-only">Note Categories</legend>
+      <LayerCategory
+        isExpanded={isExpanded}
+        label="Note Categories"
+        onToggle={() => setIsExpanded((current) => !current)}
+      />
+      {isExpanded ? (
+        <>
+          {noteCategories.map((category) => (
+            <NoteCategoryRow
+              category={category}
+              inheritedColor={markerColors.notes}
+              key={category.id}
+              noteCategoryColor={noteCategoryColors[category.id]}
+              noteCategoryMarkerShape={noteCategoryMarkerShapes[category.id]}
+              noteCategoryPipSize={noteCategoryPipSizes[category.id]}
+              viewerCanWrite={viewerCanWrite}
+              viewerIsAdmin={viewerIsAdmin}
+              onColorChange={onColorChange}
+              onDelete={onDelete}
+              onMarkerShapeChange={onMarkerShapeChange}
+              onPipSizeChange={onPipSizeChange}
+              onUpdate={onUpdate}
+            />
+          ))}
+          {viewerCanWrite ? (
+            <div className="map-note-category-add">
+              {isAdding ? (
+                <form
+                  className="map-note-category-add-form"
+                  onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                    event.preventDefault();
+                    void onCreate({
+                      name: newCategoryName
+                    }).then((category) => {
+                      if (category !== null) {
+                        setNewCategoryName("");
+                        setIsAdding(false);
+                      }
+                    });
+                  }}
+                >
+                  <label>
+                    <span>Name</span>
+                    <input
+                      aria-label="New note category name"
+                      onChange={(event) => setNewCategoryName(event.target.value)}
+                      value={newCategoryName}
+                    />
+                  </label>
+                  <button aria-label="Create note category" type="submit">Create</button>
+                </form>
+              ) : (
+                <button onClick={() => setIsAdding(true)} type="button">
+                  Add note category
+                </button>
+              )}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function NoteCategoryRow({
+  category,
+  inheritedColor,
+  noteCategoryColor,
+  noteCategoryMarkerShape,
+  noteCategoryPipSize,
+  viewerCanWrite,
+  viewerIsAdmin,
+  onColorChange,
+  onDelete,
+  onMarkerShapeChange,
+  onPipSizeChange,
+  onUpdate
+}: {
+  category: NoteCategory;
+  inheritedColor: string;
+  noteCategoryColor: string | undefined;
+  noteCategoryMarkerShape: NoteCategoryMarkerShape | undefined;
+  noteCategoryPipSize: number | undefined;
+  viewerCanWrite: boolean;
+  viewerIsAdmin: boolean;
+  onColorChange(categoryId: string, color: string | null): void;
+  onDelete(categoryId: string): Promise<boolean>;
+  onMarkerShapeChange(categoryId: string, markerShape: NoteCategoryMarkerShape): void;
+  onPipSizeChange(categoryId: string, pipSize: number): void;
+  onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+}) {
+  const [name, setName] = useState(category.name);
+  const inheritsColor = noteCategoryColor === undefined;
+  const color = noteCategoryColor ?? inheritedColor;
+  const markerShape = noteCategoryMarkerShape ?? category.markerShape;
+  const pipSize = noteCategoryPipSize ?? category.pipSize;
+
+  return (
+    <form
+      className="map-note-category-settings-row"
+      data-testid={`note-category-row-${category.id}`}
+      onSubmit={(event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        if (!viewerCanWrite) {
+          return;
+        }
+
+        void onUpdate(category.id, {
+          name
+        });
+      }}
+    >
+      <div className="map-note-category-settings-heading">
+        <label className="map-note-category-color-field">
+          <span>Color</span>
+          <input
+            aria-label={`${category.name} color`}
+            className="map-layer-color"
+            disabled={!viewerCanWrite || inheritsColor}
+            onChange={(event) => {
+              onColorChange(category.id, event.target.value);
+            }}
+            type="color"
+            value={inheritsColor ? inheritedColor : color}
+          />
+        </label>
+        <label>
+          <span>Name</span>
+          <input
+            aria-label={`${category.name} name`}
+            disabled={!viewerCanWrite}
+            onChange={(event) => setName(event.target.value)}
+            value={name}
+          />
+        </label>
+        {viewerCanWrite ? (
+          <button
+            aria-label={`Save ${category.name} category`}
+            className="map-note-category-icon-button"
+            type="submit"
+          >
+            ✓
+          </button>
+        ) : null}
+        {viewerIsAdmin && category.name !== "General" ? (
+          <button
+            aria-label={`Delete ${category.name} category`}
+            className="map-note-category-delete map-note-category-icon-button"
+            onClick={() => {
+              if (window.confirm(`Delete the ${category.name} note category? Notes in this category will move to General.`)) {
+                void onDelete(category.id);
+              }
+            }}
+            type="button"
+          >
+            ×
+          </button>
+        ) : null}
+      </div>
+      <div className="map-note-category-settings-options">
+        <label className="map-note-category-inherit">
+          <input
+            aria-label={`${category.name} inherit Notes color`}
+            checked={inheritsColor}
+            disabled={!viewerCanWrite}
+            onChange={() => {
+              onColorChange(category.id, inheritsColor ? inheritedColor : null);
+            }}
+            type="checkbox"
+          />
+          <span>Inherit Notes color</span>
+        </label>
+        <label>
+          <span>Size</span>
+          <input
+            aria-label={`${category.name} pip size`}
+            disabled={!viewerCanWrite}
+            max={10}
+            min={1}
+            onChange={(event) => onPipSizeChange(category.id, parsePipSize(event.target.value))}
+            type="number"
+            value={pipSize}
+          />
+        </label>
+        <label>
+          <span>Shape</span>
+          <select
+            aria-label={`${category.name} marker shape`}
+            disabled={!viewerCanWrite}
+            onChange={(event) => onMarkerShapeChange(category.id, parseNoteCategoryMarkerShape(event.target.value))}
+            value={markerShape}
+          >
+            {NOTE_CATEGORY_MARKER_SHAPES.map((shape) => (
+              <option key={shape} value={shape}>{formatNoteCategoryMarkerShape(shape)}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+    </form>
+  );
+}
+
 function LayerControlRow({
   checked,
   colorLabel,
@@ -471,4 +779,30 @@ function parseOpacity(value: string): number {
   }
 
   return Math.min(100, Math.max(0, Math.round(parsedValue)));
+}
+
+function parsePipSize(value: string): number {
+  const parsedValue = Number(value);
+
+  if (!Number.isFinite(parsedValue)) {
+    return DEFAULT_NOTE_CATEGORY_PIP_SIZE;
+  }
+
+  return Math.min(10, Math.max(1, Math.round(parsedValue)));
+}
+
+function parseNoteCategoryMarkerShape(value: string): NoteCategoryMarkerShape {
+  return NOTE_CATEGORY_MARKER_SHAPES.find((shape) => shape === value) ?? DEFAULT_NOTE_CATEGORY_MARKER_SHAPE;
+}
+
+function formatNoteCategoryMarkerShape(shape: NoteCategoryMarkerShape): string {
+  if (shape === "x") {
+    return "X";
+  }
+
+  if (shape === "o") {
+    return "O";
+  }
+
+  return shape.charAt(0).toUpperCase() + shape.slice(1);
 }

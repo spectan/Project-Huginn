@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  TOWER_TYPES,
   formatTowerCreator,
   validateCampInput,
   validateDeedInput,
@@ -17,6 +18,15 @@ const bounds = {
 };
 
 describe("validateTowerInput", () => {
+  it("lists tower type options alphabetically", () => {
+    expect(TOWER_TYPES).toEqual([
+      "Freedom Isles",
+      "Horde of the Summoned",
+      "Jenn-Kellon",
+      "Mol-Rehan"
+    ]);
+  });
+
   it("normalizes a valid tower input", () => {
     expect(
       validateTowerInput(
@@ -27,7 +37,8 @@ describe("validateTowerInput", () => {
           damage: "0.25",
           makerName: " Mako ",
           makerNumber: "945",
-          planned: true
+          planned: true,
+          towerType: "Mol-Rehan"
         },
         bounds
       )
@@ -40,12 +51,13 @@ describe("validateTowerInput", () => {
         damageHundredths: 25,
         makerName: "Mako",
         makerNumber: "945",
-        planned: true
+        planned: true,
+        towerType: "Mol-Rehan"
       }
     });
   });
 
-  it("defaults towers to not planned", () => {
+  it("defaults towers to not planned and Freedom Isles tower type", () => {
     expect(
       validateTowerInput(
         {
@@ -61,7 +73,8 @@ describe("validateTowerInput", () => {
     ).toMatchObject({
       ok: true,
       value: {
-        planned: false
+        planned: false,
+        towerType: "Freedom Isles"
       }
     });
   });
@@ -76,7 +89,8 @@ describe("validateTowerInput", () => {
           damage: "",
           makerName: "",
           makerNumber: "",
-          planned: true
+          planned: true,
+          towerType: "Horde of the Summoned"
         },
         bounds
       )
@@ -89,8 +103,29 @@ describe("validateTowerInput", () => {
         damageHundredths: null,
         makerName: "",
         makerNumber: "",
-        planned: true
+        planned: true,
+        towerType: "Horde of the Summoned"
       }
+    });
+  });
+
+  it("rejects unknown tower types", () => {
+    expect(
+      validateTowerInput(
+        {
+          x: 25,
+          y: 30,
+          ql: "89.50",
+          damage: "0.25",
+          makerName: "Mako",
+          makerNumber: "945",
+          towerType: "Black Legion"
+        },
+        bounds
+      )
+    ).toEqual({
+      ok: false,
+      error: "Tower type must be one of Freedom Isles, Horde of the Summoned, Jenn-Kellon, or Mol-Rehan"
     });
   });
 
@@ -116,7 +151,8 @@ describe("validateTowerInput", () => {
         damageHundredths: 25,
         makerName: "Mako",
         makerNumber: "",
-        planned: false
+        planned: false,
+        towerType: "Freedom Isles"
       }
     });
   });
@@ -356,7 +392,7 @@ describe("validateNoteInput", () => {
     });
   });
 
-  it("rejects empty notes", () => {
+  it("allows empty note text", () => {
     expect(validateNoteInput({
       category: "Landmarks",
       text: "   ",
@@ -364,8 +400,14 @@ describe("validateNoteInput", () => {
       x: 5,
       y: 6
     }, bounds)).toEqual({
-      ok: false,
-      error: "Note text is required"
+      ok: true,
+      value: {
+        category: "Landmarks",
+        text: "",
+        title: "Mine entrance",
+        x: 5,
+        y: 6
+      }
     });
   });
 

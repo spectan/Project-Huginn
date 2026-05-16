@@ -10,6 +10,8 @@ import {
   isLocateSoulDistanceBandKey
 } from "@/lib/domain/locate-soul";
 import {
+  DEFAULT_TOWER_TYPE,
+  TOWER_TYPES,
   validateCampInput,
   validateDeedInput,
   validateLocateSoulInput,
@@ -26,7 +28,8 @@ import {
   type PathMarkerInput,
   type PathType,
   type RiftMarkerInput,
-  type TowerMarkerInput
+  type TowerMarkerInput,
+  type TowerType
 } from "@/lib/domain/markers";
 import { formatHundredths } from "@/lib/domain/number-fields";
 import {
@@ -81,9 +84,10 @@ type MarkerModifierRecord = {
   updatedBy?: UserSummaryRecord | null;
 };
 
-type TowerRecord = TowerMarkerInput & {
+type TowerRecord = Omit<TowerMarkerInput, "towerType"> & {
   id: string;
   mapId: string;
+  towerType: string;
 } & MarkerModifierRecord;
 
 type DeedRecord = DeedMarkerInput & {
@@ -97,9 +101,12 @@ type NoteRecord = NoteMarkerInput & {
 } & MarkerModifierRecord;
 
 type NoteCategoryRecord = {
+  color: string | null;
   id: string;
+  markerShape: string;
   mapId: string;
   name: string;
+  pipSize: number;
 };
 
 type RiftRecord = RiftMarkerInput & {
@@ -253,6 +260,7 @@ export type CreateMarkerInput =
       makerNumber: string;
       planned?: boolean;
       ql: string;
+      towerType?: string;
       x: number;
       y: number;
     })
@@ -808,8 +816,7 @@ export async function disbandDeedMarker(
 
   return ok({
     category: {
-      id: conversion.category.id,
-      name: conversion.category.name
+      ...serializeNoteCategory(conversion.category)
     },
     deletedMarkerId: conversion.deletedDeed.id,
     marker
@@ -828,6 +835,7 @@ function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
       makerNumber: getString(input, "makerNumber"),
       planned: getBoolean(input, "planned"),
       ql: getString(input, "ql"),
+      towerType: getString(input, "towerType"),
       type: "tower",
       x: getNumber(input, "x"),
       y: getNumber(input, "y")
@@ -1033,10 +1041,15 @@ function serializeTower(tower: TowerRecord): TowerWorkspaceMarker {
     makerNumber: tower.makerNumber,
     planned: tower.planned,
     ql: formatOptionalHundredths(tower.qlHundredths),
+    towerType: normalizeTowerRecordType(tower.towerType),
     type: "tower",
     x: tower.x,
     y: tower.y
   };
+}
+
+function normalizeTowerRecordType(value: string): TowerType {
+  return TOWER_TYPES.find((towerType) => towerType === value) ?? DEFAULT_TOWER_TYPE;
 }
 
 function formatOptionalHundredths(value: number | null): string {
@@ -1102,6 +1115,21 @@ function serializeNote(note: NoteRecord): NoteWorkspaceMarker {
     type: "note",
     x: note.x,
     y: note.y
+  };
+}
+
+function serializeNoteCategory(category: NoteCategoryRecord): NoteCategory {
+  return {
+    color: category.color,
+    id: category.id,
+    markerShape: category.markerShape === "x" ||
+      category.markerShape === "o" ||
+      category.markerShape === "triangle" ||
+      category.markerShape === "square"
+      ? category.markerShape
+      : "circle",
+    name: category.name,
+    pipSize: Math.min(10, Math.max(1, Math.round(category.pipSize)))
   };
 }
 

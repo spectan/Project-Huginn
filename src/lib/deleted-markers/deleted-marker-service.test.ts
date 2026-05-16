@@ -256,6 +256,7 @@ describe("deleted marker service", () => {
 
     expect(result).toEqual({
       deletedCounts: {
+        annotation: 0,
         bridge: 0,
         camp: 0,
         canal: 0,

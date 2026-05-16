@@ -236,6 +236,20 @@ describe("map overlay styles", () => {
     expect(block).toContain("padding: 0");
   });
 
+  it("keeps note dialog category rows separate from settings category rows", () => {
+    const dialogBlock = getStandaloneCssBlock(".map-note-category-row");
+    const settingsBlock = getStandaloneCssBlock(".map-note-category-settings-row");
+    const settingsHeadingBlock = getStandaloneCssBlock(".map-note-category-settings-heading");
+    const settingsOptionsBlock = getStandaloneCssBlock(".map-note-category-settings-options");
+
+    expect(dialogBlock).toContain("grid-template-columns: minmax(0, 1fr) 36px");
+    expect(dialogBlock).not.toContain("border-top");
+    expect(settingsBlock).toContain("border-top: 1px solid rgba(148, 163, 184, 0.14)");
+    expect(settingsHeadingBlock).toContain("grid-template-columns: 32px minmax(0, 1fr) auto auto");
+    expect(settingsOptionsBlock).toContain("grid-template-columns: minmax(0, 1.1fr) 54px minmax(82px, 0.8fr)");
+    expect(globalsCss).not.toMatch(/\.map-note-category-row\s*\{[^}]*border-top/s);
+  });
+
   it("keeps locate soul overlays non-interactive so the 3 by 3 pip owns right-click actions", () => {
     const svgBlock = getStandaloneCssBlock(".map-locate-soul-overlay-svg");
     const overlayBlock = getStandaloneCssBlock(".map-locate-soul-overlay");
@@ -363,9 +377,13 @@ describe("map overlay styles", () => {
 
     expect(block).toContain("width: 18px");
     expect(block).toContain("height: 18px");
+    expect(block).toContain("transform: translate(-50%, -50%) rotate(-45deg)");
+    expect(block).toContain("transform-origin: 50% 50%");
     expect(block).toContain("border-radius: 50% 50% 50% 0");
     expect(block).toContain("background: #facc15");
     expect(block).toContain("border: 2px solid #92400e");
+    expect(block).not.toContain("transform-origin: 50% 100%");
+    expect(block).not.toContain("calc(-100% + 2px)");
     expect(block).not.toContain("width: 34px");
     expect(block).not.toContain("height: 34px");
     expect(centerBlock).toContain("border-radius: 50%");

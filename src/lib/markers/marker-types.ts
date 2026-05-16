@@ -3,6 +3,8 @@ import type {
   LocateSoulDirection,
   LocateSoulDistanceBandKey
 } from "@/lib/domain/locate-soul";
+import type { TowerType } from "@/lib/domain/markers";
+import type { NoteCategoryMarkerShape } from "@/lib/domain/note-categories";
 
 export type WorkspaceMapLayer = {
   heightPx: number;
@@ -35,6 +37,7 @@ export type TowerWorkspaceMarker = {
   makerNumber: string;
   planned?: boolean;
   ql: string;
+  towerType?: TowerType;
   type: "tower";
   x: number;
   y: number;
@@ -63,6 +66,15 @@ export type NoteWorkspaceMarker = {
   text: string;
   title: string;
   type: "note";
+  x: number;
+  y: number;
+};
+
+export type AnnotationWorkspaceMarker = {
+  id: string;
+  text: string;
+  title: string;
+  type: "annotation";
   x: number;
   y: number;
 };
@@ -127,6 +139,7 @@ export type WorkspaceMarker =
   | TowerWorkspaceMarker
   | DeedWorkspaceMarker
   | NoteWorkspaceMarker
+  | AnnotationWorkspaceMarker
   | RiftWorkspaceMarker
   | CampWorkspaceMarker
   | MinedoorWorkspaceMarker
@@ -136,6 +149,7 @@ export type WorkspaceMarker =
 export type MarkerType = WorkspaceMarker["type"];
 
 export type MarkerVisibility = {
+  annotations: boolean;
   bridges: boolean;
   camps: boolean;
   canals: boolean;
@@ -156,6 +170,7 @@ export type MarkerVisibility = {
 };
 
 export type MarkerColors = {
+  annotations: string;
   bridges: string;
   camps: string;
   canals: string;
@@ -171,6 +186,7 @@ export type MarkerColors = {
 };
 
 export type MarkerOpacities = {
+  annotations: number;
   bridges: number;
   canals: number;
   deeds: number;
@@ -190,6 +206,9 @@ export type TileHighlightSettings = {
 };
 
 export type NoteCategory = {
+  color: string | null;
   id: string;
+  markerShape: NoteCategoryMarkerShape;
   name: string;
+  pipSize: number;
 };

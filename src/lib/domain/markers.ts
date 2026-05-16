@@ -17,6 +17,15 @@ import {
 } from "./locate-soul";
 import { err, ok, type Result } from "./result";
 
+export const TOWER_TYPES = [
+  "Freedom Isles",
+  "Horde of the Summoned",
+  "Jenn-Kellon",
+  "Mol-Rehan"
+] as const;
+export type TowerType = typeof TOWER_TYPES[number];
+export const DEFAULT_TOWER_TYPE: TowerType = "Freedom Isles";
+
 export type TowerInput = {
   x: number;
   y: number;
@@ -25,6 +34,7 @@ export type TowerInput = {
   makerName: string;
   makerNumber: string;
   planned?: boolean;
+  towerType?: string;
 };
 
 export type TowerMarkerInput = {
@@ -35,6 +45,7 @@ export type TowerMarkerInput = {
   makerName: string;
   makerNumber: string;
   planned: boolean;
+  towerType: TowerType;
 };
 
 export type CampType = "Rift" | "Goblin";
@@ -218,6 +229,11 @@ export function validateTowerInput(
     return err("Creator number must be blank or a whole number from 0 to 999");
   }
 
+  const towerType = normalizeTowerType(input.towerType ?? "");
+  if (!towerType.ok) {
+    return towerType;
+  }
+
   return ok({
     x: coordinate.value.x,
     y: coordinate.value.y,
@@ -225,7 +241,8 @@ export function validateTowerInput(
     damageHundredths: damage.value,
     makerName: makerName.value,
     makerNumber,
-    planned: input.planned === true
+    planned: input.planned === true,
+    towerType: towerType.value
   });
 }
 
@@ -337,10 +354,6 @@ export function validateNoteInput(
   }
 
   const text = input.text.trim();
-  if (text.length === 0) {
-    return err("Note text is required");
-  }
-
   if (text.length > MAX_NOTE_TEXT_LENGTH) {
     return err(`Note text must be ${MAX_NOTE_TEXT_LENGTH} characters or less`);
   }
@@ -594,6 +607,30 @@ function validatePerimeter(input: number): Result<number> {
   }
 
   return ok(input);
+}
+
+function normalizeTowerType(input: string): Result<TowerType> {
+  const value = input.trim();
+
+  if (value.length === 0) {
+    return ok(DEFAULT_TOWER_TYPE);
+  }
+
+  const towerType = TOWER_TYPES.find((candidate) => candidate === value);
+
+  if (towerType === undefined) {
+    return err(`Tower type must be one of ${formatList(TOWER_TYPES)}`);
+  }
+
+  return ok(towerType);
+}
+
+function formatList(values: readonly string[]): string {
+  if (values.length <= 1) {
+    return values.join("");
+  }
+
+  return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`;
 }
 
 function normalizeOptionalDate(input: string, label: string): Result<Date | null> {

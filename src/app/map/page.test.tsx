@@ -19,6 +19,13 @@ const readOnlyViewer = {
   permissions: "READ"
 } as const;
 
+const writerViewer = {
+  ...approvedViewer,
+  isAdmin: false,
+  permissions: "WRITE",
+  username: "Writer"
+} as const;
+
 const activeMap = {
   heightPx: 2048,
   id: "map-1",
@@ -46,8 +53,8 @@ const activeMap = {
 } as const;
 
 const noteCategories = [
-  { id: "category-general", name: "General" },
-  { id: "category-landmarks", name: "Landmarks" }
+  { color: null, id: "category-general", markerShape: "circle", name: "General", pipSize: 3 },
+  { color: "#00ffaa", id: "category-landmarks", markerShape: "triangle", name: "Landmarks", pipSize: 6 }
 ] as const;
 
 function mockClipboardWrite() {
@@ -80,6 +87,17 @@ function expandAllLayerCategories() {
   ["Markers", "Roadways", "Misc"].forEach((label) => expandLayerCategory(label));
 
   return getLayerControls();
+}
+
+function expandNoteCategories() {
+  const categoryControls = within(screen.getByRole("group", { name: "Note Categories" }));
+  const toggle = categoryControls.getByRole("button", { name: "Note Categories" });
+
+  if (toggle.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(toggle);
+  }
+
+  return categoryControls;
 }
 
 describe("MapPage", () => {
@@ -160,6 +178,20 @@ describe("MapPage", () => {
       fireEvent.click(screen.getByRole("button", { name: /Tip:/ }));
 
       expect(screen.getByText("Tip: All colours and opacities can be configured in the settings cogwheel in the top right.")).toBeTruthy();
+
+      for (let index = 0; index < 3; index += 1) {
+        fireEvent.click(screen.getByRole("button", { name: /Tip:/ }));
+      }
+
+      expect(screen.getByText("Tip: Did you know you can shift-click and drag while in the edit menu of a deed to quick resize it?")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /Tip:/ }));
+
+      expect(screen.getByText("Tip: Note settings are all user specific. The only thing that is shared are category names.")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("button", { name: /Tip:/ }));
+
+      expect(screen.getByText("Tip: You can use the Quick Input field on new towers to paste a log directly from Wurm and have the information auto-fill.")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -184,7 +216,7 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).getAllByText("Allowed")).toHaveLength(2);
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.1.0")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.1.1")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
@@ -795,6 +827,92 @@ describe("MapPage", () => {
     );
   });
 
+  it("supports dragging the map to pan from marker overlays", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+    const deedOverlay = screen.getByTestId("deed-overlay-deed-1");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.pointerDown(deedOverlay, {
+      button: 0,
+      clientX: 500,
+      clientY: 600,
+      pointerId: 91
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 545,
+      clientY: 625,
+      pointerId: 91
+    });
+    fireEvent.pointerUp(window, { pointerId: 91 });
+
+    await waitFor(() =>
+      expect(stage.style.transform).toBe("translate(45px, 25px) scale(1)")
+    );
+  });
+
+  it("supports dragging the map to pan from marker pips", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          damage: "0.25",
+          id: "tower-1",
+          makerName: "Mako",
+          makerNumber: "945",
+          ql: "89.50",
+          type: "tower",
+          x: 250,
+          y: 300
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+    const towerPip = screen.getByTestId("tower-center-tower-1");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.pointerDown(towerPip, {
+      button: 0,
+      clientX: 250,
+      clientY: 300,
+      pointerId: 92
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 290,
+      clientY: 330,
+      pointerId: 92
+    });
+    fireEvent.pointerUp(window, { pointerId: 92 });
+
+    await waitFor(() =>
+      expect(stage.style.transform).toBe("translate(40px, 30px) scale(1)")
+    );
+  });
+
   it("zooms back out to the full fitted map after panning", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
@@ -862,6 +980,7 @@ describe("MapPage", () => {
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
     expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140`);
+    expect(screen.getByRole("menuitem", { name: "Annotation" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Tower" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Deed" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Note" })).toBeTruthy();
@@ -1369,11 +1488,28 @@ describe("MapPage", () => {
     expect(screen.getByLabelText("Damage").hasAttribute("required")).toBe(false);
     expect(screen.getByLabelText("Creator")).toHaveProperty("value", "");
     expect(screen.getByLabelText("Creator").hasAttribute("required")).toBe(false);
+    expect(screen.getByLabelText("Quick Input")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Tower type")).toHaveProperty("value", "Freedom Isles");
+    expect(within(screen.getByLabelText("Tower type")).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Freedom Isles",
+      "Horde of the Summoned",
+      "Jenn-Kellon",
+      "Mol-Rehan"
+    ]);
+    fireEvent.change(screen.getByLabelText("Quick Input"), {
+      target: {
+        value: "[20:34:20] A high guard tower. The guard tower has some irregularities that must be removed with a stone chisel. Ql: 63.42072, Dam: 0.0. The name of the founder, Stargrace, has been carved into the stone above the door. 'Stargrace 490' is engraved in a metal plaque on the door."
+      }
+    });
+    expect(screen.getByLabelText("QL")).toHaveProperty("value", "63.42");
+    expect(screen.getByLabelText("Damage")).toHaveProperty("value", "0.0");
+    expect(screen.getByLabelText("Creator")).toHaveProperty("value", "Stargrace 490");
+    expect(screen.getByLabelText("Tower type")).toHaveProperty("value", "Freedom Isles");
     expect(screen.queryByLabelText("Creator name")).toBeNull();
     expect(screen.queryByLabelText("Creator number")).toBeNull();
   });
 
-  it("opens a note create form with title, category dropdown, and admin category creation", async () => {
+  it("opens a note create form with title and category dropdown", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
       initialNoteCategories: noteCategories,
@@ -1395,9 +1531,144 @@ describe("MapPage", () => {
     expect(dialog.className).toContain("map-marker-dialog");
     expect(screen.getByLabelText("Title")).toBeTruthy();
     expect(screen.getByLabelText("Category")).toHaveProperty("value", "General");
+    expect(screen.getByLabelText("Text").hasAttribute("required")).toBe(false);
     expect(screen.getByRole("option", { name: "General" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Landmarks" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add note category" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add note category" })).toBeNull();
+  });
+
+  it("stores annotations in per-user map settings instead of shared marker APIs", async () => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({}),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        ...globalThis.crypto,
+        randomUUID: vi.fn(() => "annotation-id")
+      }
+    });
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Annotation" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Add annotation" });
+    expect(dialog.className).toContain("map-marker-dialog");
+    expect(screen.getByLabelText("Title")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Text")).toHaveProperty("value", "");
+
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Private waypoint" }
+    });
+    fireEvent.change(screen.getByLabelText("Text"), {
+      target: { value: "Personal reminder" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByRole("button", { name: "Annotation Private waypoint at 125, 140" })).toBeTruthy();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/settings",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/maps/map-1/markers",
+      expect.objectContaining({ method: "POST" })
+    );
+    const settingsCall = (fetchMock.mock.calls as unknown as Array<[unknown, RequestInit | undefined]>)
+      .find(([url]) => url === "/api/maps/map-1/settings");
+    const settingsBody = JSON.parse(String((settingsCall?.[1] as RequestInit | undefined)?.body));
+    expect(settingsBody.annotations).toEqual([
+      {
+        id: "annotation-annotation-id",
+        text: "Personal reminder",
+        title: "Private waypoint",
+        type: "annotation",
+        x: 125,
+        y: 140
+      }
+    ]);
+  });
+
+  it("saves notes without text", async () => {
+    const savedNote = {
+      category: "General",
+      id: "note-1",
+      text: "",
+      title: "Mine entrance",
+      type: "note",
+      x: 125,
+      y: 140
+    } as const;
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({ marker: savedNote }),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Note" }));
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "Mine entrance" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/markers",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      })
+    ));
+    const requestInit = (fetchMock.mock.calls[0] as [unknown, RequestInit | undefined] | undefined)?.[1];
+    expect(requestInit).toBeDefined();
+
+    if (requestInit === undefined) {
+      return;
+    }
+
+    expect(JSON.parse(String(requestInit.body))).toEqual({
+      category: "General",
+      text: "",
+      title: "Mine entrance",
+      type: "note",
+      x: 125,
+      y: 140
+    });
+    expect(screen.getByRole("button", { name: "Note General - Mine entrance at 125, 140" })).toBeTruthy();
   });
 
   it("opens a rift create form with optional date, time, and notes fields", async () => {
@@ -1625,13 +1896,7 @@ describe("MapPage", () => {
     expect(screen.queryByRole("button", { name: "Add note category" })).toBeNull();
   });
 
-  it("allows admins to add a note category from the note form", async () => {
-    const fetchMock = vi.fn(async () => ({
-      json: async () => ({ category: { id: "category-hotas", name: "HotA" } }),
-      ok: true
-    })) as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
+  it("hides note category creation from the note form for admins", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
       initialNoteCategories: noteCategories,
@@ -1648,21 +1913,9 @@ describe("MapPage", () => {
       clientY: 140
     });
     fireEvent.click(screen.getByRole("menuitem", { name: "Note" }));
-    fireEvent.click(screen.getByRole("button", { name: "Add note category" }));
-    fireEvent.change(screen.getByLabelText("New category"), {
-      target: { value: "HotA" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Save category" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/maps/map-1/note-categories",
-      {
-        body: JSON.stringify({ name: "HotA" }),
-        headers: { "content-type": "application/json" },
-        method: "POST"
-      }
-    ));
-    await waitFor(() => expect(screen.getByLabelText("Category")).toHaveProperty("value", "HotA"));
+    expect(screen.queryByRole("button", { name: "Add note category" })).toBeNull();
+    expect(screen.queryByLabelText("New category")).toBeNull();
   });
 
   it("shows cursor-following dark hover details instead of inline hover cards", () => {
@@ -1709,21 +1962,20 @@ describe("MapPage", () => {
       clientY: 330
     });
 
-    const towerDetails = screen.getByRole("tooltip", { name: "Tower: Mako 945" });
+    const towerDetails = screen.getByRole("tooltip", { name: "Map items at 320, 330" });
     expect(towerDetails.className).toContain("map-hover-details");
     expect(towerDetails.style.left).toBe("334px");
     expect(towerDetails.style.top).toBe("344px");
-    expect(screen.getByText("Tower: Mako 945")).toBeTruthy();
-    expect(screen.getByText("QL")).toBeTruthy();
-    expect(screen.getByText("88.50")).toBeTruthy();
-    expect(screen.getByText("DMG")).toBeTruthy();
-    expect(screen.getByText("1.25")).toBeTruthy();
-    expect(screen.getByText("Last Modified")).toBeTruthy();
-    expect(screen.getByText("Sam")).toBeTruthy();
+    expect(screen.getByText("Map items at 320, 330")).toBeTruthy();
+    const towerPill = within(towerDetails).getByTestId("hover-marker-pill");
+    expect(towerPill.querySelector(".map-context-marker-title")?.textContent).toBe("Mako 945");
+    expect(towerPill.querySelectorAll(".map-context-marker-meta")[0]?.textContent).toBe("Tower | QL 88.50 | DMG 1.25");
+    expect(towerPill.querySelectorAll(".map-context-marker-meta")[1]?.textContent).toBe("Tower type: Freedom Isles");
+    expect(towerPill.querySelector(".map-context-marker-modifier")?.textContent).toBe("Last Modified: Sam");
     expect(screen.queryByText("Creator")).toBeNull();
 
     fireEvent.mouseLeave(tower);
-    expect(screen.queryByRole("tooltip", { name: "Tower: Mako 945" })).toBeNull();
+    expect(screen.queryByRole("tooltip", { name: "Map items at 320, 330" })).toBeNull();
 
     const deed = screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" });
     fireEvent.mouseMove(deed, {
@@ -1731,16 +1983,14 @@ describe("MapPage", () => {
       clientY: 430
     });
 
-    expect(screen.getByRole("tooltip", { name: "Deed: Oak Harbour" })).toBeTruthy();
-    expect(screen.getByText("Deed: Oak Harbour")).toBeTruthy();
+    const deedDetails = screen.getByRole("tooltip", { name: "Map items at 420, 430" });
+    expect(within(deedDetails).getByText("Map items at 420, 430")).toBeTruthy();
+    const deedPill = within(deedDetails).getByTestId("hover-marker-pill");
+    expect(deedPill.querySelector(".map-context-marker-title")?.textContent).toBe("Oak Harbour");
+    expect(deedPill.querySelector(".map-context-marker-meta")?.textContent).toBe("Deed | Mayor Founder | 11x11");
+    expect(deedPill.querySelector(".map-context-marker-modifier")?.textContent).toBe("Last Modified: Kichi");
     expect(screen.queryByText("Name")).toBeNull();
-    expect(screen.getByText("Mayor")).toBeTruthy();
-    expect(screen.getByText("Founder")).toBeTruthy();
-    expect(screen.getByText("Dimensions")).toBeTruthy();
-    expect(screen.getByText("11x11")).toBeTruthy();
-    expect(screen.getByText("Founding date")).toBeTruthy();
-    expect(screen.getByText("2026-05-10")).toBeTruthy();
-    expect(screen.getByText("Kichi")).toBeTruthy();
+    expect(screen.queryByText("Founding date")).toBeNull();
   });
 
   it("keeps hover and tap details inside viewport edges", () => {
@@ -1766,7 +2016,7 @@ describe("MapPage", () => {
       clientY: 2040
     });
 
-    const details = screen.getByRole("tooltip", { name: "Tower: Mako 945" });
+    const details = screen.getByRole("tooltip", { name: "Map items at 2040, 2040" });
     expect(details.style.left).toBe("1756px");
     expect(details.style.top).toBe("1816px");
   });
@@ -1790,12 +2040,14 @@ describe("MapPage", () => {
           y: 600
         },
         {
-          category: "General",
-          id: "note-1",
-          lastModifiedBy: "Kichi",
-          text: "Hidden under the deed overlay",
-          title: "Buried note",
-          type: "note",
+          damage: "0.25",
+          id: "tower-1",
+          lastModifiedBy: "Alyeska",
+          makerName: "Mako",
+          makerNumber: "945",
+          ql: "89.50",
+          towerType: "Mol-Rehan",
+          type: "tower",
           x: 500,
           y: 600
         }
@@ -1812,7 +2064,6 @@ describe("MapPage", () => {
     const details = screen.getByRole("tooltip", { name: "Map items at 500, 600" });
     expect(details.className).toContain("map-hover-details");
     expect(within(details).queryByText("Deed: Oak Harbour")).toBeNull();
-    expect(within(details).queryByText("General - Buried note")).toBeNull();
 
     const pills = within(details).getAllByTestId("hover-marker-pill");
     expect(pills).toHaveLength(2);
@@ -1821,9 +2072,10 @@ describe("MapPage", () => {
     expect(pills[0]?.querySelector(".map-context-marker-meta")?.textContent).toBe("Deed | Mayor Founder | 11x11");
     expect(pills[0]?.querySelector(".map-context-marker-modifier")?.textContent).toBe("Last Modified: Sam");
     expect(pills[1]?.className).toContain("map-context-marker-row");
-    expect(pills[1]?.querySelector(".map-context-marker-title")?.textContent).toBe("Buried note");
-    expect(pills[1]?.querySelector(".map-context-marker-meta")?.textContent).toBe("Note | General");
-    expect(pills[1]?.querySelector(".map-context-marker-modifier")?.textContent).toBe("Last Modified: Kichi");
+    expect(pills[1]?.querySelector(".map-context-marker-title")?.textContent).toBe("Mako 945");
+    expect(pills[1]?.querySelectorAll(".map-context-marker-meta")[0]?.textContent).toBe("Tower | QL 89.50 | DMG 0.25");
+    expect(pills[1]?.querySelectorAll(".map-context-marker-meta")[1]?.textContent).toBe("Tower type: Mol-Rehan");
+    expect(pills[1]?.querySelector(".map-context-marker-modifier")?.textContent).toBe("Last Modified: Alyeska");
   });
 
   it("displays incomplete tower creator numbers as unknown", async () => {
@@ -1855,7 +2107,7 @@ describe("MapPage", () => {
       clientY: 330
     });
 
-    expect(screen.getByRole("tooltip", { name: "Tower: Mako - ???" })).toBeTruthy();
+    expect(screen.getByRole("tooltip", { name: "Map items at 320, 330" })).toBeTruthy();
 
     fireEvent.contextMenu(tower, {
       clientX: 250,
@@ -1877,7 +2129,8 @@ describe("MapPage", () => {
           makerName: "Mako",
           makerNumber: "",
           planned: false,
-          ql: "88.50"
+          ql: "88.50",
+          towerType: "Freedom Isles"
         }),
         headers: { "content-type": "application/json" },
         method: "PATCH"
@@ -1955,7 +2208,101 @@ describe("MapPage", () => {
           makerName: "Mako",
           makerNumber: "945",
           planned: false,
-          ql: "88.50"
+          ql: "88.50",
+          towerType: "Freedom Isles"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      }
+    ));
+  });
+
+  it("resizes an edited deed by shift-dragging its overlay before saving", async () => {
+    const savedDeed = {
+      east: 5,
+      foundingDate: null,
+      founder: "Founder",
+      id: "deed-1",
+      name: "Oak Harbour",
+      north: 10,
+      perimeter: 5,
+      south: 5,
+      type: "deed",
+      west: 10,
+      x: 500,
+      y: 600
+    } as const;
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({ marker: savedDeed }),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          ...savedDeed,
+          north: 5,
+          west: 5
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
+      clientX: 500,
+      clientY: 600
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Deed Oak Harbour" }));
+
+    const editedOverlay = screen.getByTestId("deed-overlay-deed-1");
+    const startLeft = Number.parseFloat(editedOverlay.style.left);
+    const startTop = Number.parseFloat(editedOverlay.style.top);
+    fireEvent.pointerDown(editedOverlay, {
+      button: 0,
+      clientX: startLeft,
+      clientY: startTop,
+      pointerId: 61,
+      shiftKey: true
+    });
+    fireEvent.pointerMove(window, {
+      clientX: startLeft - 5,
+      clientY: startTop - 5,
+      pointerId: 61,
+      shiftKey: true
+    });
+    fireEvent.pointerUp(window, { pointerId: 61 });
+
+    await waitFor(() => expect(screen.getByLabelText("North")).toHaveProperty("value", "10"));
+    expect(screen.getByLabelText("West")).toHaveProperty("value", "10");
+    expect(screen.getByLabelText("East")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("South")).toHaveProperty("value", "5");
+    expect(screen.getByLabelText("X")).toHaveProperty("value", "500");
+    expect(screen.getByLabelText("Y")).toHaveProperty("value", "600");
+    expect(screen.getByTestId("deed-overlay-deed-1").style.left).toBe(`${startLeft - 5}px`);
+    expect(screen.getByTestId("deed-overlay-deed-1").style.top).toBe(`${startTop - 5}px`);
+    expect(screen.getByTestId("deed-overlay-deed-1").style.width).toBe("16px");
+    expect(screen.getByTestId("deed-overlay-deed-1").style.height).toBe("16px");
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/markers/deed/deed-1",
+      {
+        body: JSON.stringify({
+          type: "deed",
+          x: 500,
+          y: 600,
+          east: 5,
+          foundingDate: "",
+          founder: "Founder",
+          name: "Oak Harbour",
+          north: 10,
+          perimeter: 5,
+          south: 5,
+          west: 10
         }),
         headers: { "content-type": "application/json" },
         method: "PATCH"
@@ -2006,7 +2353,8 @@ describe("MapPage", () => {
           makerName: "Kichi",
           makerNumber: "1",
           planned: false,
-          ql: "88.50"
+          ql: "88.50",
+          towerType: "Freedom Isles"
         }),
         headers: { "content-type": "application/json" },
         method: "PATCH"
@@ -2022,6 +2370,7 @@ describe("MapPage", () => {
       makerNumber: "945",
       planned: true,
       ql: "88.50",
+      towerType: "Mol-Rehan",
       type: "tower",
       x: 250,
       y: 300
@@ -2050,7 +2399,9 @@ describe("MapPage", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit Tower Mako 945" }));
 
     const plannedCheckbox = screen.getByRole("checkbox", { name: "Planned" });
+    expect(screen.queryByLabelText("Quick Input")).toBeNull();
     expect(plannedCheckbox).toHaveProperty("checked", false);
+    expect(screen.getByLabelText("Tower type")).toHaveProperty("value", "Mol-Rehan");
     fireEvent.click(plannedCheckbox);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -2065,7 +2416,8 @@ describe("MapPage", () => {
           makerName: "Mako",
           makerNumber: "945",
           planned: true,
-          ql: "88.50"
+          ql: "88.50",
+          towerType: "Mol-Rehan"
         }),
         headers: { "content-type": "application/json" },
         method: "PATCH"
@@ -2144,6 +2496,7 @@ describe("MapPage", () => {
       makerNumber: "",
       planned: true,
       ql: "",
+      towerType: "Freedom Isles",
       type: "tower",
       x: 350,
       y: 300
@@ -2350,7 +2703,7 @@ describe("MapPage", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("shows note hover details as category and title with note text underneath", () => {
+  it("shows note hover details with the grouped marker interface", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -2375,8 +2728,50 @@ describe("MapPage", () => {
       clientY: 730
     });
 
-    expect(screen.getByRole("tooltip", { name: "Landmarks - Mine entrance" })).toBeTruthy();
-    expect(screen.getByText("Scout here")).toBeTruthy();
+    const details = screen.getByRole("tooltip", { name: "Map items at 720, 730" });
+    const pill = within(details).getByTestId("hover-marker-pill");
+    expect(pill.querySelector(".map-context-marker-title")?.textContent).toBe("Mine entrance");
+    expect(pill.querySelector(".map-context-marker-meta")?.textContent).toBe("Note | Landmarks");
+    expect(pill.querySelector(".map-context-marker-modifier")?.textContent).toBe("Last Modified: Unknown");
+    expect(screen.queryByText("Scout here")).toBeNull();
+  });
+
+  it("renders note pips with category-specific color, size, and shape", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          category: "Landmarks",
+          id: "note-1",
+          text: "Scout here",
+          title: "Mine entrance",
+          type: "note",
+          x: 700,
+          y: 800
+        }
+      ],
+      initialNoteCategories: noteCategories,
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        noteCategoryColors: {
+          "category-landmarks": "#00ffaa"
+        },
+        noteCategoryMarkerShapes: {
+          "category-landmarks": "square"
+        },
+        noteCategoryPipSizes: {
+          "category-landmarks": 8
+        }
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const note = screen.getByTestId("note-center-note-1");
+
+    expect(note.className).toContain("map-marker--note-shape-square");
+    expect(note.style.getPropertyValue("--map-note-category-color")).toBe("#00ffaa");
+    expect(note.style.width).toBe("8px");
+    expect(note.style.height).toBe("8px");
   });
 
   it("shows hover details for rifts, camps, and minedoors", () => {
@@ -2427,12 +2822,11 @@ describe("MapPage", () => {
       clientX: 900,
       clientY: 1000
     });
-    expect(screen.getByRole("tooltip", { name: "Rift" })).toBeTruthy();
-    expect(screen.getByText("Date of arrival")).toBeTruthy();
-    expect(screen.getByText("2026-05-10")).toBeTruthy();
-    expect(screen.getByText("Estimated rift time")).toBeTruthy();
-    expect(screen.getByText("2026-05-10T18:30")).toBeTruthy();
-    expect(screen.getByText("Bring cotton")).toBeTruthy();
+    const riftDetails = screen.getByRole("tooltip", { name: "Map items at 900, 1000" });
+    const riftPill = within(riftDetails).getByTestId("hover-marker-pill");
+    expect(riftPill.querySelector(".map-context-marker-title")?.textContent).toBe("Rift");
+    expect(riftPill.querySelector(".map-context-marker-meta")?.textContent).toBe("Rift | 2026-05-10T18:30");
+    expect(within(riftDetails).queryByText("Bring cotton")).toBeNull();
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Camp Goblin at 910, 1010" }), {
       clientX: 910,
@@ -2460,14 +2854,11 @@ describe("MapPage", () => {
       clientX: 930,
       clientY: 1030
     });
-    expect(screen.getByRole("tooltip", { name: "Locate Soul: Funkiey" })).toBeTruthy();
-    expect(screen.getByText("Caster facing")).toBeTruthy();
-    expect(screen.getByText("North")).toBeTruthy();
-    expect(screen.getByText("Direction")).toBeTruthy();
-    expect(screen.getByText("Ahead left")).toBeTruthy();
-    expect(screen.getByText("Distance")).toBeTruthy();
-    expect(screen.getByText("50-199 tiles")).toBeTruthy();
-    expect(screen.getByText("Corpse result")).toBeTruthy();
+    const locateSoulDetails = screen.getByRole("tooltip", { name: "Map items at 930, 1030" });
+    const locateSoulPill = within(locateSoulDetails).getByTestId("hover-marker-pill");
+    expect(locateSoulPill.querySelector(".map-context-marker-title")?.textContent).toBe("Locate Soul Funkiey");
+    expect(locateSoulPill.querySelector(".map-context-marker-meta")?.textContent).toBe("Locate Soul | Ahead left | 50-199 tiles");
+    expect(within(locateSoulDetails).queryByText("Corpse result")).toBeNull();
   });
 
   it("moves compact map layer controls into the settings cog", () => {
@@ -2554,6 +2945,7 @@ describe("MapPage", () => {
       "Mission Grid",
       "Search Lines",
       "Markers",
+      "Annotations",
       "Towers",
       "Planned Towers",
       "Deeds",
@@ -2570,6 +2962,7 @@ describe("MapPage", () => {
       "Locate Souls"
     ]);
     expect(layerControls.getByRole("checkbox", { name: "Overlays" })).toBeTruthy();
+    expect(layerControls.getByRole("checkbox", { name: "Annotations" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Towers" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Planned Towers" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Tower Names" })).toBeTruthy();
@@ -2587,6 +2980,7 @@ describe("MapPage", () => {
     expect(layerControls.getByRole("checkbox", { name: "Sector Grid" })).toBeTruthy();
     expect(layerControls.getByRole("checkbox", { name: "Mission Grid" })).toBeTruthy();
     expect(layerControls.getByLabelText("Towers color")).toBeTruthy();
+    expect(layerControls.getByLabelText("Annotations color")).toHaveProperty("value", "#38bdf8");
     expect(layerControls.getByLabelText("Deeds color")).toBeTruthy();
     expect(layerControls.getByLabelText("Notes color")).toBeTruthy();
     expect(layerControls.getByLabelText("Camps color")).toHaveProperty("value", "#facc15");
@@ -2610,6 +3004,7 @@ describe("MapPage", () => {
       layerControls.getByRole("slider", { name: "Bridges opacity" })
     ]);
     expect(layerControls.getByRole("slider", { name: "Towers opacity" })).toHaveProperty("value", "100");
+    expect(layerControls.getByRole("slider", { name: "Annotations opacity" })).toHaveProperty("value", "50");
     expect(layerControls.getByRole("slider", { name: "Deeds opacity" })).toHaveProperty("value", "100");
     expect(layerControls.getByRole("slider", { name: "Notes opacity" })).toHaveProperty("value", "50");
     expect(layerControls.getByRole("slider", { name: "Locate Souls opacity" })).toHaveProperty("value", "50");
@@ -2692,6 +3087,226 @@ describe("MapPage", () => {
 
     expect(screen.getByTestId("tower-center-tower-built")).toBeTruthy();
     expect(screen.queryByTestId("tower-center-tower-planned")).toBeNull();
+  });
+
+  it("lets writers add and update note category presentation from settings", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (url === "/api/maps/map-1/settings" && init?.method === "PATCH") {
+        return {
+          json: async () => ({}),
+          ok: true
+        };
+      }
+
+      if (url === "/api/maps/map-1/note-categories" && init?.method === "POST") {
+        return {
+          json: async () => ({
+            category: { color: null, id: "category-mines", markerShape: "circle", name: "Mines", pipSize: 3 }
+          }),
+          ok: true
+        };
+      }
+
+      return {
+        json: async () => ({
+          category: { color: null, id: "category-landmarks", markerShape: "square", name: "Mines", pipSize: 8 }
+        }),
+        ok: true
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          category: "Landmarks",
+          id: "note-1",
+          text: "Scout here",
+          title: "Mine entrance",
+          type: "note",
+          x: 700,
+          y: 800
+        }
+      ],
+      initialNoteCategories: noteCategories,
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        noteCategoryColors: {
+          "category-landmarks": "#00ffaa"
+        },
+        noteCategoryMarkerShapes: {
+          "category-landmarks": "triangle"
+        },
+        noteCategoryPipSizes: {
+          "category-landmarks": 6
+        }
+      },
+      map: activeMap,
+      viewer: writerViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const categoryControls = expandNoteCategories();
+
+    expect(categoryControls.getByRole("button", { name: "Add note category" })).toBeTruthy();
+    expect(categoryControls.queryByRole("button", { name: "Delete Landmarks category" })).toBeNull();
+    expect(categoryControls.getByLabelText("Landmarks color")).toHaveProperty("value", "#00ffaa");
+    expect(categoryControls.getByRole("spinbutton", { name: "Landmarks pip size" })).toHaveProperty("value", "6");
+    expect(categoryControls.getByRole("combobox", { name: "Landmarks marker shape" })).toHaveProperty("value", "triangle");
+
+    fireEvent.change(categoryControls.getByLabelText("Landmarks name"), {
+      target: { value: "Mines" }
+    });
+    fireEvent.change(categoryControls.getByLabelText("Landmarks color"), {
+      target: { value: "#ff00ff" }
+    });
+    fireEvent.change(categoryControls.getByRole("spinbutton", { name: "Landmarks pip size" }), {
+      target: { value: "8" }
+    });
+    fireEvent.change(categoryControls.getByRole("combobox", { name: "Landmarks marker shape" }), {
+      target: { value: "square" }
+    });
+    const saveButton = categoryControls.getByRole("button", { name: "Save Landmarks category" });
+
+    expect(saveButton.textContent).toBe("✓");
+    fireEvent.click(saveButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/note-categories/category-landmarks",
+      expect.objectContaining({
+        body: JSON.stringify({
+          name: "Mines"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+    expect(screen.getByRole("button", { name: "Note Mines - Mine entrance at 700, 800" })).toBeTruthy();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/settings",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+    const settingsCall = fetchMock.mock.calls.find((call) => call[0] === "/api/maps/map-1/settings");
+    const settingsBody = JSON.parse(String((settingsCall?.[1] as RequestInit | undefined)?.body));
+    expect(settingsBody.noteCategoryColors).toEqual({
+      "category-landmarks": "#ff00ff"
+    });
+    expect(settingsBody.noteCategoryMarkerShapes).toEqual({
+      "category-landmarks": "square"
+    });
+    expect(settingsBody.noteCategoryPipSizes).toEqual({
+      "category-landmarks": 8
+    });
+
+    fireEvent.click(categoryControls.getByRole("button", { name: "Add note category" }));
+    fireEvent.change(categoryControls.getByLabelText("New note category name"), {
+      target: { value: "Mines" }
+    });
+    fireEvent.click(categoryControls.getByRole("button", { name: "Create note category" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/note-categories",
+      expect.objectContaining({
+        body: JSON.stringify({
+          name: "Mines"
+        }),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      })
+    ));
+  });
+
+  it("lets admins delete note categories and reassign visible notes to General", async () => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({
+        category: { id: "category-landmarks", reassignedTo: "General" }
+      }),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          category: "Landmarks",
+          id: "note-1",
+          text: "Scout here",
+          title: "Mine entrance",
+          type: "note",
+          x: 700,
+          y: 800
+        }
+      ],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+    const confirmMock = vi.fn(() => true);
+    vi.stubGlobal("confirm", confirmMock);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const categoryControls = expandNoteCategories();
+    const deleteButton = categoryControls.getByRole("button", { name: "Delete Landmarks category" });
+
+    expect(deleteButton.textContent).toBe("×");
+    fireEvent.click(deleteButton);
+
+    expect(confirmMock).toHaveBeenCalledWith("Delete the Landmarks note category? Notes in this category will move to General.");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/note-categories/category-landmarks",
+      { method: "DELETE" }
+    ));
+    expect(screen.getByRole("button", { name: "Note General - Mine entrance at 700, 800" })).toBeTruthy();
+  });
+
+  it("keeps note categories collapsed by default and cancels category deletion when not confirmed", () => {
+    const fetchMock = vi.fn();
+    const confirmMock = vi.fn(() => false);
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    vi.stubGlobal("confirm", confirmMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    const categoryControls = within(screen.getByRole("group", { name: "Note Categories" }));
+    const toggle = categoryControls.getByRole("button", { name: "Note Categories" });
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(categoryControls.queryByLabelText("Landmarks name")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(categoryControls.getByRole("button", { name: "Delete Landmarks category" }));
+
+    expect(confirmMock).toHaveBeenCalledWith("Delete the Landmarks note category? Notes in this category will move to General.");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("prevents read-only users from changing note categories in settings", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: readOnlyViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const categoryControls = expandNoteCategories();
+
+    expect(categoryControls.queryByRole("button", { name: "Add note category" })).toBeNull();
+    expect(categoryControls.queryByRole("button", { name: "Save Landmarks category" })).toBeNull();
+    expect(categoryControls.getByLabelText("Landmarks name")).toHaveProperty("disabled", true);
+    expect(categoryControls.getByLabelText("Landmarks color")).toHaveProperty("disabled", true);
   });
 
   it("toggles the WurmMaps sector grid separately from the mission grid", () => {
@@ -3577,17 +4192,23 @@ describe("MapPage", () => {
       clientX: 150,
       clientY: 130
     });
-    expect(screen.getByRole("tooltip", { name: "Bridge: Cedar Bridge" })).toBeTruthy();
+    let pathDetails = screen.getByRole("tooltip", { name: "Map items at -724, -764" });
+    expect(within(pathDetails).getByText("Cedar Bridge")).toBeTruthy();
+    expect(within(pathDetails).getByText("Bridge | 2 points | Width 2")).toBeTruthy();
     fireEvent.mouseMove(canal, {
       clientX: 150,
       clientY: 130
     });
-    expect(screen.getByRole("tooltip", { name: "Canal: West Canal" })).toBeTruthy();
+    pathDetails = screen.getByRole("tooltip", { name: "Map items at -724, -764" });
+    expect(within(pathDetails).getByText("West Canal")).toBeTruthy();
+    expect(within(pathDetails).getByText("Canal | 2 points | Width 2")).toBeTruthy();
     fireEvent.mouseMove(highway, {
       clientX: 150,
       clientY: 130
     });
-    expect(screen.getByRole("tooltip", { name: "Highway: East Road" })).toBeTruthy();
+    pathDetails = screen.getByRole("tooltip", { name: "Map items at -724, -764" });
+    expect(within(pathDetails).getByText("East Road")).toBeTruthy();
+    expect(within(pathDetails).getByText("Highway | 2 points | Width 2")).toBeTruthy();
 
     fireEvent.contextMenu(bridge, {
       clientX: 150,
@@ -3632,7 +4253,7 @@ describe("MapPage", () => {
 
     const label = screen.getByTestId("tower-name-label-tower-1");
     expect(label.textContent).toBe("Mako 945");
-    expect(screen.queryByRole("tooltip", { name: "Tower: Mako 945" })).toBeNull();
+    expect(screen.queryByRole("tooltip", { name: "Map items at 420, 430" })).toBeNull();
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 420,
@@ -3640,7 +4261,7 @@ describe("MapPage", () => {
     });
 
     expect(screen.queryByTestId("tower-name-label-tower-1")).toBeNull();
-    expect(screen.getByRole("tooltip", { name: "Tower: Mako 945" })).toBeTruthy();
+    expect(screen.getByRole("tooltip", { name: "Map items at 420, 430" })).toBeTruthy();
 
     fireEvent.mouseLeave(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }));
 
@@ -3677,7 +4298,7 @@ describe("MapPage", () => {
 
     const label = screen.getByTestId("deed-name-label-deed-1");
     expect(label.textContent).toBe("Oak Harbour");
-    expect(screen.queryByRole("tooltip", { name: "Deed: Oak Harbour" })).toBeNull();
+    expect(screen.queryByRole("tooltip", { name: "Map items at 420, 430" })).toBeNull();
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" }), {
       clientX: 420,
@@ -3685,7 +4306,7 @@ describe("MapPage", () => {
     });
 
     expect(screen.queryByTestId("deed-name-label-deed-1")).toBeNull();
-    expect(screen.getByRole("tooltip", { name: "Deed: Oak Harbour" })).toBeTruthy();
+    expect(screen.getByRole("tooltip", { name: "Map items at 420, 430" })).toBeTruthy();
 
     fireEvent.mouseLeave(screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" }));
 
@@ -4432,6 +5053,7 @@ describe("MapPage", () => {
     expect(screen.getByTestId("context-marker-row-tower-1")).toBeTruthy();
     expect(screen.getByText("Mako 945")).toBeTruthy();
     expect(screen.getByText("Tower | QL 89.50 | DMG 0.25")).toBeTruthy();
+    expect(screen.getByText("Tower type: Freedom Isles")).toBeTruthy();
     expect(screen.getByTestId("context-marker-row-tower-1").style.getPropertyValue("--map-context-marker-color")).toBe("#ffffff");
     expect(window.location.href).toBe(`${window.location.origin}/map?x=250&y=300`);
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit Tower Mako 945" }));

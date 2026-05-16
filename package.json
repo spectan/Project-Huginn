@@ -1,6 +1,6 @@
 {
   "name": "wurm-map-util",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -15,7 +15,7 @@
     "start": "next start",
     "seed:admin": "node scripts/seed-admin.mjs",
     "lint": "eslint . --max-warnings=0",
-    "typecheck": "next typegen && tsc --noEmit",
+    "typecheck": "prisma generate && next typegen && tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:watch": "vitest",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build"

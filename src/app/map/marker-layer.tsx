@@ -11,12 +11,22 @@ import {
   locateSoulOverlayIntersectsMap
 } from "@/lib/domain/locate-soul";
 import { formatTowerCreator } from "@/lib/domain/markers";
+import {
+  DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
+  DEFAULT_NOTE_CATEGORY_PIP_SIZE
+} from "@/lib/domain/note-categories";
 import type {
   MarkerColors,
   MarkerOpacities,
   MarkerVisibility,
+  NoteCategory,
   WorkspaceMarker
 } from "@/lib/markers/marker-types";
+import type {
+  NoteCategoryColors,
+  NoteCategoryMarkerShapes,
+  NoteCategoryPipSizes
+} from "@/lib/map-settings/map-settings";
 
 type MarkerLayerProps = {
   activeRelocatableMarkerId: string | null;
@@ -25,7 +35,12 @@ type MarkerLayerProps = {
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markers: WorkspaceMarker[];
+  noteCategories: NoteCategory[];
+  noteCategoryColors: NoteCategoryColors;
+  noteCategoryMarkerShapes: NoteCategoryMarkerShapes;
+  noteCategoryPipSizes: NoteCategoryPipSizes;
   onContextMenu(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
+  onDeedOverlayPointerDown(marker: WorkspaceMarker, event: PointerEvent<Element>): void;
   onHoverEnd(): void;
   onHoverMove(marker: WorkspaceMarker, event: MouseEvent<Element>): void;
   onMarkerPointerDown(marker: WorkspaceMarker, event: PointerEvent<Element>): void;
@@ -47,7 +62,12 @@ export function MarkerLayer({
   markerColors,
   markerOpacities,
   markers,
+  noteCategories,
+  noteCategoryColors,
+  noteCategoryMarkerShapes,
+  noteCategoryPipSizes,
   onContextMenu,
+  onDeedOverlayPointerDown,
   onHoverEnd,
   onHoverMove,
   onMarkerPointerDown,
@@ -57,7 +77,7 @@ export function MarkerLayer({
 }: MarkerLayerProps) {
   return (
     <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
-      {markers.map((marker) => renderMarker(marker, activeRelocatableMarkerId, highlightedMarkerIds, mapSize, markerColors, markerOpacities, onContextMenu, onHoverEnd, onHoverMove, onMarkerPointerDown, roadwayEditMode, view, visibility))}
+      {markers.map((marker) => renderMarker(marker, activeRelocatableMarkerId, highlightedMarkerIds, mapSize, markerColors, markerOpacities, noteCategories, noteCategoryColors, noteCategoryMarkerShapes, noteCategoryPipSizes, onContextMenu, onDeedOverlayPointerDown, onHoverEnd, onHoverMove, onMarkerPointerDown, roadwayEditMode, view, visibility))}
     </div>
   );
 }
@@ -69,7 +89,12 @@ function renderMarker(
   mapSize: { heightPx: number; widthPx: number },
   markerColors: MarkerColors,
   markerOpacities: MarkerOpacities,
+  noteCategories: NoteCategory[],
+  noteCategoryColors: NoteCategoryColors,
+  noteCategoryMarkerShapes: NoteCategoryMarkerShapes,
+  noteCategoryPipSizes: NoteCategoryPipSizes,
   onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
+  onDeedOverlayPointerDown: (marker: WorkspaceMarker, event: PointerEvent<Element>) => void,
   onHoverEnd: () => void,
   onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
   onMarkerPointerDown: (marker: WorkspaceMarker, event: PointerEvent<Element>) => void,
@@ -224,6 +249,28 @@ function renderMarker(
     );
   }
 
+  if (marker.type === "annotation") {
+    if (!visibility.annotations) {
+      return null;
+    }
+
+    return (
+      <button
+        aria-label={`Annotation ${marker.title} at ${marker.x}, ${marker.y}`}
+        className={getMarkerClassName("map-marker map-marker--note map-marker--note-shape-triangle map-marker--annotation", isHighlighted, isRelocatable)}
+        data-testid={`annotation-center-${marker.id}`}
+        key={marker.id}
+        onContextMenu={(event) => onContextMenu(marker, event)}
+        onMouseEnter={(event) => onHoverMove(marker, event)}
+        onMouseLeave={onHoverEnd}
+        onMouseMove={(event) => onHoverMove(marker, event)}
+        onPointerDown={(event) => onMarkerPointerDown(marker, event)}
+        style={getAnnotationMarkerStyle(marker.x, marker.y, markerColors.annotations, view)}
+        type="button"
+      />
+    );
+  }
+
   if (marker.type === "deed") {
     if (!visibility.deeds) {
       return null;
@@ -252,6 +299,7 @@ function renderMarker(
               onMouseEnter={(event) => onHoverMove(marker, event)}
               onMouseLeave={onHoverEnd}
               onMouseMove={(event) => onHoverMove(marker, event)}
+              onPointerDown={(event) => onDeedOverlayPointerDown(marker, event)}
               style={{
                 ...deedOverlayStyle,
                 opacity: percentageToOpacity(markerOpacities.deeds)
@@ -505,10 +553,19 @@ function renderMarker(
     return null;
   }
 
+  const noteCategory = getNoteCategory(marker.category, noteCategories);
+  const noteColor = noteCategory === null ? markerColors.notes : noteCategoryColors[noteCategory.id] ?? markerColors.notes;
+  const noteShape = noteCategory === null
+    ? DEFAULT_NOTE_CATEGORY_MARKER_SHAPE
+    : noteCategoryMarkerShapes[noteCategory.id] ?? noteCategory.markerShape;
+  const noteSize = noteCategory === null
+    ? DEFAULT_NOTE_CATEGORY_PIP_SIZE
+    : noteCategoryPipSizes[noteCategory.id] ?? noteCategory.pipSize;
+
   return (
     <button
       aria-label={`Note ${marker.category} - ${marker.title} at ${marker.x}, ${marker.y}`}
-      className={getMarkerClassName("map-marker map-marker--note", isHighlighted, isRelocatable)}
+      className={getMarkerClassName(`map-marker map-marker--note map-marker--note-shape-${noteShape}`, isHighlighted, isRelocatable)}
       data-testid={`note-center-${marker.id}`}
       key={marker.id}
       onContextMenu={(event) => onContextMenu(marker, event)}
@@ -516,10 +573,14 @@ function renderMarker(
       onMouseLeave={onHoverEnd}
       onMouseMove={(event) => onHoverMove(marker, event)}
       onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-      style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.notes, view)}
+      style={getNoteMarkerStyle(marker.x, marker.y, noteSize, noteColor, view)}
       type="button"
     />
   );
+}
+
+function getNoteCategory(categoryName: string, noteCategories: NoteCategory[]): NoteCategory | null {
+  return noteCategories.find((category) => category.name === categoryName) ?? null;
 }
 
 function getMarkerClassName(baseClassName: string, isHighlighted: boolean, isRelocatable: boolean): string {
@@ -582,10 +643,43 @@ type MinedoorMarkerStyle = CSSProperties & {
   "--map-minedoor-color": string;
 };
 
+type NoteMarkerStyle = CSSProperties & {
+  "--map-note-category-color": string;
+};
+
+type AnnotationMarkerStyle = CSSProperties & {
+  "--map-note-category-color": string;
+};
+
 function getMinedoorMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): MinedoorMarkerStyle {
   return {
     ...getSingleTileStyle(x, y, view),
     "--map-minedoor-color": color
+  };
+}
+
+function getAnnotationMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): AnnotationMarkerStyle {
+  return {
+    ...getCenterTileStyle(x, y, view),
+    "--map-note-category-color": color,
+    backgroundColor: color,
+    opacity: 1
+  };
+}
+
+function getNoteMarkerStyle(x: number, y: number, size: number, color: string, view: MarkerLayerView): NoteMarkerStyle {
+  const normalizedSize = Math.min(10, Math.max(1, Math.round(size)));
+
+  return {
+    ...getScreenRectStyle({
+      height: normalizedSize,
+      width: normalizedSize,
+      x: x + 0.5 - normalizedSize / 2,
+      y: y + 0.5 - normalizedSize / 2
+    }, view),
+    "--map-note-category-color": color,
+    backgroundColor: color,
+    opacity: 1
   };
 }
 

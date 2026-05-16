@@ -2,8 +2,10 @@ import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
-import { MAX_NAME_LENGTH } from "@/lib/domain/constants";
-import { canAdminister, canReadMap } from "@/lib/domain/permissions";
+import {
+  validateNoteCategoryInput
+} from "@/lib/domain/note-categories";
+import { canReadMap, canWriteMarkers } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
 
 type RouteContext = {
@@ -28,7 +30,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const categories = await prisma.noteCategory.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    select: { color: true, id: true, markerShape: true, name: true, pipSize: true },
     where: { mapId: map.id }
   });
 
@@ -38,15 +40,15 @@ export async function GET(_request: Request, context: RouteContext) {
 export async function POST(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !canAdminister(viewer)) {
-    return NextResponse.json({ error: "Admin access is required" }, { status: 403 });
+  if (viewer === null || !canWriteMarkers(viewer)) {
+    return NextResponse.json({ error: "Write access is required" }, { status: 403 });
   }
 
   const body = await readJson(request);
-  const name = normalizeCategoryName(body);
+  const input = validateNoteCategoryInput(body);
 
-  if (name === null) {
-    return NextResponse.json({ error: "Category name is required" }, { status: 400 });
+  if (!input.ok) {
+    return NextResponse.json({ error: input.error }, { status: 400 });
   }
 
   const { mapId } = await context.params;
@@ -57,10 +59,13 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const category = await prisma.noteCategory.upsert({
-    create: { mapId: map.id, name },
+    create: {
+      mapId: map.id,
+      name: input.value.name
+    },
     update: {},
     where: {
-      mapId_name: { mapId: map.id, name }
+      mapId_name: { mapId: map.id, name: input.value.name }
     }
   });
 
@@ -73,8 +78,11 @@ export async function POST(request: Request, context: RouteContext) {
 
   return NextResponse.json({
     category: {
+      color: category.color,
       id: category.id,
-      name: category.name
+      markerShape: category.markerShape,
+      name: category.name,
+      pipSize: category.pipSize
     }
   }, { status: 201 });
 }
@@ -95,26 +103,6 @@ async function readJson(request: Request): Promise<unknown> {
   } catch {
     return null;
   }
-}
-
-function normalizeCategoryName(input: unknown): string | null {
-  if (typeof input !== "object" || input === null || !("name" in input)) {
-    return null;
-  }
-
-  const value = input.name;
-
-  if (typeof value !== "string") {
-    return null;
-  }
-
-  const trimmed = value.trim();
-
-  if (trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH) {
-    return null;
-  }
-
-  return trimmed;
 }
 
 async function recordCategoryCreatedAudit(input: {

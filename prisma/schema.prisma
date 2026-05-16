@@ -172,6 +172,7 @@ model Tower {
   makerName        String
   makerNumber      String
   planned          Boolean   @default(false)
+  towerType        String    @default("Freedom Isles")
   createdByUserId  String?
   createdBy        User?     @relation("TowerCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   updatedByUserId  String?
@@ -372,12 +373,15 @@ model PathMarker {
 }
 
 model NoteCategory {
-  id        String   @id @default(cuid())
-  mapId     String
-  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  mapId       String
+  map         Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  name        String
+  color       String?
+  markerShape String   @default("circle")
+  pipSize     Int      @default(3)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@unique([mapId, name])
   @@index([mapId])

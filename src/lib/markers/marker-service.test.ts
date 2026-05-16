@@ -79,6 +79,7 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     mapId: string;
     planned: boolean;
     qlHundredths: number | null;
+    towerType: "Freedom Isles" | "Horde of the Summoned" | "Jenn-Kellon" | "Mol-Rehan";
     x: number;
     y: number;
   }>();
@@ -92,9 +93,12 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     y: number;
   }>();
   const noteCategories = new Map<string, {
+    color: string | null;
     id: string;
+    markerShape: string;
     mapId: string;
     name: string;
+    pipSize: number;
   }>();
   const rifts = new Map<string, ModifierFields & {
     arrivalDate: Date | null;
@@ -229,9 +233,12 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
         category.mapId === deed.mapId && category.name === input.categoryName
       ));
       const category = existingCategory ?? {
+        color: null,
         id: `category-${noteCategoryCount + 1}`,
+        markerShape: "circle",
         mapId: deed.mapId,
-        name: input.categoryName
+        name: input.categoryName,
+        pipSize: 3
       };
 
       if (existingCategory === undefined) {
@@ -500,6 +507,7 @@ describe("marker service", () => {
         makerNumber: "945",
         planned: true,
         ql: "89.50",
+        towerType: "Jenn-Kellon",
         type: "tower",
         x: 25,
         y: 30
@@ -517,6 +525,7 @@ describe("marker service", () => {
         makerNumber: "945",
         planned: true,
         ql: "89.50",
+        towerType: "Jenn-Kellon",
         type: "tower",
         x: 25,
         y: 30
@@ -550,6 +559,7 @@ describe("marker service", () => {
         makerNumber: "",
         planned: true,
         ql: "",
+        towerType: "Freedom Isles",
         type: "tower",
         x: 25,
         y: 30
@@ -574,6 +584,35 @@ describe("marker service", () => {
     expect(result).toEqual({
       ok: false,
       error: "Write access is required"
+    });
+  });
+
+  it("creates a note marker with optional text", async () => {
+    const result = await createMarker({
+      actor: writer,
+      input: {
+        category: "Landmarks",
+        text: "",
+        title: "Mine entrance",
+        type: "note",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        category: "Landmarks",
+        id: "note-1",
+        lastModifiedBy: "Writer",
+        text: "",
+        title: "Mine entrance",
+        type: "note",
+        x: 25,
+        y: 30
+      }
     });
   });
 
@@ -798,6 +837,7 @@ describe("marker service", () => {
             makerNumber: "945",
             planned: false,
             ql: "89.50",
+            towerType: "Freedom Isles",
             type: "tower",
             x: 25,
             y: 30
@@ -954,8 +994,11 @@ describe("marker service", () => {
 
     expect(result.value.deletedMarkerId).toBe(created.value.id);
     expect(result.value.category).toEqual({
+      color: null,
       id: "category-1",
-      name: "Abandoned Deed"
+      markerShape: "circle",
+      name: "Abandoned Deed",
+      pipSize: 3
     });
     expect(result.value.marker).toMatchObject({
       category: "Abandoned Deed",

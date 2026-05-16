@@ -1,5 +1,15 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import {
+  DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
+  NOTE_CATEGORY_MARKER_SHAPES,
+  type NoteCategoryMarkerShape
+} from "@/lib/domain/note-categories";
+import {
+  DEFAULT_TOWER_TYPE,
+  TOWER_TYPES,
+  type TowerType
+} from "@/lib/domain/markers";
 import type { MarkerServiceDependencies } from "./marker-service";
 
 const mapWithLayers = {
@@ -31,7 +41,7 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       include: markerUserRelations
     }).then(normalizePathRecord),
     createRift: async (input) => prisma.rift.create({ data: input, include: markerUserRelations }),
-    createTower: async (input) => prisma.tower.create({ data: input, include: markerUserRelations }),
+    createTower: async (input) => prisma.tower.create({ data: input, include: markerUserRelations }).then(normalizeTowerRecord),
     disbandDeed: async (input) => prisma.$transaction(async (transaction) => {
       const deed = await transaction.deed.findFirst({
         where: { deletedAt: null, id: input.deedId }
@@ -105,7 +115,7 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
     findTower: async (id) => prisma.tower.findFirst({
       include: { map: true, ...markerUserRelations },
       where: { deletedAt: null, id }
-    }),
+    }).then((tower) => tower === null ? null : normalizeTowerRecord(tower)),
     listActiveMarkers: async (mapId) => {
       const [towers, deeds, notes, rifts, camps, minedoors, locateSouls, paths] = await Promise.all([
         prisma.tower.findMany({
@@ -150,7 +160,16 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
         })
       ]);
 
-      return { camps, deeds, locateSouls, minedoors, notes, paths: paths.map(normalizePathRecord), rifts, towers };
+      return {
+        camps,
+        deeds,
+        locateSouls,
+        minedoors,
+        notes,
+        paths: paths.map(normalizePathRecord),
+        rifts,
+        towers: towers.map(normalizeTowerRecord)
+      };
     },
     now: () => new Date(),
     recordAudit: async (input) => {
@@ -235,7 +254,7 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
         return null;
       }
 
-      return prisma.tower.update({ data: input, where: { id } });
+      return prisma.tower.update({ data: input, where: { id } }).then(normalizeTowerRecord);
     },
     updateDeed: async (id, input) => prisma.deed.update({
       data: input,
@@ -279,8 +298,21 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
       data: input,
       include: markerUserRelations,
       where: { id }
-    })
+    }).then(normalizeTowerRecord)
   };
+}
+
+function normalizeTowerRecord<T extends { towerType: string }>(
+  tower: T
+): Omit<T, "towerType"> & { towerType: TowerType } {
+  return {
+    ...tower,
+    towerType: normalizeStoredTowerType(tower.towerType)
+  };
+}
+
+function normalizeStoredTowerType(value: string): TowerType {
+  return TOWER_TYPES.find((towerType) => towerType === value) ?? DEFAULT_TOWER_TYPE;
 }
 
 function normalizePathRecord<T extends {
@@ -336,12 +368,24 @@ export async function listActiveMapSummaries() {
 }
 
 export async function listNoteCategories(mapId: string) {
-  return prisma.noteCategory.findMany({
+  const categories = await prisma.noteCategory.findMany({
     orderBy: { name: "asc" },
     select: {
+      color: true,
       id: true,
-      name: true
+      markerShape: true,
+      name: true,
+      pipSize: true
     },
     where: { mapId }
   });
+
+  return categories.map((category) => ({
+    ...category,
+    markerShape: normalizeNoteCategoryMarkerShape(category.markerShape)
+  }));
+}
+
+function normalizeNoteCategoryMarkerShape(value: string): NoteCategoryMarkerShape {
+  return NOTE_CATEGORY_MARKER_SHAPES.find((shape) => shape === value) ?? DEFAULT_NOTE_CATEGORY_MARKER_SHAPE;
 }

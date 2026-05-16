@@ -313,6 +313,7 @@ export async function cleanupExpiredDeletedMarkers(
 
   return {
     deletedCounts: {
+      annotation: 0,
       bridge: pathCounts.bridge,
       camp: campCount,
       canal: pathCounts.canal,
