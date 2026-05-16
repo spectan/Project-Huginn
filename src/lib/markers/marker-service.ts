@@ -349,7 +349,7 @@ export async function createMarker(
   input: { actor: Actor; input: unknown; mapId: string },
   dependencies: MarkerServiceDependencies
 ): Promise<Result<WorkspaceMarker>> {
-  if (!canWriteMarkers(input.actor)) {
+  if (!canWriteMarkers(input.actor, input.mapId)) {
     await auditAuthorizationFailure(dependencies, input.actor, input.mapId);
     return err("Write access is required");
   }

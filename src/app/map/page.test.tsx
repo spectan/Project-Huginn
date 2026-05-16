@@ -1576,6 +1576,12 @@ describe("MapPage", () => {
       "Jenn-Kellon",
       "Mol-Rehan"
     ]);
+    fireEvent.change(screen.getByLabelText("QL"), { target: { value: "72.13" } });
+    fireEvent.change(screen.getByLabelText("Damage"), { target: { value: "0.25" } });
+    fireEvent.change(screen.getByLabelText("Creator"), { target: { value: "Mako 945" } });
+    expect(screen.getByLabelText("QL")).toHaveProperty("value", "72.13");
+    expect(screen.getByLabelText("Damage")).toHaveProperty("value", "0.25");
+    expect(screen.getByLabelText("Creator")).toHaveProperty("value", "Mako 945");
     fireEvent.change(screen.getByLabelText("Quick Input"), {
       target: {
         value: "[20:34:20] A high guard tower. The guard tower has some irregularities that must be removed with a stone chisel. Ql: 63.42072, Dam: 0.0. The name of the founder, Stargrace, has been carved into the stone above the door. 'Stargrace 490' is engraved in a metal plaque on the door."

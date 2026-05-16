@@ -3482,7 +3482,11 @@ function TowerMarkerFields({
         <input
           name="ql"
           value={towerFields.ql}
-          onChange={(event) => setTowerFields((current) => ({ ...current, ql: event.currentTarget.value }))}
+          onChange={(event) => {
+            const ql = event.currentTarget.value;
+
+            setTowerFields((current) => ({ ...current, ql }));
+          }}
         />
       </label>
       <label>
@@ -3490,7 +3494,11 @@ function TowerMarkerFields({
         <input
           name="damage"
           value={towerFields.damage}
-          onChange={(event) => setTowerFields((current) => ({ ...current, damage: event.currentTarget.value }))}
+          onChange={(event) => {
+            const damage = event.currentTarget.value;
+
+            setTowerFields((current) => ({ ...current, damage }));
+          }}
         />
       </label>
       <label>
@@ -3498,7 +3506,11 @@ function TowerMarkerFields({
         <input
           name="creator"
           value={towerFields.creator}
-          onChange={(event) => setTowerFields((current) => ({ ...current, creator: event.currentTarget.value }))}
+          onChange={(event) => {
+            const creator = event.currentTarget.value;
+
+            setTowerFields((current) => ({ ...current, creator }));
+          }}
         />
       </label>
       <label>

@@ -30,6 +30,17 @@ const reader = {
   username: "Reader"
 } as const;
 
+const scopedWriter = {
+  accessLevel: "NONE",
+  approvalStatus: "APPROVED",
+  id: "scoped-writer-id",
+  isAdmin: false,
+  mapPermissions: [
+    { accessLevel: "WRITE", isOperator: false, mapId: "map-1" }
+  ],
+  username: "Scoped Writer"
+} as const;
+
 function createDependencies(): MarkerServiceDependencies & { auditEvents: unknown[] } {
   type ModifierFields = {
     createdBy?: { username: string } | null;
@@ -39,7 +50,8 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
   };
   const usersById = new Map<string, string>([
     [writer.id, writer.username],
-    [reader.id, reader.username]
+    [reader.id, reader.username],
+    [scopedWriter.id, scopedWriter.username]
   ]);
   const userSummary = (userId: string | undefined) => (
     userId === undefined ? null : { username: usersById.get(userId) ?? "Unknown" }
@@ -535,6 +547,32 @@ describe("marker service", () => {
         type: "tower",
         x: 25,
         y: 30
+      }
+    });
+  });
+
+  it("creates markers for users with write access on the target map", async () => {
+    const result = await createMarker({
+      actor: scopedWriter,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        planned: false,
+        ql: "89.50",
+        towerType: "Freedom Isles",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        lastModifiedBy: "Scoped Writer",
+        type: "tower"
       }
     });
   });
