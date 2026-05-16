@@ -32,7 +32,7 @@ export async function getUserMapSettings(
   input: { actor: Actor; mapId: string },
   dependencies: UserMapSettingsDependencies
 ): Promise<Result<UserMapSettings>> {
-  if (!canReadMap(input.actor)) {
+  if (!canReadMap(input.actor, input.mapId)) {
     return err("Read access is required");
   }
 
@@ -50,7 +50,7 @@ export async function saveUserMapSettings(
   input: { actor: Actor; input: unknown; mapId: string },
   dependencies: UserMapSettingsDependencies
 ): Promise<Result<UserMapSettings>> {
-  if (!canReadMap(input.actor)) {
+  if (!canReadMap(input.actor, input.mapId)) {
     return err("Read access is required");
   }
 

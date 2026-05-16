@@ -31,6 +31,7 @@ export type UserAnnotation = AnnotationWorkspaceMarker;
 export type UserMapSettings = {
   annotations: UserAnnotation[];
   eventFeedPanelSize: EventFeedPanelSize;
+  favoriteServerId: string | null;
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
@@ -114,6 +115,7 @@ export const DEFAULT_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
 export const DEFAULT_USER_MAP_SETTINGS: UserMapSettings = {
   annotations: [],
   eventFeedPanelSize: DEFAULT_EVENT_FEED_PANEL_SIZE,
+  favoriteServerId: null,
   markerColors: DEFAULT_MARKER_COLORS,
   markerOpacities: DEFAULT_MARKER_OPACITIES,
   markerVisibility: DEFAULT_MARKER_VISIBILITY,
@@ -204,6 +206,7 @@ function parseUserMapSettingsWithFallback(
   return {
     annotations: parseAnnotations(source.annotations, fallback.annotations),
     eventFeedPanelSize: parsePanelSize(source.eventFeedPanelSize, fallback.eventFeedPanelSize),
+    favoriteServerId: parseFavoriteServerId(source.favoriteServerId, fallback.favoriteServerId),
     markerColors: parseMarkerColors(source.markerColors, fallback.markerColors),
     markerOpacities: parseMarkerOpacities(source.markerOpacities, fallback.markerOpacities),
     markerVisibility: parseMarkerVisibility(source.markerVisibility, fallback.markerVisibility),
@@ -225,6 +228,18 @@ function parseUserMapSettingsWithFallback(
       fallback.tileHighlightPanelPosition
     )
   };
+}
+
+export function getFavoriteServerIdFromSettingsRows(rows: Array<{ settings: unknown }>): string | null {
+  for (const row of rows) {
+    const source = isRecord(row.settings) ? row.settings : {};
+
+    if (Object.hasOwn(source, "favoriteServerId")) {
+      return parseUserMapSettings(row.settings).favoriteServerId;
+    }
+  }
+
+  return null;
 }
 
 function parseAnnotations(input: unknown, fallback: UserAnnotation[]): UserAnnotation[] {
@@ -270,6 +285,24 @@ function parseAnnotations(input: unknown, fallback: UserAnnotation[]): UserAnnot
   }
 
   return annotations;
+}
+
+function parseFavoriteServerId(input: unknown, fallback: string | null): string | null {
+  if (input === undefined) {
+    return fallback;
+  }
+
+  if (input === null) {
+    return null;
+  }
+
+  if (typeof input !== "string") {
+    return fallback;
+  }
+
+  const favoriteServerId = input.trim();
+
+  return favoriteServerId.length > 0 && favoriteServerId.length <= 120 ? favoriteServerId : fallback;
 }
 
 function parseMarkerVisibility(input: unknown, fallback: MarkerVisibility): MarkerVisibility {

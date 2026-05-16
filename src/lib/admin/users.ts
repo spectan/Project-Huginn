@@ -3,6 +3,7 @@ import {
   canAdminister,
   type AccessLevel,
   type ApprovalStatus,
+  type MapPermission,
   type UserAccess
 } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -13,20 +14,35 @@ type AdminActor = UserAccess & {
 
 type AdminUserRecord = {
   accessLevel: AccessLevel;
+  approvedBy?: { username: string } | null;
   approvalStatus: ApprovalStatus;
   createdAt: Date;
   id: string;
   isAdmin: boolean;
+  mapPermissions: readonly MapPermission[];
   username: string;
+};
+
+export type AdminMapSummary = {
+  id: string;
+  name: string;
 };
 
 export type AdminUserSummary = {
   accessLevel: AccessLevel;
+  approvedByUsername: string | null;
   approvalStatus: ApprovalStatus;
   createdAt: string;
   id: string;
   isAdmin: boolean;
+  mapPermissions: readonly MapPermission[];
   username: string;
+};
+
+export type AdminUsersList = {
+  maps: AdminMapSummary[];
+  users: AdminUserSummary[];
+  viewerCanManageGlobalAccounts: boolean;
 };
 
 type AdminUserAuditInput = {
@@ -39,6 +55,7 @@ type AdminUserAuditInput = {
 
 export type AdminUserDependencies = {
   hashPassword(password: string): Promise<string>;
+  listMaps(): Promise<AdminMapSummary[]>;
   listUsers(): Promise<AdminUserRecord[]>;
   recordAudit(input: AdminUserAuditInput): Promise<void>;
   removeUser(input: {
@@ -50,9 +67,9 @@ export type AdminUserDependencies = {
     userId: string;
   }): Promise<AdminUserRecord | null>;
   updateUserPrivileges(input: {
-    accessLevel: AccessLevel;
     approvedByUserId: string;
     isAdmin: boolean;
+    mapPermissions: readonly MapPermission[];
     userId: string;
   }): Promise<AdminUserRecord | null>;
 };
@@ -60,29 +77,36 @@ export type AdminUserDependencies = {
 export async function listAdminUsers(
   input: { actor: AdminActor },
   dependencies: AdminUserDependencies
-): Promise<Result<{ users: AdminUserSummary[] }>> {
-  if (!canAdminister(input.actor)) {
+): Promise<Result<AdminUsersList>> {
+  if (!canUseAdminPane(input.actor)) {
     await recordFailedAuthorization(dependencies, input.actor, "USER_LIST", null);
     return err("Admin access is required");
   }
 
-  const users = await dependencies.listUsers();
+  const [users, maps] = await Promise.all([
+    dependencies.listUsers(),
+    dependencies.listMaps()
+  ]);
+  const manageableMaps = getManageableMaps(input.actor, maps);
+  const visibleMapIds = new Set(manageableMaps.map((map) => map.id));
 
   return ok({
-    users: users.map(serializeAdminUser)
+    maps: manageableMaps,
+    users: users.map((user) => serializeAdminUser(user, visibleMapIds)),
+    viewerCanManageGlobalAccounts: canAdminister(input.actor)
   });
 }
 
 export async function updateAdminUser(
   input: {
-    accessLevel: AccessLevel;
     actor: AdminActor;
     isAdmin: boolean;
+    mapPermissions: readonly MapPermission[];
     userId: string;
   },
   dependencies: AdminUserDependencies
 ): Promise<Result<AdminUserSummary>> {
-  if (!canAdminister(input.actor)) {
+  if (!canUseAdminPane(input.actor)) {
     await recordFailedAuthorization(dependencies, input.actor, "PERMISSION_CHANGED", input.userId);
     return err("Admin access is required");
   }
@@ -91,14 +115,44 @@ export async function updateAdminUser(
     return err("Admins cannot change their own account");
   }
 
-  if (!isAccessLevel(input.accessLevel)) {
-    return err("Access level is invalid");
+  const [users, maps] = await Promise.all([
+    dependencies.listUsers(),
+    dependencies.listMaps()
+  ]);
+  const existingUser = users.find((user) => user.id === input.userId) ?? null;
+
+  if (existingUser === null) {
+    return err("User was not found");
   }
 
+  const globalAdmin = canAdminister(input.actor);
+  const operatedMapIds = getOperatedMapIds(input.actor);
+
+  if (!globalAdmin && existingUser.isAdmin) {
+    return err("Operators cannot change global admin accounts");
+  }
+
+  if (!globalAdmin && input.isAdmin) {
+    return err("Operators cannot grant global admin access");
+  }
+
+  const normalizedPermissionsResult = normalizeRequestedMapPermissions(input.mapPermissions, maps);
+
+  if (!normalizedPermissionsResult.ok) {
+    return err(normalizedPermissionsResult.error);
+  }
+
+  if (!globalAdmin && normalizedPermissionsResult.value.some((permission) => !operatedMapIds.has(permission.mapId))) {
+    return err("Operators can only change permissions for their operated servers");
+  }
+
+  const nextMapPermissions = globalAdmin
+    ? normalizedPermissionsResult.value
+    : mergeOperatorPermissions(existingUser.mapPermissions, normalizedPermissionsResult.value, operatedMapIds);
   const user = await dependencies.updateUserPrivileges({
-    accessLevel: input.accessLevel,
     approvedByUserId: input.actor.id,
-    isAdmin: input.isAdmin,
+    isAdmin: globalAdmin ? input.isAdmin : existingUser.isAdmin,
+    mapPermissions: nextMapPermissions,
     userId: input.userId
   });
 
@@ -110,15 +164,18 @@ export async function updateAdminUser(
     action: "PERMISSION_CHANGED",
     actorUserId: input.actor.id,
     metadata: {
-      accessLevel: user.accessLevel,
       isAdmin: user.isAdmin,
+      mapPermissions: user.mapPermissions,
       username: user.username
     },
     targetId: user.id,
     targetType: "USER"
   });
 
-  return ok(serializeAdminUser(user));
+  return ok(serializeAdminUser(
+    user,
+    globalAdmin ? undefined : operatedMapIds
+  ));
 }
 
 export async function updateAdminUserPassword(
@@ -199,23 +256,97 @@ export async function removeAdminUser(
   return ok(serializeAdminUser(user));
 }
 
-function serializeAdminUser(user: AdminUserRecord): AdminUserSummary {
+function serializeAdminUser(user: AdminUserRecord, visibleMapIds?: ReadonlySet<string>): AdminUserSummary {
   return {
     accessLevel: user.accessLevel,
+    approvedByUsername: user.approvedBy?.username ?? null,
     approvalStatus: user.approvalStatus,
     createdAt: user.createdAt.toISOString(),
     id: user.id,
     isAdmin: user.isAdmin,
+    mapPermissions: sortMapPermissions(
+      visibleMapIds === undefined
+        ? user.mapPermissions
+        : user.mapPermissions.filter((permission) => visibleMapIds.has(permission.mapId))
+    ),
     username: user.username
   };
 }
 
-function isAccessLevel(value: AccessLevel): boolean {
-  return value === "NONE" || value === "READ" || value === "WRITE";
-}
-
 function isValidPassword(value: string): boolean {
   return value.length >= 12 && value.length <= 128;
+}
+
+function canUseAdminPane(actor: AdminActor): boolean {
+  return canAdminister(actor) || getOperatedMapIds(actor).size > 0;
+}
+
+function getManageableMaps(actor: AdminActor, maps: AdminMapSummary[]): AdminMapSummary[] {
+  if (canAdminister(actor)) {
+    return maps;
+  }
+
+  const operatedMapIds = getOperatedMapIds(actor);
+
+  return maps.filter((map) => operatedMapIds.has(map.id));
+}
+
+function getOperatedMapIds(actor: AdminActor): Set<string> {
+  return new Set(
+    actor.mapPermissions
+      ?.filter((permission) => permission.isOperator)
+      .map((permission) => permission.mapId) ?? []
+  );
+}
+
+function normalizeRequestedMapPermissions(
+  permissions: readonly MapPermission[],
+  maps: AdminMapSummary[]
+): Result<MapPermission[]> {
+  const mapIds = new Set(maps.map((map) => map.id));
+  const normalized = new Map<string, MapPermission>();
+
+  for (const permission of permissions) {
+    if (!mapIds.has(permission.mapId)) {
+      return err("Map permission server is invalid");
+    }
+
+    if (!isAccessLevel(permission.accessLevel)) {
+      return err("Access level is invalid");
+    }
+
+    if (permission.accessLevel === "NONE" && !permission.isOperator) {
+      normalized.delete(permission.mapId);
+      continue;
+    }
+
+    normalized.set(permission.mapId, {
+      accessLevel: permission.accessLevel,
+      isOperator: permission.isOperator,
+      mapId: permission.mapId
+    });
+  }
+
+  return ok(sortMapPermissions(Array.from(normalized.values())));
+}
+
+function mergeOperatorPermissions(
+  existingPermissions: readonly MapPermission[],
+  requestedPermissions: readonly MapPermission[],
+  operatedMapIds: Set<string>
+): MapPermission[] {
+  return sortMapPermissions([
+    ...existingPermissions.filter((permission) => !operatedMapIds.has(permission.mapId)),
+    ...requestedPermissions
+  ]);
+}
+
+function sortMapPermissions(permissions: readonly MapPermission[]): MapPermission[] {
+  return Array.from(permissions).sort((a, b) => a.mapId.localeCompare(b.mapId));
+}
+
+function isAccessLevel(value: AccessLevel): boolean {
+  return value === "NONE" || value === "READ" || value === "WRITE";
 }
 
 async function recordFailedAuthorization(

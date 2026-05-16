@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { getFavoriteServerIdFromSettingsRows } from "./map-settings";
 import type { UserMapSettingsDependencies } from "./map-settings-service";
 
 export function createUserMapSettingsDependencies(): UserMapSettingsDependencies {
@@ -44,4 +45,14 @@ export function createUserMapSettingsDependencies(): UserMapSettingsDependencies
       }
     })
   };
+}
+
+export async function findUserFavoriteServerId(userId: string): Promise<string | null> {
+  const settingsRows = await prisma.userMapSettings.findMany({
+    orderBy: { updatedAt: "desc" },
+    select: { settings: true },
+    where: { userId }
+  });
+
+  return getFavoriteServerIdFromSettingsRows(settingsRows);
 }

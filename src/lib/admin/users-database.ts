@@ -5,16 +5,36 @@ import type { AdminUserDependencies } from "./users";
 
 const USER_SELECT = {
   accessLevel: true,
+  approvedBy: {
+    select: {
+      username: true
+    }
+  },
   approvalStatus: true,
   createdAt: true,
   id: true,
   isAdmin: true,
+  mapPermissions: {
+    select: {
+      accessLevel: true,
+      isOperator: true,
+      mapId: true
+    }
+  },
   username: true
 } satisfies Prisma.UserSelect;
 
 export function createAdminUserDependencies(): AdminUserDependencies {
   return {
     hashPassword: async (password) => argon2.hash(password),
+    listMaps: async () => prisma.map.findMany({
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true
+      },
+      where: { isActive: true }
+    }),
     listUsers: async () => prisma.user.findMany({
       orderBy: [
         { approvalStatus: "asc" },
@@ -79,7 +99,7 @@ export function createAdminUserDependencies(): AdminUserDependencies {
 
       return updatedUser;
     },
-    updateUserPrivileges: async ({ accessLevel, approvedByUserId, isAdmin, userId }) => {
+    updateUserPrivileges: async ({ approvedByUserId, isAdmin, mapPermissions, userId }) => {
       const existingUser = await prisma.user.findUnique({
         select: { id: true },
         where: { id: userId }
@@ -89,16 +109,48 @@ export function createAdminUserDependencies(): AdminUserDependencies {
         return null;
       }
 
-      return prisma.user.update({
-        data: {
-          accessLevel,
-          approvalStatus: "APPROVED",
-          approvedAt: new Date(),
-          approvedByUserId,
-          isAdmin
-        },
-        select: USER_SELECT,
-        where: { id: userId }
+      return prisma.$transaction(async (transaction) => {
+        await transaction.userMapPermission.deleteMany({
+          where: {
+            userId,
+            mapId: {
+              notIn: mapPermissions.map((permission) => permission.mapId)
+            }
+          }
+        });
+
+        for (const permission of mapPermissions) {
+          await transaction.userMapPermission.upsert({
+            create: {
+              accessLevel: permission.accessLevel,
+              isOperator: permission.isOperator,
+              mapId: permission.mapId,
+              userId
+            },
+            update: {
+              accessLevel: permission.accessLevel,
+              isOperator: permission.isOperator
+            },
+            where: {
+              userId_mapId: {
+                mapId: permission.mapId,
+                userId
+              }
+            }
+          });
+        }
+
+        return transaction.user.update({
+          data: {
+            accessLevel: "NONE",
+            approvalStatus: "APPROVED",
+            approvedAt: new Date(),
+            approvedByUserId,
+            isAdmin
+          },
+          select: USER_SELECT,
+          where: { id: userId }
+        });
       });
     }
   };

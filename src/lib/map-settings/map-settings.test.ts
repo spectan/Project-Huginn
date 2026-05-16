@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_USER_MAP_SETTINGS,
+  getFavoriteServerIdFromSettingsRows,
   mergeUserMapSettingsInput,
   parseUserMapSettings
 } from "./map-settings";
@@ -13,6 +14,7 @@ describe("user map settings", () => {
     expect(DEFAULT_USER_MAP_SETTINGS.markerVisibility.annotations).toBe(true);
     expect(DEFAULT_USER_MAP_SETTINGS.markerColors.annotations).toBe("#38bdf8");
     expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.annotations).toBe(50);
+    expect(DEFAULT_USER_MAP_SETTINGS.favoriteServerId).toBeNull();
     expect(DEFAULT_USER_MAP_SETTINGS.searchLinesEnabled).toBe(false);
     expect(DEFAULT_USER_MAP_SETTINGS.routePlannerSpeedKmh).toBe(0);
     expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.deeds).toBe(100);
@@ -67,6 +69,7 @@ describe("user map settings", () => {
         top: 500.8
       },
       routePlannerSpeedKmh: 12.4,
+      favoriteServerId: " map-cadence ",
       searchLinesEnabled: true,
       tileHighlight: {
         selection: "Clay"
@@ -136,6 +139,7 @@ describe("user map settings", () => {
         top: 501
       },
       routePlannerSpeedKmh: 12,
+      favoriteServerId: "map-cadence",
       searchLinesEnabled: true,
       tileHighlight: {
         ...DEFAULT_USER_MAP_SETTINGS.tileHighlight,
@@ -191,6 +195,23 @@ describe("user map settings", () => {
     ]);
   });
 
+  it("keeps the latest explicit favorite server id from settings rows", () => {
+    expect(getFavoriteServerIdFromSettingsRows([
+      { settings: { favoriteServerId: "map-cadence" } },
+      { settings: { favoriteServerId: "map-celebration" } }
+    ])).toBe("map-cadence");
+
+    expect(getFavoriteServerIdFromSettingsRows([
+      { settings: { markerColors: { towers: "#00ff00" } } },
+      { settings: { favoriteServerId: "map-harmony" } }
+    ])).toBe("map-harmony");
+
+    expect(getFavoriteServerIdFromSettingsRows([
+      { settings: { favoriteServerId: null } },
+      { settings: { favoriteServerId: "map-harmony" } }
+    ])).toBeNull();
+  });
+
   it("sanitizes invalid colors, opacities, and tile selections", () => {
     expect(parseUserMapSettings({
       markerColors: {
@@ -235,7 +256,8 @@ describe("user map settings", () => {
         color: "#12xz45",
         opacity: 52.2,
         selection: "Unknown"
-      }
+      },
+      favoriteServerId: ""
     })).toMatchObject({
       markerColors: {
         annotations: "#00beef",
@@ -273,7 +295,8 @@ describe("user map settings", () => {
         color: DEFAULT_USER_MAP_SETTINGS.tileHighlight.color,
         opacity: 52,
         selection: ""
-      }
+      },
+      favoriteServerId: DEFAULT_USER_MAP_SETTINGS.favoriteServerId
     });
   });
 
@@ -411,6 +434,7 @@ describe("user map settings", () => {
         top: 90
       },
       routePlannerSpeedKmh: 27,
+      favoriteServerId: "map-cadence",
       searchLinesEnabled: true,
       tileHighlightPanelPosition: null
     })).toEqual({
@@ -437,6 +461,7 @@ describe("user map settings", () => {
         top: 90
       },
       routePlannerSpeedKmh: 27,
+      favoriteServerId: "map-cadence",
       searchLinesEnabled: true,
       tileHighlightPanelPosition: null
     });

@@ -317,7 +317,7 @@ export async function listMarkers(
   input: { actor: Actor; mapId: string },
   dependencies: MarkerServiceDependencies
 ): Promise<Result<{ map: WorkspaceMap; markers: WorkspaceMarker[] }>> {
-  if (!canReadMap(input.actor)) {
+  if (!canReadMap(input.actor, input.mapId)) {
     await auditAuthorizationFailure(dependencies, input.actor, input.mapId);
     return err("Read access is required");
   }
@@ -523,11 +523,6 @@ export async function updateMarker(
   },
   dependencies: MarkerServiceDependencies
 ): Promise<Result<WorkspaceMarker>> {
-  if (!canWriteMarkers(input.actor)) {
-    await auditAuthorizationFailure(dependencies, input.actor, null);
-    return err("Write access is required");
-  }
-
   const markerInput = parseMarkerInput(input.input);
 
   if (!markerInput.ok) {
@@ -543,6 +538,10 @@ export async function updateMarker(
 
     if (existing === null || markerInput.value.type !== "tower") {
       return err("Marker was not found");
+    }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
     }
 
     const validated = validateTowerInput(markerInput.value, existing.map);
@@ -570,6 +569,10 @@ export async function updateMarker(
     if (existing === null || markerInput.value.type !== "deed") {
       return err("Marker was not found");
     }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
+    }
 
     const validated = validateDeedInput(markerInput.value, existing.map);
     if (!validated.ok) {
@@ -595,6 +598,10 @@ export async function updateMarker(
 
     if (existing === null || markerInput.value.type !== "rift") {
       return err("Marker was not found");
+    }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
     }
 
     const validated = validateRiftInput(markerInput.value, existing.map);
@@ -622,6 +629,10 @@ export async function updateMarker(
     if (existing === null || markerInput.value.type !== "camp") {
       return err("Marker was not found");
     }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
+    }
 
     const validated = validateCampInput(markerInput.value, existing.map);
     if (!validated.ok) {
@@ -647,6 +658,10 @@ export async function updateMarker(
 
     if (existing === null || markerInput.value.type !== "minedoor") {
       return err("Marker was not found");
+    }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
     }
 
     const validated = validateMinedoorInput(markerInput.value, existing.map);
@@ -674,6 +689,10 @@ export async function updateMarker(
     if (existing === null || markerInput.value.type !== "locateSoul") {
       return err("Marker was not found");
     }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
+    }
 
     const validated = validateLocateSoulInput(markerInput.value, existing.map);
     if (!validated.ok) {
@@ -700,6 +719,10 @@ export async function updateMarker(
     if (existing === null || !isPathCreateMarkerInput(markerInput.value) || existing.pathType !== input.markerType) {
       return err("Marker was not found");
     }
+    if (!canWriteMarkers(input.actor, existing.mapId)) {
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+      return err("Write access is required");
+    }
 
     const validated = validatePathInput(markerInput.value, existing.map);
     if (!validated.ok) {
@@ -724,6 +747,10 @@ export async function updateMarker(
 
   if (existing === null || markerInput.value.type !== "note") {
     return err("Marker was not found");
+  }
+  if (!canWriteMarkers(input.actor, existing.mapId)) {
+    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+    return err("Write access is required");
   }
 
   const validated = validateNoteInput(markerInput.value, existing.map);
@@ -756,15 +783,14 @@ export async function disbandDeedMarker(
   deletedMarkerId: string;
   marker: NoteWorkspaceMarker;
 }>> {
-  if (!canWriteMarkers(input.actor)) {
-    await auditAuthorizationFailure(dependencies, input.actor, null);
-    return err("Write access is required");
-  }
-
   const existing = await dependencies.findDeed(input.markerId);
 
   if (existing === null) {
     return err("Marker was not found");
+  }
+  if (!canWriteMarkers(input.actor, existing.mapId)) {
+    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
+    return err("Write access is required");
   }
 
   const note = validateNoteInput({
@@ -962,8 +988,14 @@ export async function deleteMarker(
   markerId: string;
   markerType: MarkerType;
 }>> {
-  if (!canWriteMarkers(input.actor)) {
-    await auditAuthorizationFailure(dependencies, input.actor, null);
+  const existing = await findExistingMarkerForDelete(input, dependencies);
+
+  if (existing === null) {
+    return err("Marker was not found");
+  }
+
+  if (!canWriteMarkers(input.actor, existing.mapId)) {
+    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
     return err("Write access is required");
   }
 
@@ -1268,6 +1300,41 @@ async function softDeleteMarker(
   }
 
   return dependencies.softDeleteNote(input.markerId, softDeleteInput);
+}
+
+async function findExistingMarkerForDelete(
+  input: { markerId: string; markerType: MarkerType },
+  dependencies: MarkerServiceDependencies
+): Promise<{ mapId: string } | null> {
+  if (input.markerType === "tower") {
+    return dependencies.findTower(input.markerId);
+  }
+
+  if (input.markerType === "deed") {
+    return dependencies.findDeed(input.markerId);
+  }
+
+  if (input.markerType === "rift") {
+    return dependencies.findRift(input.markerId);
+  }
+
+  if (input.markerType === "camp") {
+    return dependencies.findCamp(input.markerId);
+  }
+
+  if (input.markerType === "minedoor") {
+    return dependencies.findMinedoor(input.markerId);
+  }
+
+  if (input.markerType === "locateSoul") {
+    return dependencies.findLocateSoul(input.markerId);
+  }
+
+  if (isPathMarkerType(input.markerType)) {
+    return dependencies.findPath(input.markerId);
+  }
+
+  return dependencies.findNote(input.markerId);
 }
 
 async function auditAuthorizationFailure(

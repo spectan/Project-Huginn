@@ -13,11 +13,12 @@ type RouteContext = {
 export async function GET(_request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !canReadMap(viewer)) {
+  const { mapId } = await context.params;
+
+  if (viewer === null || !canReadMap(viewer, mapId)) {
     return NextResponse.json({ error: "Read access is required" }, { status: 403 });
   }
 
-  const { mapId } = await context.params;
   const map = await findActiveMap(mapId);
 
   if (map === null) {

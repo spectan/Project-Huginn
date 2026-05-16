@@ -1,6 +1,6 @@
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
-import { createUserMapSettingsDependencies } from "@/lib/map-settings/database";
+import { createUserMapSettingsDependencies, findUserFavoriteServerId } from "@/lib/map-settings/database";
 import { DEFAULT_USER_MAP_SETTINGS } from "@/lib/map-settings/map-settings";
 import { getUserMapSettings } from "@/lib/map-settings/map-settings-service";
 import {
@@ -41,16 +41,17 @@ async function getWorkspaceData(
   viewer: Awaited<ReturnType<typeof getCurrentViewer>>,
   requestedMapId?: string
 ) {
-  if (viewer === null || !canReadMap(viewer)) {
+  if (viewer === null) {
     return null;
   }
 
-  const [requestedMap, fallbackMap, servers] = await Promise.all([
-    requestedMapId === undefined ? null : findActiveMap(requestedMapId),
-    findActiveMap(),
-    listActiveMapSummaries()
+  const [servers, favoriteServerId] = await Promise.all([
+    listActiveMapSummaries(),
+    findUserFavoriteServerId(viewer.id)
   ]);
-  const map = requestedMap ?? fallbackMap;
+  const readableServers = getReadableServerSummaries(viewer, servers);
+  const initialMapId = getInitialMapServerId(requestedMapId, favoriteServerId, readableServers);
+  const map = initialMapId === undefined ? null : await findActiveMap(initialMapId);
 
   if (map === null) {
     return null;
@@ -65,17 +66,46 @@ async function getWorkspaceData(
     return null;
   }
 
-  const [noteCategories, settings] = await Promise.all([
+  const [noteCategories, mapSettings] = await Promise.all([
     listNoteCategories(map.id),
     getReadableUserMapSettings(viewer, map.id)
   ]);
+  const settings = {
+    ...mapSettings,
+    favoriteServerId: mapSettings.favoriteServerId ?? favoriteServerId
+  };
 
   return {
     ...result.value,
     noteCategories,
-    servers,
+    servers: readableServers,
     settings
   };
+}
+
+export function getInitialMapServerId(
+  requestedMapId: string | undefined,
+  favoriteServerId: string | null,
+  readableServers: Array<{ id: string }>
+): string | undefined {
+  const readableServerIds = new Set(readableServers.map((server) => server.id));
+
+  if (requestedMapId !== undefined && readableServerIds.has(requestedMapId)) {
+    return requestedMapId;
+  }
+
+  if (favoriteServerId !== null && readableServerIds.has(favoriteServerId)) {
+    return favoriteServerId;
+  }
+
+  return readableServers[0]?.id;
+}
+
+export function getReadableServerSummaries<T extends { id: string }>(
+  viewer: NonNullable<Awaited<ReturnType<typeof getCurrentViewer>>>,
+  servers: T[]
+): T[] {
+  return servers.filter((server) => canReadMap(viewer, server.id));
 }
 
 async function getReadableUserMapSettings(

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
-import { canAdminister } from "@/lib/domain/permissions";
+import { canManageAccounts } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
 
 export async function GET() {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !canAdminister(viewer)) {
+  if (viewer === null || !canManageAccounts(viewer)) {
     return NextResponse.json({ error: "Admin access is required" }, { status: 403 });
   }
 

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     approvalStatus: "APPROVED";
     id: string;
     isAdmin: false;
+    mapPermissions?: readonly [{ accessLevel: "READ"; isOperator: false; mapId: string }];
   },
   eventFeed: {
     events: [
@@ -75,7 +76,10 @@ describe("GET /api/maps/[mapId]/events", () => {
       accessLevel: "READ",
       approvalStatus: "APPROVED",
       id: "user-1",
-      isAdmin: false
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+      ]
     };
 
     const response = await GET(new Request("http://localhost/api/maps/map-1/events"), {
@@ -92,7 +96,10 @@ describe("GET /api/maps/[mapId]/events", () => {
       accessLevel: "READ",
       approvalStatus: "APPROVED",
       id: "user-1",
-      isAdmin: false
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+      ]
     };
     mocks.map = null;
 

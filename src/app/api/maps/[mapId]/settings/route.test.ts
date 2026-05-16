@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
       approvalStatus: "APPROVED";
       id: string;
       isAdmin: false;
+      mapPermissions?: readonly [{ accessLevel: "READ"; isOperator: false; mapId: string }];
     },
     settings: new Map<string, unknown>()
   };
@@ -61,7 +62,10 @@ describe("PATCH /api/maps/[mapId]/settings", () => {
       accessLevel: "READ",
       approvalStatus: "APPROVED",
       id: "user-1",
-      isAdmin: false
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+      ]
     };
     mocks.state.settings.set("user-1:map-1", {
       markerColors: {

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { prisma } from "@/lib/db/prisma";
+import { canManageAccounts } from "@/lib/domain/permissions";
 import { SESSION_COOKIE_NAME, hashSessionToken } from "./session";
 import { toViewer, type AuthViewer } from "./viewer";
 
@@ -13,7 +14,17 @@ export async function getCurrentViewer(): Promise<AuthViewer | null> {
 
   const session = await prisma.session.findUnique({
     include: {
-      user: true
+      user: {
+        include: {
+          mapPermissions: {
+            select: {
+              accessLevel: true,
+              isOperator: true,
+              mapId: true
+            }
+          }
+        }
+      }
     },
     where: {
       tokenHash: hashSessionToken(token)
@@ -24,7 +35,7 @@ export async function getCurrentViewer(): Promise<AuthViewer | null> {
     return null;
   }
 
-  const pendingApprovalCount = session.user.isAdmin
+  const pendingApprovalCount = canManageAccounts(session.user)
     ? await prisma.user.count({
         where: {
           approvalStatus: "PENDING"

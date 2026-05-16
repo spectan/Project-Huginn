@@ -9,7 +9,7 @@ import {
   DEFAULT_NOTE_CATEGORY_PIP_SIZE,
   validateNoteCategoryInput
 } from "@/lib/domain/note-categories";
-import { canAdminister, canWriteMarkers } from "@/lib/domain/permissions";
+import { canDeleteNoteCategories, canWriteMarkers } from "@/lib/domain/permissions";
 
 type RouteContext = {
   params: Promise<{
@@ -20,8 +20,9 @@ type RouteContext = {
 
 export async function PATCH(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
+  const { categoryId, mapId } = await context.params;
 
-  if (viewer === null || !canWriteMarkers(viewer)) {
+  if (viewer === null || !canWriteMarkers(viewer, mapId)) {
     return NextResponse.json({ error: "Write access is required" }, { status: 403 });
   }
 
@@ -32,7 +33,6 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: input.error }, { status: 400 });
   }
 
-  const { categoryId, mapId } = await context.params;
   const map = await findActiveMap(mapId);
 
   if (map === null) {
@@ -96,7 +96,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 export async function DELETE(_request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !canAdminister(viewer)) {
+  if (viewer === null || !canDeleteNoteCategories(viewer)) {
     return NextResponse.json({ error: "Admin access is required" }, { status: 403 });
   }
 

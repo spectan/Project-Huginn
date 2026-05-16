@@ -58,45 +58,46 @@ enum AuditTargetType {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  username         String            @unique
-  passwordHash     String
-  approvalStatus   ApprovalStatus    @default(PENDING)
-  accessLevel      AccessLevel       @default(NONE)
-  isAdmin          Boolean           @default(false)
-  approvedAt       DateTime?
-  approvedByUserId String?
-  approvedBy       User?             @relation("UserApprovals", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  approvedUsers    User[]            @relation("UserApprovals")
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  createdTowers    Tower[]           @relation("TowerCreatedBy")
-  updatedTowers    Tower[]           @relation("TowerUpdatedBy")
-  deletedTowers    Tower[]           @relation("TowerDeletedBy")
-  createdDeeds     Deed[]            @relation("DeedCreatedBy")
-  updatedDeeds     Deed[]            @relation("DeedUpdatedBy")
-  deletedDeeds     Deed[]            @relation("DeedDeletedBy")
-  createdNotes     Note[]            @relation("NoteCreatedBy")
-  updatedNotes     Note[]            @relation("NoteUpdatedBy")
-  deletedNotes     Note[]            @relation("NoteDeletedBy")
-  createdRifts     Rift[]            @relation("RiftCreatedBy")
-  updatedRifts     Rift[]            @relation("RiftUpdatedBy")
-  deletedRifts     Rift[]            @relation("RiftDeletedBy")
-  createdCamps     Camp[]            @relation("CampCreatedBy")
-  updatedCamps     Camp[]            @relation("CampUpdatedBy")
-  deletedCamps     Camp[]            @relation("CampDeletedBy")
-  createdMinedoors Minedoor[]        @relation("MinedoorCreatedBy")
-  updatedMinedoors Minedoor[]        @relation("MinedoorUpdatedBy")
-  deletedMinedoors Minedoor[]        @relation("MinedoorDeletedBy")
-  createdLocateSouls LocateSoul[]    @relation("LocateSoulCreatedBy")
-  updatedLocateSouls LocateSoul[]    @relation("LocateSoulUpdatedBy")
-  deletedLocateSouls LocateSoul[]    @relation("LocateSoulDeletedBy")
-  createdPaths     PathMarker[]      @relation("PathCreatedBy")
-  updatedPaths     PathMarker[]      @relation("PathUpdatedBy")
-  deletedPaths     PathMarker[]      @relation("PathDeletedBy")
-  auditEvents      AuditEvent[]      @relation("AuditActor")
-  sessions         Session[]
-  mapSettings      UserMapSettings[]
+  id                 String              @id @default(cuid())
+  username           String              @unique
+  passwordHash       String
+  approvalStatus     ApprovalStatus      @default(PENDING)
+  accessLevel        AccessLevel         @default(NONE)
+  isAdmin            Boolean             @default(false)
+  approvedAt         DateTime?
+  approvedByUserId   String?
+  approvedBy         User?               @relation("UserApprovals", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  approvedUsers      User[]              @relation("UserApprovals")
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  createdTowers      Tower[]             @relation("TowerCreatedBy")
+  updatedTowers      Tower[]             @relation("TowerUpdatedBy")
+  deletedTowers      Tower[]             @relation("TowerDeletedBy")
+  createdDeeds       Deed[]              @relation("DeedCreatedBy")
+  updatedDeeds       Deed[]              @relation("DeedUpdatedBy")
+  deletedDeeds       Deed[]              @relation("DeedDeletedBy")
+  createdNotes       Note[]              @relation("NoteCreatedBy")
+  updatedNotes       Note[]              @relation("NoteUpdatedBy")
+  deletedNotes       Note[]              @relation("NoteDeletedBy")
+  createdRifts       Rift[]              @relation("RiftCreatedBy")
+  updatedRifts       Rift[]              @relation("RiftUpdatedBy")
+  deletedRifts       Rift[]              @relation("RiftDeletedBy")
+  createdCamps       Camp[]              @relation("CampCreatedBy")
+  updatedCamps       Camp[]              @relation("CampUpdatedBy")
+  deletedCamps       Camp[]              @relation("CampDeletedBy")
+  createdMinedoors   Minedoor[]          @relation("MinedoorCreatedBy")
+  updatedMinedoors   Minedoor[]          @relation("MinedoorUpdatedBy")
+  deletedMinedoors   Minedoor[]          @relation("MinedoorDeletedBy")
+  createdLocateSouls LocateSoul[]        @relation("LocateSoulCreatedBy")
+  updatedLocateSouls LocateSoul[]        @relation("LocateSoulUpdatedBy")
+  deletedLocateSouls LocateSoul[]        @relation("LocateSoulDeletedBy")
+  createdPaths       PathMarker[]        @relation("PathCreatedBy")
+  updatedPaths       PathMarker[]        @relation("PathUpdatedBy")
+  deletedPaths       PathMarker[]        @relation("PathDeletedBy")
+  auditEvents        AuditEvent[]        @relation("AuditActor")
+  sessions           Session[]
+  mapSettings        UserMapSettings[]
+  mapPermissions     UserMapPermission[]
 
   @@index([approvalStatus])
   @@index([accessLevel])
@@ -118,26 +119,27 @@ model Session {
 }
 
 model Map {
-  id             String            @id @default(cuid())
-  name           String
-  imagePath      String
-  widthPx        Int
-  heightPx       Int
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  layers         MapLayer[]
-  towers         Tower[]
-  deeds          Deed[]
-  notes          Note[]
-  rifts          Rift[]
-  camps          Camp[]
-  minedoors      Minedoor[]
-  locateSouls    LocateSoul[]
-  paths          PathMarker[]
-  noteCategories NoteCategory[]
-  auditEvents    AuditEvent[]
-  userSettings   UserMapSettings[]
+  id              String              @id @default(cuid())
+  name            String
+  imagePath       String
+  widthPx         Int
+  heightPx        Int
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  layers          MapLayer[]
+  towers          Tower[]
+  deeds           Deed[]
+  notes           Note[]
+  rifts           Rift[]
+  camps           Camp[]
+  minedoors       Minedoor[]
+  locateSouls     LocateSoul[]
+  paths           PathMarker[]
+  noteCategories  NoteCategory[]
+  auditEvents     AuditEvent[]
+  userSettings    UserMapSettings[]
+  userPermissions UserMapPermission[]
 
   @@index([isActive])
   @@map("maps")
@@ -401,6 +403,23 @@ model UserMapSettings {
   @@unique([userId, mapId])
   @@index([mapId])
   @@map("user_map_settings")
+}
+
+model UserMapPermission {
+  id          String      @id @default(cuid())
+  userId      String
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mapId       String
+  map         Map         @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  accessLevel AccessLevel @default(NONE)
+  isOperator  Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([userId, mapId])
+  @@index([mapId])
+  @@index([isOperator])
+  @@map("user_map_permissions")
 }
 
 model AuditEvent {

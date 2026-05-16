@@ -32,19 +32,34 @@ describe("AccountOverlay", () => {
     renderAccountOverlay({
       approvalStatus: "APPROVED",
       isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "WRITE", isOperator: false, mapId: "map-celebration" },
+        { accessLevel: "NONE", isOperator: false, mapId: "map-defiance" },
+        { accessLevel: "READ", isOperator: false, mapId: "map-release" },
+        { accessLevel: "NONE", isOperator: true, mapId: "map-xanadu" }
+      ],
       pendingApprovalCount: 0,
       permissions: "WRITE",
       username: "Mako"
-    });
+    }, [
+      { id: "map-celebration", name: "Celebration" },
+      { id: "map-defiance", name: "Defiance" },
+      { id: "map-release", name: "Release" },
+      { id: "map-xanadu", name: "Xanadu" }
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Mako" }));
 
     expect(screen.getByRole("dialog", { name: "Account settings" })).toBeTruthy();
     const permissionsGroup = screen.getByRole("group", { name: "Permissions" });
     expect(screen.queryByText("Status")).toBeNull();
+    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Read/Write")).toBeTruthy();
-    expect(within(permissionsGroup).getByText("Allowed")).toBeTruthy();
-    expect(within(permissionsGroup).queryByText("Read")).toBeNull();
+    expect(within(permissionsGroup).getByText("Release")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Read")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Xanadu")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Operator")).toBeTruthy();
+    expect(within(permissionsGroup).queryByText("Defiance")).toBeNull();
     expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
     expect(screen.getByText("Project Huginn - v1.1.1")).toBeTruthy();
@@ -62,14 +77,18 @@ describe("AccountOverlay", () => {
       pendingApprovalCount: 3,
       permissions: "WRITE",
       username: "Admin"
-    });
+    }, [
+      { id: "map-celebration", name: "Celebration" },
+      { id: "map-defiance", name: "Defiance" }
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
 
     const permissionsGroup = screen.getByRole("group", { name: "Permissions" });
-    expect(within(permissionsGroup).getByText("Read/Write")).toBeTruthy();
-    expect(within(permissionsGroup).getByText("Admin")).toBeTruthy();
-    expect(within(permissionsGroup).getAllByText("Allowed")).toHaveLength(2);
+    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Defiance")).toBeTruthy();
+    expect(within(permissionsGroup).getAllByText("Admin")).toHaveLength(2);
+    expect(within(permissionsGroup).queryByText("Read/Write")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
     expect(screen.getByRole("link", { name: "Accounts 3 pending" }).getAttribute("href")).toBe(
@@ -134,7 +153,10 @@ describe("AccountOverlay", () => {
   });
 });
 
-function renderAccountOverlay(viewer: AccountViewer | null) {
+function renderAccountOverlay(
+  viewer: AccountViewer | null,
+  servers: Array<{ id: string; name: string }> = []
+) {
   function ControlledAccountOverlay() {
     const [isOpen, setIsOpen] = React.useState(false);
 
@@ -142,6 +164,7 @@ function renderAccountOverlay(viewer: AccountViewer | null) {
       <AccountOverlay
         isOpen={isOpen}
         onOpenChange={setIsOpen}
+        servers={servers}
         viewer={viewer}
       />
     );

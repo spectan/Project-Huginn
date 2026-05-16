@@ -16,12 +16,12 @@ type RouteContext = {
 
 export async function GET(_request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
+  const { mapId } = await context.params;
 
-  if (viewer === null || !canReadMap(viewer)) {
+  if (viewer === null || !canReadMap(viewer, mapId)) {
     return NextResponse.json({ error: "Read access is required" }, { status: 403 });
   }
 
-  const { mapId } = await context.params;
   const map = await findActiveMap(mapId);
 
   if (map === null) {
@@ -39,8 +39,9 @@ export async function GET(_request: Request, context: RouteContext) {
 
 export async function POST(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
+  const { mapId } = await context.params;
 
-  if (viewer === null || !canWriteMarkers(viewer)) {
+  if (viewer === null || !canWriteMarkers(viewer, mapId)) {
     return NextResponse.json({ error: "Write access is required" }, { status: 403 });
   }
 
@@ -51,7 +52,6 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: input.error }, { status: 400 });
   }
 
-  const { mapId } = await context.params;
   const map = await findActiveMap(mapId);
 
   if (map === null) {

@@ -112,7 +112,7 @@ const MAP_FOOTER_TIPS = [
 ] as const;
 const SERVER_CLUSTER_ORDER = [
   "Epic",
-  "North Freedom Isles",
+  "Northern Freedom Isles",
   "Southern Freedom Isles",
 ] as const;
 const SERVER_CLUSTERS = new Map<string, typeof SERVER_CLUSTER_ORDER[number]>([
@@ -124,10 +124,10 @@ const SERVER_CLUSTERS = new Map<string, typeof SERVER_CLUSTER_ORDER[number]>([
   ["Pristine", "Southern Freedom Isles"],
   ["Release", "Southern Freedom Isles"],
   ["Xanadu", "Southern Freedom Isles"],
-  ["Cadence", "North Freedom Isles"],
-  ["Defiance", "North Freedom Isles"],
-  ["Harmony", "North Freedom Isles"],
-  ["Melody", "North Freedom Isles"],
+  ["Cadence", "Northern Freedom Isles"],
+  ["Defiance", "Northern Freedom Isles"],
+  ["Harmony", "Northern Freedom Isles"],
+  ["Melody", "Northern Freedom Isles"],
   ["Affliction", "Epic"],
   ["Desertion", "Epic"],
   ["Elevation", "Epic"],
@@ -360,6 +360,7 @@ export default function MapWorkspace({
   const [localMarkers, setLocalMarkers] = useState<WorkspaceMarker[] | null>(null);
   const [annotations, setAnnotations] = useState<UserAnnotation[]>(initialSettings.annotations);
   const [formError, setFormError] = useState<string | null>(null);
+  const [favoriteServerId, setFavoriteServerId] = useState<string | null>(initialSettings.favoriteServerId);
   const [markerVisibility, setMarkerVisibility] = useState<MarkerVisibility>(initialSettings.markerVisibility);
   const [markerColors, setMarkerColors] = useState<MarkerColors>(initialSettings.markerColors);
   const [markerOpacities, setMarkerOpacities] = useState<MarkerOpacities>(initialSettings.markerOpacities);
@@ -443,16 +444,19 @@ export default function MapWorkspace({
   const canViewMap = map !== null && viewer !== null && canReadMap({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
-    isAdmin: viewer.isAdmin
-  });
-  const canWriteMapMarkers = viewer !== null && canWriteMarkers({
+    isAdmin: viewer.isAdmin,
+    mapPermissions: viewer.mapPermissions
+  }, map.id);
+  const canWriteMapMarkers = map !== null && viewer !== null && canWriteMarkers({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
-    isAdmin: viewer.isAdmin
-  });
+    isAdmin: viewer.isAdmin,
+    mapPermissions: viewer.mapPermissions
+  }, map.id);
   const userMapSettings = useMemo<UserMapSettings>(() => ({
     annotations,
     eventFeedPanelSize,
+    favoriteServerId,
     markerColors,
     markerOpacities,
     markerVisibility,
@@ -467,6 +471,7 @@ export default function MapWorkspace({
   }), [
     annotations,
     eventFeedPanelSize,
+    favoriteServerId,
     markerColors,
     markerOpacities,
     markerVisibility,
@@ -488,6 +493,7 @@ export default function MapWorkspace({
   );
   const resetUserMapSettings = useCallback(() => {
     setEventFeedPanelSize(DEFAULT_USER_MAP_SETTINGS.eventFeedPanelSize);
+    setFavoriteServerId(DEFAULT_USER_MAP_SETTINGS.favoriteServerId);
     setMarkerColors(DEFAULT_USER_MAP_SETTINGS.markerColors);
     setMarkerOpacities(DEFAULT_USER_MAP_SETTINGS.markerOpacities);
     setMarkerVisibility(DEFAULT_USER_MAP_SETTINGS.markerVisibility);
@@ -1780,7 +1786,16 @@ export default function MapWorkspace({
           <SelectedCoordinateReticule coordinate={renderedSelectedCoordinate} view={view} />
         </section>
       ) : (
-        <section className="map-locked" aria-label="Map access required" />
+        <section className="map-locked" aria-label="Map access required">
+          <div className="map-locked-message">
+            <strong>{viewer === null ? "Log in to view the map" : "No readable servers"}</strong>
+            <span>
+              {viewer === null
+                ? "Use the account menu in the upper right to sign in."
+                : "Ask an admin or operator to grant read access for this server."}
+            </span>
+          </div>
+        </section>
       )}
       {canViewMap ? (
         <SearchOverlay
@@ -1799,8 +1814,11 @@ export default function MapWorkspace({
                   navigateToServer(serverId);
                 }
               }}
+              onFavoriteServerChange={setFavoriteServerId}
+              favoriteServerId={favoriteServerId}
               selectedLayerId={selectedMapLayer?.id ?? ""}
               selectedServerId={map.id}
+              selectedServerName={map.name}
               servers={availableServers}
             />
           ) : null}
@@ -1879,6 +1897,7 @@ export default function MapWorkspace({
         <AccountOverlay
           isOpen={topPanel === "account"}
           onOpenChange={(isOpen) => setTopPanel(isOpen ? "account" : null)}
+          servers={availableServers}
           viewer={viewer}
         />
         {canViewMap ? (
@@ -2117,40 +2136,96 @@ function SearchOverlay({
 }
 
 function MapSelectionControls({
+  favoriteServerId,
   layers,
+  onFavoriteServerChange,
   onLayerChange,
   onServerChange,
   selectedLayerId,
   selectedServerId,
+  selectedServerName,
   servers
 }: {
+  favoriteServerId: string | null;
   layers: readonly WorkspaceMapLayer[];
+  onFavoriteServerChange(serverId: string | null): void;
   onLayerChange(layerId: string): void;
   onServerChange(serverId: string): void;
   selectedLayerId: string;
   selectedServerId: string;
+  selectedServerName: string;
   servers: readonly WorkspaceServer[];
 }) {
-  const groupedServers = getGroupedServers(servers);
+  const selectedServer = servers.find((server) => server.id === selectedServerId) ?? {
+    id: selectedServerId,
+    name: selectedServerName
+  };
+  const [isServerMenuOpen, setIsServerMenuOpen] = useState(false);
+  const groupedServers = getGroupedServers(servers, favoriteServerId);
+
+  function selectServer(serverId: string) {
+    setIsServerMenuOpen(false);
+    onServerChange(serverId);
+  }
 
   return (
     <div className="map-selection-controls">
-      <label>
-        <span>Server</span>
-        <select
+      <div className="map-server-dropdown">
+        <button
+          aria-controls="map-server-dropdown-panel"
+          aria-expanded={isServerMenuOpen}
+          aria-haspopup="menu"
           aria-label="Server"
-          onChange={(event) => onServerChange(event.target.value)}
-          value={selectedServerId}
+          className="map-server-dropdown-trigger"
+          onClick={() => setIsServerMenuOpen((current) => !current)}
+          role="combobox"
+          type="button"
         >
-          {groupedServers.map((group) => (
-            <optgroup key={group.name} label={group.name}>
-              {group.servers.map((server) => (
-                <option key={server.id} value={server.id}>{server.name}</option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </label>
+          <span aria-hidden="true" className={favoriteServerId === selectedServerId ? "map-server-current-star is-active" : "map-server-current-star"}>
+            {favoriteServerId === selectedServerId ? "★" : "☆"}
+          </span>
+          <span className="map-server-current-name">{selectedServer.name}</span>
+        </button>
+        {isServerMenuOpen ? (
+          <div aria-label="Server choices" className="map-server-dropdown-panel" id="map-server-dropdown-panel" role="menu">
+            {groupedServers.map((group) => (
+              <div aria-label={group.name} className="map-server-dropdown-group" key={group.name} role="group">
+                <div className="map-server-dropdown-heading">{group.name}</div>
+                {group.servers.map((server) => {
+                  const isFavorite = favoriteServerId === server.id;
+                  const favoriteLabel = isFavorite
+                    ? `Remove favorite server ${server.name}`
+                    : `Set ${server.name} as favorite server`;
+
+                  return (
+                    <div className={server.id === selectedServerId ? "map-server-option is-selected" : "map-server-option"} key={`${group.name}:${server.id}`}>
+                      <button
+                        aria-current={server.id === selectedServerId ? "true" : undefined}
+                        className="map-server-option-name"
+                        onClick={() => selectServer(server.id)}
+                        role="menuitem"
+                        type="button"
+                      >
+                        {server.name}
+                      </button>
+                      <button
+                        aria-label={favoriteLabel}
+                        aria-pressed={isFavorite}
+                        className={isFavorite ? "map-server-option-favorite is-active" : "map-server-option-favorite"}
+                        onClick={() => onFavoriteServerChange(isFavorite ? null : server.id)}
+                        title={favoriteLabel}
+                        type="button"
+                      >
+                        <span aria-hidden="true">{isFavorite ? "★" : "☆"}</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
       <label>
         <span>Map</span>
         <select
@@ -2167,12 +2242,15 @@ function MapSelectionControls({
   );
 }
 
-function getGroupedServers(servers: readonly WorkspaceServer[]): Array<{
+function getGroupedServers(servers: readonly WorkspaceServer[], favoriteServerId: string | null): Array<{
   name: string;
   servers: WorkspaceServer[];
 }> {
   const serversByCluster = new Map<string, WorkspaceServer[]>();
   const unclusteredServers: WorkspaceServer[] = [];
+  const favoriteServer = favoriteServerId === null
+    ? null
+    : servers.find((server) => server.id === favoriteServerId) ?? null;
 
   for (const server of servers) {
     const cluster = SERVER_CLUSTERS.get(server.name);
@@ -2192,6 +2270,13 @@ function getGroupedServers(servers: readonly WorkspaceServer[]): Array<{
       servers: sortServersByName(serversByCluster.get(cluster) ?? [])
     }))
     .filter((group) => group.servers.length > 0);
+
+  if (favoriteServer !== null) {
+    groups.unshift({
+      name: "Favorite",
+      servers: [favoriteServer]
+    });
+  }
 
   if (unclusteredServers.length > 0) {
     groups.push({
@@ -4077,7 +4162,11 @@ function applyMapLayer(map: WorkspaceMap, layer: WorkspaceMapLayer | null): Work
 
 function getAvailableServers(servers: readonly WorkspaceServer[], map: WorkspaceMap | null): WorkspaceServer[] {
   if (servers.length > 0) {
-    return Array.from(servers);
+    if (map === null || servers.some((server) => server.id === map.id || server.name === map.name)) {
+      return Array.from(servers);
+    }
+
+    return [...servers, { id: map.id, name: map.name }];
   }
 
   return map === null ? [] : [{ id: map.id, name: map.name }];

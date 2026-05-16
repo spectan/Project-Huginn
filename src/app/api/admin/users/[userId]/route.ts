@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { updateAdminUser, removeAdminUser } from "@/lib/admin/users";
 import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
-import type { AccessLevel } from "@/lib/domain/permissions";
+import type { AccessLevel, MapPermission } from "@/lib/domain/permissions";
 
 type RouteContext = {
   params: Promise<{
@@ -20,9 +20,9 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = await readJson(request);
   const { userId } = await context.params;
   const result = await updateAdminUser({
-    accessLevel: getAccessLevel(body),
     actor: viewer,
     isAdmin: getIsAdmin(body),
+    mapPermissions: getMapPermissions(body),
     userId
   }, createAdminUserDependencies());
 
@@ -67,19 +67,6 @@ async function readJson(request: Request): Promise<unknown> {
   }
 }
 
-function getAccessLevel(body: unknown): AccessLevel {
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "accessLevel" in body &&
-    (body.accessLevel === "NONE" || body.accessLevel === "READ" || body.accessLevel === "WRITE")
-  ) {
-    return body.accessLevel;
-  }
-
-  return "NONE";
-}
-
 function getIsAdmin(body: unknown): boolean {
   return (
     typeof body === "object" &&
@@ -87,4 +74,43 @@ function getIsAdmin(body: unknown): boolean {
     "isAdmin" in body &&
     body.isAdmin === true
   );
+}
+
+function getMapPermissions(body: unknown): MapPermission[] {
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("mapPermissions" in body) ||
+    !Array.isArray(body.mapPermissions)
+  ) {
+    return [];
+  }
+
+  return body.mapPermissions
+    .filter(isMapPermissionInput)
+    .map((permission) => ({
+      accessLevel: permission.accessLevel,
+      isOperator: permission.isOperator === true,
+      mapId: permission.mapId
+    }));
+}
+
+function isMapPermissionInput(value: unknown): value is {
+  accessLevel: AccessLevel;
+  isOperator?: boolean;
+  mapId: string;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "accessLevel" in value &&
+    isAccessLevel(value.accessLevel) &&
+    "mapId" in value &&
+    typeof value.mapId === "string" &&
+    (!("isOperator" in value) || typeof value.isOperator === "boolean")
+  );
+}
+
+function isAccessLevel(value: unknown): value is AccessLevel {
+  return value === "NONE" || value === "READ" || value === "WRITE";
 }

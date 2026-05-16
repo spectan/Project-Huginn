@@ -10,7 +10,10 @@ const readableActor = {
   accessLevel: "READ",
   approvalStatus: "APPROVED",
   id: "user-1",
-  isAdmin: false
+  isAdmin: false,
+  mapPermissions: [
+    { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+  ]
 } as const;
 
 const blockedActor = {
@@ -72,7 +75,13 @@ describe("user map settings service", () => {
 
   it("rejects missing maps", async () => {
     await expect(getUserMapSettings({
-      actor: readableActor,
+      actor: {
+        ...readableActor,
+        mapPermissions: [
+          ...readableActor.mapPermissions,
+          { accessLevel: "READ", isOperator: false, mapId: "missing-map" }
+        ]
+      },
       mapId: "missing-map"
     }, dependencies)).resolves.toEqual({
       ok: false,

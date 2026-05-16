@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     approvalStatus: "APPROVED" | "PENDING";
     id: string;
     isAdmin: boolean;
+    mapPermissions?: readonly [{ accessLevel: "WRITE"; isOperator: false; mapId: string }];
   },
   map: null as null | { id: string },
   noteCategoryDelete: vi.fn(async () => ({ id: "category-landmarks" })),
@@ -81,7 +82,10 @@ describe("PATCH /api/maps/[mapId]/note-categories/[categoryId]", () => {
       accessLevel: "WRITE",
       approvalStatus: "APPROVED",
       id: "writer-1",
-      isAdmin: false
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "WRITE", isOperator: false, mapId: "map-1" }
+      ]
     };
     mocks.map = { id: "map-1" };
   });

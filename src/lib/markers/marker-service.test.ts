@@ -13,6 +13,9 @@ const writer = {
   approvalStatus: "APPROVED",
   id: "writer-id",
   isAdmin: false,
+  mapPermissions: [
+    { accessLevel: "WRITE", isOperator: false, mapId: "map-1" }
+  ],
   username: "Writer"
 } as const;
 
@@ -21,6 +24,9 @@ const reader = {
   approvalStatus: "APPROVED",
   id: "reader-id",
   isAdmin: false,
+  mapPermissions: [
+    { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+  ],
   username: "Reader"
 } as const;
 

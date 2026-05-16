@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
     approvalStatus: "APPROVED" | "PENDING";
     id: string;
     isAdmin: boolean;
+    mapPermissions?: readonly [{ accessLevel: "WRITE"; isOperator: false; mapId: string }];
   },
   map: null as null | { id: string },
   noteCategoryUpsert: vi.fn(async (input: unknown) => {
@@ -74,7 +75,10 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
       accessLevel: "WRITE",
       approvalStatus: "APPROVED",
       id: "writer-1",
-      isAdmin: false
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "WRITE", isOperator: false, mapId: "map-1" }
+      ]
     };
 
     const response = await POST(createCategoryRequest({ name: "Landmarks" }), {

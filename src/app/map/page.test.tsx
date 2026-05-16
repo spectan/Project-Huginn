@@ -8,6 +8,7 @@ import MapWorkspace from "./map-workspace";
 const approvedViewer = {
   approvalStatus: "APPROVED",
   isAdmin: true,
+  mapPermissions: [],
   pendingApprovalCount: 0,
   permissions: "WRITE",
   username: "Admin"
@@ -16,12 +17,18 @@ const approvedViewer = {
 const readOnlyViewer = {
   ...approvedViewer,
   isAdmin: false,
+  mapPermissions: [
+    { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+  ],
   permissions: "READ"
 } as const;
 
 const writerViewer = {
   ...approvedViewer,
   isAdmin: false,
+  mapPermissions: [
+    { accessLevel: "WRITE", isOperator: false, mapId: "map-1" }
+  ],
   permissions: "WRITE",
   username: "Writer"
 } as const;
@@ -211,9 +218,8 @@ describe("MapPage", () => {
     const permissionsGroup = within(accountDialog).getByRole("group", { name: "Permissions" });
 
     expect(within(accountDialog).queryByText("Status")).toBeNull();
-    expect(within(permissionsGroup).getByText("Read/Write")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Admin")).toBeTruthy();
-    expect(within(permissionsGroup).getAllByText("Allowed")).toHaveLength(2);
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
     expect(within(accountDialog).getByText("Project Huginn - v1.1.1")).toBeTruthy();
@@ -232,8 +238,8 @@ describe("MapPage", () => {
     const permissionsGroup = within(screen.getByRole("dialog", { name: "Account settings" }))
       .getByRole("group", { name: "Permissions" });
 
+    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Read")).toBeTruthy();
-    expect(within(permissionsGroup).getByText("Allowed")).toBeTruthy();
     expect(within(permissionsGroup).queryByText("Read/Write")).toBeNull();
     expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
@@ -516,8 +522,9 @@ describe("MapPage", () => {
       viewer: approvedViewer
     }));
 
-    expect(screen.getByRole("combobox", { name: "Server" })).toHaveProperty("value", "map-1");
-    expect(screen.getByRole("option", { name: "Celebration" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Server" }).textContent).toContain("Celebration");
+    fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
+    expect(screen.getByRole("menuitem", { name: "Celebration" })).toBeTruthy();
 
     const mapSelect = screen.getByRole("combobox", { name: "Map" });
     expect(mapSelect).toHaveProperty("value", "layer-terrain");
@@ -549,26 +556,99 @@ describe("MapPage", () => {
       viewer: approvedViewer
     }));
 
-    const serverSelect = screen.getByRole("combobox", { name: "Server" });
-    const groups = Array.from(serverSelect.querySelectorAll("optgroup"));
+    fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
 
-    expect(groups.map((group) => group.label)).toEqual([
+    const serverMenu = screen.getByRole("menu", { name: "Server choices" });
+    const groups = within(serverMenu).getAllByRole("group");
+
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
       "Epic",
-      "North Freedom Isles",
+      "Northern Freedom Isles",
       "Southern Freedom Isles"
     ]);
-    expect(Array.from(groups[0]?.querySelectorAll("option") ?? []).map((option) => option.textContent)).toEqual([
+    expect(within(groups[0] as HTMLElement).getAllByRole("menuitem").map((option) => option.textContent)).toEqual([
       "Affliction",
       "Elevation"
     ]);
-    expect(Array.from(groups[1]?.querySelectorAll("option") ?? []).map((option) => option.textContent)).toEqual([
+    expect(within(groups[1] as HTMLElement).getAllByRole("menuitem").map((option) => option.textContent)).toEqual([
       "Cadence",
       "Harmony"
     ]);
-    expect(Array.from(groups[2]?.querySelectorAll("option") ?? []).map((option) => option.textContent)).toEqual([
+    expect(within(groups[2] as HTMLElement).getAllByRole("menuitem").map((option) => option.textContent)).toEqual([
       "Celebration",
       "Xanadu"
     ]);
+  });
+
+  it("shows a favorite server at the top while keeping it in its cluster", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        favoriteServerId: "map-harmony"
+      },
+      map: activeMap,
+      servers: [
+        { id: "map-cadence", name: "Cadence" },
+        { id: "map-harmony", name: "Harmony" },
+        { id: "map-celebration", name: "Celebration" }
+      ],
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
+
+    const serverMenu = screen.getByRole("menu", { name: "Server choices" });
+    const groups = within(serverMenu).getAllByRole("group");
+
+    expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
+      "Favorite",
+      "Northern Freedom Isles",
+      "Southern Freedom Isles"
+    ]);
+    expect(within(groups[0] as HTMLElement).getAllByRole("menuitem").map((option) => option.textContent)).toEqual([
+      "Harmony"
+    ]);
+    expect(within(groups[1] as HTMLElement).getAllByRole("menuitem").map((option) => option.textContent)).toEqual([
+      "Cadence",
+      "Harmony"
+    ]);
+  });
+
+  it("saves the selected server as the single favorite server setting", async () => {
+    const fetchMock = vi.fn(async () => ({
+      json: async () => ({}),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      servers: [
+        { id: "map-1", name: "Celebration" },
+        { id: "map-harmony", name: "Harmony" }
+      ],
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
+    fireEvent.click(screen.getByRole("button", { name: "Set Celebration as favorite server" }));
+
+    expect(screen.getAllByRole("button", { name: "Remove favorite server Celebration" })[0]?.getAttribute("aria-pressed")).toBe("true");
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/maps/map-1/settings",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+
+    const settingsCall = (fetchMock.mock.calls as unknown as Array<[unknown, RequestInit | undefined]>)
+      .find(([url]) => url === "/api/maps/map-1/settings");
+    const settingsBody = JSON.parse(String(settingsCall?.[1]?.body));
+    expect(settingsBody.favoriteServerId).toBe("map-1");
   });
 
   it("prevents native image dragging so pointer panning owns the interaction", () => {
@@ -1875,11 +1955,7 @@ describe("MapPage", () => {
       initialMarkers: [],
       initialNoteCategories: noteCategories,
       map: activeMap,
-      viewer: {
-        ...approvedViewer,
-        isAdmin: false,
-        username: "Writer"
-      }
+      viewer: writerViewer
     }));
 
     const stage = screen.getByTestId("map-stage");

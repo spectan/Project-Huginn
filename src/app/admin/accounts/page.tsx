@@ -19,5 +19,11 @@ export default async function AdminAccountsPage() {
     return <AdminAccountsAccessDenied message={result.error} />;
   }
 
-  return <AdminAccountsView users={result.value.users} />;
+  return (
+    <AdminAccountsView
+      maps={result.value.maps}
+      users={result.value.users}
+      viewerCanManageGlobalAccounts={result.value.viewerCanManageGlobalAccounts}
+    />
+  );
 }
