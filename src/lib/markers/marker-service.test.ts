@@ -159,7 +159,7 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     mapId: string;
     name: string;
     notes: string;
-    pathType: "bridge" | "canal" | "highway";
+    pathType: "bridge" | "canal" | "highway" | "tunnel";
     points: Array<{ x: number; y: number }>;
     width: number;
     x: number;

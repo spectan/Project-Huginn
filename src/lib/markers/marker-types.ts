@@ -129,7 +129,7 @@ export type PathWorkspaceMarker = {
   name: string;
   notes: string;
   points: Array<{ x: number; y: number }>;
-  type: "bridge" | "canal" | "highway";
+  type: "bridge" | "canal" | "highway" | "tunnel";
   width: number;
   x: number;
   y: number;
@@ -167,6 +167,7 @@ export type MarkerVisibility = {
   sectorGrid: boolean;
   towers: boolean;
   towerNames: boolean;
+  tunnels: boolean;
 };
 
 export type MarkerColors = {
@@ -183,6 +184,7 @@ export type MarkerColors = {
   rifts: string;
   sectorGrid: string;
   towers: string;
+  tunnels: string;
 };
 
 export type MarkerOpacities = {
@@ -197,6 +199,7 @@ export type MarkerOpacities = {
   riftOverlays: number;
   sectorGrid: number;
   towers: number;
+  tunnels: number;
 };
 
 export type TileHighlightSettings = {

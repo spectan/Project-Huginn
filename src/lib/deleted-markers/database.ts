@@ -520,8 +520,8 @@ function requireDate(value: Date | null): Date {
   return value;
 }
 
-function requirePathType(value: string): "bridge" | "canal" | "highway" {
-  if (value === "bridge" || value === "canal" || value === "highway") {
+function requirePathType(value: string): "bridge" | "canal" | "highway" | "tunnel" {
+  if (value === "bridge" || value === "canal" || value === "highway" || value === "tunnel") {
     return value;
   }
 

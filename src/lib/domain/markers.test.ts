@@ -626,7 +626,7 @@ describe("validateLocateSoulInput", () => {
 });
 
 describe("validatePathInput", () => {
-  it("normalizes bridge, canal, and highway paths with at least two points", () => {
+  it("normalizes bridge, canal, highway, and tunnel paths with at least two points", () => {
     expect(validatePathInput({
       name: "Cedar Bridge",
       notes: "Two lanes",
@@ -651,6 +651,31 @@ describe("validatePathInput", () => {
         width: 2,
         x: 10,
         y: 20
+      }
+    });
+
+    expect(validatePathInput({
+      name: "South Tunnel",
+      notes: "Underground route",
+      points: [
+        { x: 20, y: 30 },
+        { x: 20, y: 34 }
+      ],
+      type: "tunnel",
+      width: 3
+    }, bounds)).toEqual({
+      ok: true,
+      value: {
+        name: "South Tunnel",
+        notes: "Underground route",
+        pathType: "tunnel",
+        points: [
+          { x: 20, y: 30 },
+          { x: 20, y: 34 }
+        ],
+        width: 3,
+        x: 20,
+        y: 30
       }
     });
   });
@@ -687,12 +712,12 @@ describe("validatePathInput", () => {
       }
     },
     {
-      error: "Path type must be bridge, canal, or highway",
+      error: "Path type must be bridge, canal, highway, or tunnel",
       input: {
         name: "",
         notes: "",
         points: [{ x: 10, y: 20 }, { x: 11, y: 20 }],
-        type: "tunnel",
+        type: "dock",
         width: 1
       }
     }

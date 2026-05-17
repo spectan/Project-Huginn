@@ -156,7 +156,7 @@ export type LocateSoulMarkerInput = {
   y: number;
 };
 
-export type PathType = "bridge" | "canal" | "highway";
+export type PathType = "bridge" | "canal" | "highway" | "tunnel";
 
 export type PathPointInput = {
   x: number;
@@ -682,11 +682,11 @@ function normalizeCampType(input: string): Result<CampType> {
 }
 
 function normalizePathType(input: string): Result<PathType> {
-  if (input === "bridge" || input === "canal" || input === "highway") {
+  if (input === "bridge" || input === "canal" || input === "highway" || input === "tunnel") {
     return ok(input);
   }
 
-  return err("Path type must be bridge, canal, or highway");
+  return err("Path type must be bridge, canal, highway, or tunnel");
 }
 
 function validateCenteredMarkerFootprint(

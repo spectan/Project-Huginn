@@ -21,7 +21,7 @@ type DeletedMarkerAuditAction =
   | "MARKER_RESTORED";
 
 type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "SYSTEM";
-type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway">;
+type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway" | "tunnel">;
 
 type DeletedMarkerAuditInput = {
   action: DeletedMarkerAuditAction;
@@ -323,7 +323,8 @@ export async function cleanupExpiredDeletedMarkers(
       minedoor: minedoorCount,
       note: noteCount,
       rift: riftCount,
-      tower: towerCount
+      tower: towerCount,
+      tunnel: pathCounts.tunnel
     }
   };
 }
@@ -494,7 +495,7 @@ async function deleteAndAuditExpiredPathMarkers(
   now: Date,
   dependencies: DeletedMarkerDependencies
 ): Promise<Record<PathMarkerType, number>> {
-  const counts = { bridge: 0, canal: 0, highway: 0 };
+  const counts = { bridge: 0, canal: 0, highway: 0, tunnel: 0 };
 
   if (markers.length === 0) {
     return counts;
@@ -576,7 +577,7 @@ function getAuditTargetType(markerType: MarkerType): DeletedMarkerAuditTarget {
 }
 
 function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType {
-  return markerType === "bridge" || markerType === "canal" || markerType === "highway";
+  return markerType === "bridge" || markerType === "canal" || markerType === "highway" || markerType === "tunnel";
 }
 
 function getPathTypeTitle(markerType: PathMarkerType): string {
@@ -588,5 +589,9 @@ function getPathTypeTitle(markerType: PathMarkerType): string {
     return "Canal";
   }
 
-  return "Highway";
+  if (markerType === "highway") {
+    return "Highway";
+  }
+
+  return "Tunnel";
 }

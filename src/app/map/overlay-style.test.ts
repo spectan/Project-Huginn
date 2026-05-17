@@ -266,6 +266,17 @@ describe("map overlay styles", () => {
     expect(lineBlock).toContain("pointer-events: none");
   });
 
+  it("keeps roadway draft point handles above existing marker paths while editing", () => {
+    const markerLayerBlock = getStandaloneCssBlock(".map-marker-layer");
+    const draftLayerBlock = getStandaloneCssBlock(".map-path-draft-layer");
+    const draftPointBlock = getStandaloneCssBlock(".map-path-draft-point");
+
+    expect(markerLayerBlock).toContain("z-index: 5");
+    expect(draftLayerBlock).toContain("z-index: 6");
+    expect(draftLayerBlock).toContain("pointer-events: none");
+    expect(draftPointBlock).toContain("pointer-events: auto");
+  });
+
   it("keeps the event feed resizable and scrollable", () => {
     const panelBlock = getStandaloneCssBlock(".map-event-feed-panel");
     const listBlock = getStandaloneCssBlock(".map-event-feed-list");

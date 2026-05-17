@@ -1079,6 +1079,7 @@ describe("MapPage", () => {
     expect(screen.getByRole("menuitem", { name: "Bridge" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Canal" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Highway" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Tunnel" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Misc" }));
     expect(screen.getByRole("menu", { name: "Misc" })).toBeTruthy();
@@ -3037,6 +3038,7 @@ describe("MapPage", () => {
       "Bridges",
       "Canals",
       "Highways",
+      "Tunnels",
       "Misc",
       "Rifts",
       "Camps",
@@ -4004,6 +4006,19 @@ describe("MapPage", () => {
           width: 2,
           x: 100,
           y: 120
+        },
+        {
+          id: "path-2",
+          name: "North Tunnel",
+          notes: "Underground",
+          points: [
+            { x: 150, y: 160 },
+            { x: 155, y: 160 }
+          ],
+          type: "tunnel",
+          width: 1,
+          x: 150,
+          y: 160
         }
       ],
       map: activeMap,
@@ -4014,7 +4029,10 @@ describe("MapPage", () => {
     expect(bridge.getAttribute("stroke")).toBe("#cc00cc");
     expect(bridge.getAttribute("opacity")).toBe("0.5");
     expect(bridge.getAttribute("stroke-width")).toBe("2");
-    expect(bridge.getAttribute("points")).toBe("100.5,120.5 140.5,120.5");
+    expect(bridge.getAttribute("points")).toBe("101,121 141,121");
+    expect(bridge.getAttribute("stroke-linecap")).toBe("square");
+    expect(bridge.getAttribute("stroke-linejoin")).toBe("miter");
+    expect(screen.getByTestId("path-marker-path-2").getAttribute("stroke")).toBe("#6b7280");
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const layerControls = expandAllLayerCategories();
@@ -4027,10 +4045,15 @@ describe("MapPage", () => {
 
     expect(screen.getByTestId("path-marker-path-1").getAttribute("stroke")).toBe("#d946ef");
     expect(screen.getByTestId("path-marker-path-1").getAttribute("opacity")).toBe("0.42");
+    expect(layerControls.getByRole("checkbox", { name: "Tunnels" })).toBeTruthy();
+    expect(layerControls.getByLabelText("Tunnels color")).toHaveProperty("value", "#6b7280");
+    expect(layerControls.getByRole("slider", { name: "Tunnels opacity" })).toHaveProperty("value", "50");
 
     fireEvent.click(layerControls.getByRole("checkbox", { name: "Bridges" }));
+    fireEvent.click(layerControls.getByRole("checkbox", { name: "Tunnels" }));
 
     expect(screen.queryByTestId("path-marker-path-1")).toBeNull();
+    expect(screen.queryByTestId("path-marker-path-2")).toBeNull();
   });
 
   it("draws a bridge path by clicking map points and saves it", async () => {
@@ -4070,6 +4093,8 @@ describe("MapPage", () => {
 
     const drawDialog = screen.getByRole("dialog", { name: "Draw Bridge" });
     expect(within(drawDialog).getByText("1 point")).toBeTruthy();
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("stroke-linecap")).toBe("square");
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("stroke-linejoin")).toBe("miter");
 
     fireEvent.pointerDown(viewport, {
       button: 0,
@@ -4185,6 +4210,321 @@ describe("MapPage", () => {
     const drawDialog = screen.getByRole("dialog", { name: "Draw Bridge" });
     expect(within(drawDialog).getByText("1: 503, 604")).toBeTruthy();
     expect(within(drawDialog).queryByText("1: 500, 600")).toBeNull();
+  });
+
+  it("opens roadway marker actions from map right-clicks when roadway edit mode is active", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          estimatedRiftTime: null,
+          id: "rift-1",
+          arrivalDate: null,
+          notes: "",
+          type: "rift",
+          x: 503,
+          y: 604
+        },
+        {
+          id: "bridge-1",
+          name: "Hidden Bridge",
+          notes: "Runs under the rift",
+          points: [
+            { x: 500, y: 604 },
+            { x: 510, y: 604 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 500,
+          y: 604
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
+      .getByRole("group", { name: "Roadway Edit Mode" });
+    fireEvent.click(within(roadwayEditPanel).getByRole("checkbox", { name: "Roadway Edit Mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    fireEvent.contextMenu(screen.getByTestId("map-stage"), {
+      clientX: 503,
+      clientY: 604
+    });
+
+    const menu = screen.getByRole("menu", { name: "Marker actions" });
+    expect(menu.style.left).toBe("503px");
+    expect(menu.style.top).toBe("604px");
+    expect(screen.getByText("Hidden Bridge")).toBeTruthy();
+    expect(screen.getByText("Bridge | 2 points | Width 2")).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Edit Bridge Hidden Bridge" })).toBeTruthy();
+  });
+
+  it("drags roadway edit points to new coordinates before saving", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (url === "/api/markers/bridge/bridge-1" && init?.method === "PATCH") {
+        return new Response(JSON.stringify({
+          marker: {
+            id: "bridge-1",
+            name: "Cedar Bridge",
+            notes: "River crossing",
+            points: [
+              { x: 130, y: 150 },
+              { x: 140, y: 120 }
+            ],
+            type: "bridge",
+            width: 2,
+            x: 130,
+            y: 150
+          }
+        }), { status: 200 });
+      }
+
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "bridge-1",
+          name: "Cedar Bridge",
+          notes: "River crossing",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
+      .getByRole("group", { name: "Roadway Edit Mode" });
+    fireEvent.click(within(roadwayEditPanel).getByRole("checkbox", { name: "Roadway Edit Mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    fireEvent.contextMenu(screen.getByTestId("path-marker-bridge-1"), {
+      clientX: 120,
+      clientY: 120
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Bridge Cedar Bridge" }));
+
+    const drawDialog = screen.getByRole("dialog", { name: "Draw Bridge" });
+    expect(screen.queryByTestId("path-marker-bridge-1")).toBeNull();
+    const firstPoint = screen.getByRole("button", { name: "Path point 1" });
+    const startLeft = Number.parseFloat(firstPoint.style.left);
+    const startTop = Number.parseFloat(firstPoint.style.top);
+    fireEvent.pointerDown(firstPoint, {
+      button: 0,
+      clientX: startLeft,
+      clientY: startTop,
+      pointerId: 88
+    });
+    fireEvent.pointerMove(window, {
+      clientX: startLeft + 29.5,
+      clientY: startTop + 29.5,
+      pointerId: 88
+    });
+    fireEvent.pointerUp(window, {
+      clientX: startLeft + 29.5,
+      clientY: startTop + 29.5,
+      pointerId: 88
+    });
+
+    await waitFor(() => expect(within(drawDialog).getByText("1: 130, 150")).toBeTruthy());
+    expect(within(drawDialog).queryByText("1: 100, 120")).toBeNull();
+
+    fireEvent.click(within(drawDialog).getByRole("button", { name: "Save path" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/markers/bridge/bridge-1",
+      expect.objectContaining({
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      })
+    ));
+
+    const pathUpdateCall = (fetchMock.mock.calls as Array<[string | URL | Request, RequestInit?]>)
+      .find((call) => call[0] === "/api/markers/bridge/bridge-1");
+    expect(pathUpdateCall).toBeDefined();
+
+    if (pathUpdateCall === undefined) {
+      return;
+    }
+
+    expect(JSON.parse(String(pathUpdateCall[1]?.body))).toEqual({
+      name: "Cedar Bridge",
+      notes: "River crossing",
+      points: [
+        { x: 130, y: 150 },
+        { x: 140, y: 120 }
+      ],
+      type: "bridge",
+      width: 2
+    });
+  });
+
+  it("hides an edited highway while its draft route is active", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "highway-1",
+          name: "East Road",
+          notes: "Main route",
+          points: [
+            { x: 120, y: 130 },
+            { x: 180, y: 130 }
+          ],
+          type: "highway",
+          width: 2,
+          x: 120,
+          y: 130
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
+      .getByRole("group", { name: "Roadway Edit Mode" });
+    fireEvent.click(within(roadwayEditPanel).getByRole("checkbox", { name: "Roadway Edit Mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    fireEvent.contextMenu(screen.getByTestId("path-marker-highway-1"), {
+      clientX: 150,
+      clientY: 130
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Highway East Road" }));
+
+    expect(screen.queryByTestId("path-marker-highway-1")).toBeNull();
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")).toBe("1024.5,1024.5 1084.5,1024.5");
+  });
+
+  it("keeps prior highway draft connections visible while moving later points", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "highway-1",
+          name: "East Road",
+          notes: "Main route",
+          points: [
+            { x: 120, y: 130 },
+            { x: 150, y: 130 },
+            { x: 180, y: 130 },
+            { x: 210, y: 130 }
+          ],
+          type: "highway",
+          width: 2,
+          x: 120,
+          y: 130
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
+      .getByRole("group", { name: "Roadway Edit Mode" });
+    fireEvent.click(within(roadwayEditPanel).getByRole("checkbox", { name: "Roadway Edit Mode" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+
+    fireEvent.contextMenu(screen.getByTestId("path-marker-highway-1"), {
+      clientX: 150,
+      clientY: 130
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Highway East Road" }));
+
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.split(" ")).toHaveLength(4);
+
+    const draggedPoint = screen.getByRole("button", { name: "Path point 2" });
+    const startLeft = Number.parseFloat(draggedPoint.style.left);
+    const startTop = Number.parseFloat(draggedPoint.style.top);
+    fireEvent.pointerDown(draggedPoint, {
+      button: 0,
+      clientX: startLeft,
+      clientY: startTop,
+      pointerId: 89
+    });
+    fireEvent.pointerMove(window, {
+      clientX: startLeft + 9.5,
+      clientY: startTop + 29.5,
+      pointerId: 89
+    });
+
+    await waitFor(() => expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.split(" ")).toHaveLength(4));
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.startsWith("1024.5,1024.5")).toBe(true);
+
+    fireEvent.pointerUp(window, {
+      clientX: startLeft + 9.5,
+      clientY: startTop + 29.5,
+      pointerId: 89
+    });
+
+    await waitFor(() => expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.split(" ")).toHaveLength(4));
+  });
+
+  it("centers even-width roadway paths across whole tiles", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "bridge-1",
+          name: "Two Tile Bridge",
+          notes: "",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    expect(screen.getByTestId("path-marker-bridge-1").getAttribute("points")).toBe("101,121 141,121");
+  });
+
+  it("makes tall marker context menus scroll inside the viewport", () => {
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 500
+    });
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: Array.from({ length: 14 }, (_, index) => ({
+        category: "General",
+        id: `note-${index}`,
+        text: "",
+        title: `Stacked note ${index}`,
+        type: "note" as const,
+        x: 250,
+        y: 300
+      })),
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Note General - Stacked note 0 at 250, 300" }), {
+      clientX: 250,
+      clientY: 300
+    });
+
+    const menu = screen.getByRole("menu", { name: "Marker actions" });
+    expect(menu.style.maxHeight).toBe("420px");
+    expect(menu.style.overflowY).toBe("auto");
   });
 
   it("uses roadway edit mode before paths show hover details or marker actions", () => {

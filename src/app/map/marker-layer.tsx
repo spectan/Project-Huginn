@@ -124,11 +124,11 @@ function renderMarker(
           onMouseLeave={canInteract ? onHoverEnd : undefined}
           onMouseMove={canInteract ? (event) => onHoverMove(marker, event) : undefined}
           opacity={getPathOpacity(marker.type, markerOpacities)}
-          points={getPathSvgPoints(marker.points, view)}
+          points={getPathSvgPoints(marker.points, marker.width, view)}
           role={canInteract ? "button" : undefined}
           stroke={getPathColor(marker.type, markerColors)}
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeLinecap="square"
+          strokeLinejoin="miter"
           strokeWidth={getPathStrokeWidth(marker.width, view)}
           tabIndex={canInteract ? 0 : undefined}
         />
@@ -683,12 +683,12 @@ function getNoteMarkerStyle(x: number, y: number, size: number, color: string, v
   };
 }
 
-function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" }> {
-  return marker.type === "bridge" || marker.type === "canal" || marker.type === "highway";
+function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }> {
+  return marker.type === "bridge" || marker.type === "canal" || marker.type === "highway" || marker.type === "tunnel";
 }
 
 function isPathVisible(
-  marker: Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" }>,
+  marker: Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }>,
   visibility: MarkerVisibility
 ): boolean {
   if (marker.type === "bridge") {
@@ -699,10 +699,14 @@ function isPathVisible(
     return visibility.canals;
   }
 
-  return visibility.highways;
+  if (marker.type === "highway") {
+    return visibility.highways;
+  }
+
+  return visibility.tunnels;
 }
 
-function getPathColor(type: "bridge" | "canal" | "highway", markerColors: MarkerColors): string {
+function getPathColor(type: "bridge" | "canal" | "highway" | "tunnel", markerColors: MarkerColors): string {
   if (type === "bridge") {
     return markerColors.bridges;
   }
@@ -711,10 +715,14 @@ function getPathColor(type: "bridge" | "canal" | "highway", markerColors: Marker
     return markerColors.canals;
   }
 
-  return markerColors.highways;
+  if (type === "highway") {
+    return markerColors.highways;
+  }
+
+  return markerColors.tunnels;
 }
 
-function getPathOpacity(type: "bridge" | "canal" | "highway", markerOpacities: MarkerOpacities): number {
+function getPathOpacity(type: "bridge" | "canal" | "highway" | "tunnel", markerOpacities: MarkerOpacities): number {
   if (type === "bridge") {
     return percentageToOpacity(markerOpacities.bridges);
   }
@@ -723,7 +731,11 @@ function getPathOpacity(type: "bridge" | "canal" | "highway", markerOpacities: M
     return percentageToOpacity(markerOpacities.canals);
   }
 
-  return percentageToOpacity(markerOpacities.highways);
+  if (type === "highway") {
+    return percentageToOpacity(markerOpacities.highways);
+  }
+
+  return percentageToOpacity(markerOpacities.tunnels);
 }
 
 function getPathClassName(isHighlighted: boolean, canInteract: boolean): string {
@@ -734,7 +746,7 @@ function getPathClassName(isHighlighted: boolean, canInteract: boolean): string 
   ].filter(Boolean).join(" ");
 }
 
-function getPathTypeLabel(type: "bridge" | "canal" | "highway"): string {
+function getPathTypeLabel(type: "bridge" | "canal" | "highway" | "tunnel"): string {
   if (type === "bridge") {
     return "Bridge";
   }
@@ -743,13 +755,23 @@ function getPathTypeLabel(type: "bridge" | "canal" | "highway"): string {
     return "Canal";
   }
 
-  return "Highway";
+  if (type === "highway") {
+    return "Highway";
+  }
+
+  return "Tunnel";
 }
 
-function getPathSvgPoints(points: Array<{ x: number; y: number }>, view: MarkerLayerView): string {
+function getPathSvgPoints(points: Array<{ x: number; y: number }>, width: number, view: MarkerLayerView): string {
+  const offset = getPathCoordinateOffset(width);
+
   return points.map((point) => (
-    `${formatSvgNumber(view.x + (point.x + 0.5) * view.zoom)},${formatSvgNumber(view.y + (point.y + 0.5) * view.zoom)}`
+    `${formatSvgNumber(view.x + (point.x + offset) * view.zoom)},${formatSvgNumber(view.y + (point.y + offset) * view.zoom)}`
   )).join(" ");
+}
+
+function getPathCoordinateOffset(width: number): number {
+  return Math.round(width) % 2 === 0 ? 1 : 0.5;
 }
 
 function getLocateSoulOverlayPath(

@@ -317,6 +317,20 @@ export function MapSettingsOverlay({
                     highways: !markerVisibility.highways
                   })}
                 />
+                <LayerControlRow
+                  checked={markerVisibility.tunnels}
+                  colorLabel="Tunnels color"
+                  colorValue={markerColors.tunnels}
+                  label="Tunnels"
+                  opacityLabel="Tunnels opacity"
+                  opacityValue={markerOpacities.tunnels}
+                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, tunnels: value })}
+                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, tunnels: value })}
+                  onToggle={() => onMarkerVisibilityChange({
+                    ...markerVisibility,
+                    tunnels: !markerVisibility.tunnels
+                  })}
+                />
               </>
             ) : null}
             <LayerCategory

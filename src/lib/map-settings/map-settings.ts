@@ -63,7 +63,8 @@ export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
   riftOverlays: true,
   sectorGrid: false,
   towers: true,
-  towerNames: false
+  towerNames: false,
+  tunnels: true
 };
 
 export const DEFAULT_MARKER_COLORS: MarkerColors = {
@@ -79,7 +80,8 @@ export const DEFAULT_MARKER_COLORS: MarkerColors = {
   notes: "#ff2bd6",
   rifts: "#ef4444",
   sectorGrid: "#ffffff",
-  towers: "#ffffff"
+  towers: "#ffffff",
+  tunnels: "#6b7280"
 };
 
 export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
@@ -93,7 +95,8 @@ export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
   notes: 50,
   riftOverlays: 100,
   sectorGrid: 50,
-  towers: 100
+  towers: 100,
+  tunnels: 50
 };
 
 export const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
@@ -147,7 +150,8 @@ const MARKER_VISIBILITY_KEYS = [
   "riftOverlays",
   "sectorGrid",
   "towers",
-  "towerNames"
+  "towerNames",
+  "tunnels"
 ] as const;
 
 const MARKER_COLOR_KEYS = [
@@ -163,7 +167,8 @@ const MARKER_COLOR_KEYS = [
   "notes",
   "rifts",
   "sectorGrid",
-  "towers"
+  "towers",
+  "tunnels"
 ] as const;
 
 const MARKER_OPACITY_KEYS = [
@@ -177,7 +182,8 @@ const MARKER_OPACITY_KEYS = [
   "notes",
   "riftOverlays",
   "sectorGrid",
-  "towers"
+  "towers",
+  "tunnels"
 ] as const;
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 const MAX_STORED_PANEL_POSITION_PX = 10000;

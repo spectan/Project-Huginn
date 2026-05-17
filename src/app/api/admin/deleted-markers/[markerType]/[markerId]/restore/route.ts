@@ -52,7 +52,8 @@ function parseMarkerType(value: string): MarkerType | null {
     value === "locateSoul" ||
     value === "bridge" ||
     value === "canal" ||
-    value === "highway"
+    value === "highway" ||
+    value === "tunnel"
   ) {
     return value;
   }

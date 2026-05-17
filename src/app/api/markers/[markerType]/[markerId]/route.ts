@@ -81,6 +81,7 @@ function isMarkerType(value: string): value is MarkerType {
     value === "locateSoul" ||
     value === "bridge" ||
     value === "canal" ||
-    value === "highway"
+    value === "highway" ||
+    value === "tunnel"
   );
 }

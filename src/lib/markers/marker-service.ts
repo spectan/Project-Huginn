@@ -939,7 +939,7 @@ function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
     });
   }
 
-  if (input.type === "bridge" || input.type === "canal" || input.type === "highway") {
+  if (input.type === "bridge" || input.type === "canal" || input.type === "highway" || input.type === "tunnel") {
     return ok({
       name: getString(input, "name"),
       notes: getString(input, "notes"),
@@ -1243,8 +1243,8 @@ function serializePath(path: PathRecord): PathWorkspaceMarker {
   };
 }
 
-function normalizeStoredPathType(pathType: string): "bridge" | "canal" | "highway" {
-  if (pathType === "canal" || pathType === "highway") {
+function normalizeStoredPathType(pathType: string): PathType {
+  if (pathType === "canal" || pathType === "highway" || pathType === "tunnel") {
     return pathType;
   }
 
@@ -1407,8 +1407,8 @@ function getAuditTargetType(markerType: MarkerType): MarkerAuditTarget {
   return "NOTE";
 }
 
-function isPathMarkerType(markerType: MarkerType): markerType is "bridge" | "canal" | "highway" {
-  return markerType === "bridge" || markerType === "canal" || markerType === "highway";
+function isPathMarkerType(markerType: MarkerType): markerType is PathType {
+  return markerType === "bridge" || markerType === "canal" || markerType === "highway" || markerType === "tunnel";
 }
 
 function isPathCreateMarkerInput(input: CreateMarkerInput): input is PathCreateMarkerInput {

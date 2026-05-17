@@ -227,7 +227,7 @@ type HoveredMarkerState = {
   screenY: number;
 };
 
-type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway">;
+type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway" | "tunnel">;
 
 type PathDraftState = {
   id?: string;
@@ -427,13 +427,17 @@ export default function MapWorkspace({
   );
   const displayedMarkersWithEditPreview = useMemo(
     () => {
+      if (pathDraft?.mode === "edit" && pathDraft.id !== undefined) {
+        return displayedMarkers.filter((marker) => marker.id !== pathDraft.id);
+      }
+
       if (dialog === null || dialog.mode !== "edit" || isPathMarker(dialog.marker)) {
         return displayedMarkers;
       }
 
       return displayedMarkers.map((marker) => marker.id === dialog.marker.id ? dialog.marker : marker);
     },
-    [dialog, displayedMarkers]
+    [dialog, displayedMarkers, pathDraft]
   );
   const hoveredMarkers = hoveredMarker?.markers ?? [];
   const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
@@ -1044,17 +1048,9 @@ export default function MapWorkspace({
       }
 
       event.preventDefault();
-      selectCoordinate(coordinate);
-      setContextMenu({
-        mapX: coordinate.x,
-        mapY: coordinate.y,
-        mode: "map",
-        screenX: event.clientX,
-        screenY: event.clientY,
-        view
-      });
+      void openCoordinateContextMenu(event.clientX, event.clientY, view);
     },
-    [canViewMap, selectCoordinate, view, visualMap]
+    [canViewMap, openCoordinateContextMenu, view, visualMap]
   );
 
   const handleDoubleClick = useCallback(
@@ -2008,7 +2004,8 @@ type AddMarkerSubmenuId = "misc" | "roadways";
 const ROADWAY_ADD_ITEMS: Array<{ label: string; markerType: MarkerType }> = [
   { label: "Bridge", markerType: "bridge" },
   { label: "Canal", markerType: "canal" },
-  { label: "Highway", markerType: "highway" }
+  { label: "Highway", markerType: "highway" },
+  { label: "Tunnel", markerType: "tunnel" }
 ];
 
 const MISC_ADD_ITEMS: Array<{ label: string; markerType: MarkerType }> = [
@@ -2608,7 +2605,8 @@ function getLegendItems(markerColors: MarkerColors): LegendItem[] {
     { color: markerColors.locateSouls, id: "locate-soul", label: "Locate Soul", variant: "square" },
     { color: markerColors.bridges, id: "bridge", label: "Bridge", variant: "line" },
     { color: markerColors.canals, id: "canal", label: "Canal", variant: "line" },
-    { color: markerColors.highways, id: "highway", label: "Highway", variant: "line" }
+    { color: markerColors.highways, id: "highway", label: "Highway", variant: "line" },
+    { color: markerColors.tunnels, id: "tunnel", label: "Tunnel", variant: "line" }
   ];
 }
 
@@ -2667,10 +2665,10 @@ function PathDraftLayer({
         <polyline
           className="map-path-draft-line"
           fill="none"
-          points={getPathDraftSvgPoints(draft.points, view)}
+          points={getPathDraftSvgPoints(draft.points, draft.width, view)}
           stroke={getDefaultPathColor(draft.type)}
-          strokeLinecap="round"
-          strokeLinejoin="round"
+          strokeLinecap="square"
+          strokeLinejoin="miter"
           strokeWidth={Math.max(1, draft.width * view.zoom)}
         />
       </svg>
@@ -2680,7 +2678,7 @@ function PathDraftLayer({
           className="map-path-draft-point"
           key={`${point.x}-${point.y}-${index}`}
           onPointerDown={(event) => onPointPointerDown(index, event)}
-          style={getScreenCoordinateStyle(point, view)}
+          style={getPathPointStyle(point, draft.width, view)}
           type="button"
         />
       ))}
@@ -3006,7 +3004,7 @@ function RoutePlannerLayer({
           className="map-route-planner-line"
           data-testid="route-planner-line"
           fill="none"
-          points={getPathDraftSvgPoints(points, view)}
+          points={getPathDraftSvgPoints(points, 1, view)}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -4355,13 +4353,28 @@ function getQuickDeedDialogState(
   };
 }
 
-function getPathDraftSvgPoints(points: MapCoordinate[], view: ViewState): string {
+function getPathDraftSvgPoints(points: MapCoordinate[], width: number, view: ViewState): string {
+  const offset = getPathCoordinateOffset(width);
+
   return points.map((point) => {
-    const x = view.x + (point.x + 0.5) * view.zoom;
-    const y = view.y + (point.y + 0.5) * view.zoom;
+    const x = view.x + (point.x + offset) * view.zoom;
+    const y = view.y + (point.y + offset) * view.zoom;
 
     return `${formatSvgNumber(x)},${formatSvgNumber(y)}`;
   }).join(" ");
+}
+
+function getPathPointStyle(point: MapCoordinate, width: number, view: ViewState): CSSProperties {
+  const offset = getPathCoordinateOffset(width);
+
+  return getScreenCoordinateStyle({
+    x: point.x + offset - 0.5,
+    y: point.y + offset - 0.5
+  }, view);
+}
+
+function getPathCoordinateOffset(width: number): number {
+  return Math.round(width) % 2 === 0 ? 1 : 0.5;
 }
 
 function getDefaultPathColor(type: PathMarkerType): string {
@@ -4373,7 +4386,11 @@ function getDefaultPathColor(type: PathMarkerType): string {
     return DEFAULT_USER_MAP_SETTINGS.markerColors.canals;
   }
 
-  return DEFAULT_USER_MAP_SETTINGS.markerColors.highways;
+  if (type === "highway") {
+    return DEFAULT_USER_MAP_SETTINGS.markerColors.highways;
+  }
+
+  return DEFAULT_USER_MAP_SETTINGS.markerColors.tunnels;
 }
 
 function getPathTypeTitle(type: PathMarkerType): string {
@@ -4385,7 +4402,11 @@ function getPathTypeTitle(type: PathMarkerType): string {
     return "Canal";
   }
 
-  return "Highway";
+  if (type === "highway") {
+    return "Highway";
+  }
+
+  return "Tunnel";
 }
 
 function appendPathDraftPoint(points: MapCoordinate[], coordinate: MapCoordinate): MapCoordinate[] {
@@ -4860,16 +4881,23 @@ function isPathCoordinateHit(marker: Extract<WorkspaceMarker, { type: PathMarker
   }
 
   const target = { x: coordinate.x + 0.5, y: coordinate.y + 0.5 };
+  const pathOffset = getPathCoordinateOffset(marker.width);
   const threshold = Math.max(0.5, marker.width / 2);
 
   for (let index = 1; index < marker.points.length; index += 1) {
-    const start = marker.points[index - 1];
-    const end = marker.points[index];
+    const startPoint = marker.points[index - 1];
+    const endPoint = marker.points[index];
 
     if (
-      start !== undefined &&
-      end !== undefined &&
-      getDistanceToSegment(target, start, end) <= threshold
+      startPoint !== undefined &&
+      endPoint !== undefined &&
+      getDistanceToSegment(target, {
+        x: startPoint.x + pathOffset,
+        y: startPoint.y + pathOffset
+      }, {
+        x: endPoint.x + pathOffset,
+        y: endPoint.y + pathOffset
+      }) <= threshold
     ) {
       return true;
     }
@@ -4975,7 +5003,11 @@ function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility):
       return visibility.canals;
     }
 
-    return visibility.highways;
+    if (marker.type === "highway") {
+      return visibility.highways;
+    }
+
+    return visibility.tunnels;
   }
 
   if (marker.type === "tower") {
@@ -5018,7 +5050,7 @@ function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarke
 }
 
 function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType {
-  return markerType === "bridge" || markerType === "canal" || markerType === "highway";
+  return markerType === "bridge" || markerType === "canal" || markerType === "highway" || markerType === "tunnel";
 }
 
 function markerMatchesSearch(marker: WorkspaceMarker, searchTerm: string): boolean {
@@ -5414,6 +5446,10 @@ function getMarkerContextColor(marker: WorkspaceMarker, markerColors: MarkerColo
     return markerColors.highways;
   }
 
+  if (marker.type === "tunnel") {
+    return markerColors.tunnels;
+  }
+
   return markerColors.notes;
 }
 
@@ -5460,6 +5496,10 @@ function getMarkerTypeTitle(markerType: MarkerType): string {
 
   if (markerType === "highway") {
     return "highway";
+  }
+
+  if (markerType === "tunnel") {
+    return "tunnel";
   }
 
   return "note";
@@ -5509,6 +5549,7 @@ function getBoundedFixedPosition(
 ): CSSProperties {
   const viewportWidth = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? FALLBACK_MAP_SIZE_PX : window.innerHeight;
+  const boundedMaxHeight = Math.min(maxHeight, Math.max(0, viewportHeight - FLOATING_MENU_MARGIN_PX * 2));
 
   return {
     left: formatPixels(clamp(
@@ -5516,10 +5557,12 @@ function getBoundedFixedPosition(
       FLOATING_MENU_MARGIN_PX,
       Math.max(FLOATING_MENU_MARGIN_PX, viewportWidth - maxWidth - FLOATING_MENU_MARGIN_PX)
     )),
+    maxHeight: formatPixels(boundedMaxHeight),
+    overflowY: "auto",
     top: formatPixels(clamp(
       screenY,
       FLOATING_MENU_MARGIN_PX,
-      Math.max(FLOATING_MENU_MARGIN_PX, viewportHeight - maxHeight - FLOATING_MENU_MARGIN_PX)
+      Math.max(FLOATING_MENU_MARGIN_PX, viewportHeight - boundedMaxHeight - FLOATING_MENU_MARGIN_PX)
     ))
   };
 }

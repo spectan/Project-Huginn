@@ -137,6 +137,10 @@ function formatMarkerType(type: DeletedMarkerSummary["type"]): string {
     return "Highway";
   }
 
+  if (type === "tunnel") {
+    return "Tunnel";
+  }
+
   return "Note";
 }
 

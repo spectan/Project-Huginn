@@ -266,7 +266,8 @@ describe("deleted marker service", () => {
         minedoor: 0,
         note: 1,
         rift: 0,
-        tower: 1
+        tower: 1,
+        tunnel: 0
       }
     });
     expect(deletedIds).toEqual(["tower-1", "note-1"]);

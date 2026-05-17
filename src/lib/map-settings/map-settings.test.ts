@@ -20,6 +20,9 @@ describe("user map settings", () => {
     expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.deeds).toBe(100);
     expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.riftOverlays).toBe(100);
     expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.towers).toBe(100);
+    expect(DEFAULT_USER_MAP_SETTINGS.markerVisibility.tunnels).toBe(true);
+    expect(DEFAULT_USER_MAP_SETTINGS.markerColors.tunnels).toBe("#6b7280");
+    expect(DEFAULT_USER_MAP_SETTINGS.markerOpacities.tunnels).toBe(50);
     expect(DEFAULT_USER_MAP_SETTINGS.markerVisibility.plannedTowers).toBe(true);
     expect(DEFAULT_USER_MAP_SETTINGS.noteCategoryColors).toEqual({});
     expect(DEFAULT_USER_MAP_SETTINGS.noteCategoryMarkerShapes).toEqual({});
@@ -37,6 +40,7 @@ describe("user map settings", () => {
         locateSouls: "#ff8800",
         minedoors: "#00ffff",
         rifts: "#ff0000",
+        tunnels: "#666666",
         towers: "#00ff00"
       },
       noteCategoryColors: {
@@ -62,7 +66,8 @@ describe("user map settings", () => {
         locateSouls: false,
         minedoors: false,
         plannedTowers: false,
-        riftOverlays: false
+        riftOverlays: false,
+        tunnels: false
       },
       roadwayEditPanelPosition: {
         left: 300.2,
@@ -106,6 +111,7 @@ describe("user map settings", () => {
         locateSouls: "#ff8800",
         minedoors: "#00ffff",
         rifts: "#ff0000",
+        tunnels: "#666666",
         towers: "#00ff00"
       },
       noteCategoryColors: {
@@ -132,7 +138,8 @@ describe("user map settings", () => {
         locateSouls: false,
         minedoors: false,
         plannedTowers: false,
-        riftOverlays: false
+        riftOverlays: false,
+        tunnels: false
       },
       roadwayEditPanelPosition: {
         left: 300,
@@ -224,7 +231,8 @@ describe("user map settings", () => {
         locateSouls: "#F97316",
         minedoors: "cyan",
         notes: "#ABCDEF",
-        rifts: "#DC2626"
+        rifts: "#DC2626",
+        tunnels: "#666666"
       },
       markerOpacities: {
         annotations: 88.4,
@@ -235,6 +243,7 @@ describe("user map settings", () => {
         locateSouls: 62.2,
         notes: 150,
         riftOverlays: 37.2,
+        tunnels: 12.2,
         towers: 44.6
       },
       noteCategoryColors: {
@@ -269,7 +278,8 @@ describe("user map settings", () => {
         locateSouls: "#f97316",
         minedoors: DEFAULT_USER_MAP_SETTINGS.markerColors.minedoors,
         notes: "#abcdef",
-        rifts: "#dc2626"
+        rifts: "#dc2626",
+        tunnels: "#666666"
       },
       markerOpacities: {
         annotations: 88,
@@ -280,6 +290,7 @@ describe("user map settings", () => {
         locateSouls: 62,
         notes: 100,
         riftOverlays: 37,
+        tunnels: 12,
         towers: 45
       },
       noteCategoryColors: {
