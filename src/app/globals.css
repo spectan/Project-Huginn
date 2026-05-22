@@ -1235,19 +1235,19 @@ body {
 }
 
 .map-search-match {
-  animation: map-search-pulse 1.45s ease-out infinite;
-  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.95), 0 0 18px rgba(34, 211, 238, 0.82);
+  animation: map-search-pulse 1.25s ease-out infinite;
+  box-shadow: 0 0 0 6px rgba(34, 211, 238, 1), 0 0 34px rgba(34, 211, 238, 0.95);
 }
 
 @keyframes map-search-pulse {
   0% {
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.95), 0 0 12px rgba(34, 211, 238, 0.82);
+    box-shadow: 0 0 0 6px rgba(34, 211, 238, 1), 0 0 24px rgba(34, 211, 238, 0.95);
   }
   70% {
-    box-shadow: 0 0 0 12px rgba(34, 211, 238, 0), 0 0 24px rgba(34, 211, 238, 0.54);
+    box-shadow: 0 0 0 34px rgba(34, 211, 238, 0), 0 0 48px rgba(34, 211, 238, 0.72);
   }
   100% {
-    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0), 0 0 12px rgba(34, 211, 238, 0.82);
+    box-shadow: 0 0 0 6px rgba(34, 211, 238, 0), 0 0 24px rgba(34, 211, 238, 0.95);
   }
 }
 

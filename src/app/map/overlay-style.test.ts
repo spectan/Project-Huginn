@@ -124,6 +124,15 @@ describe("map overlay styles", () => {
     expect(block).toContain("animation:");
   });
 
+  it("makes search match pings large enough to stand out on dense maps", () => {
+    const block = getStandaloneCssBlock(".map-search-match");
+    const keyframes = getKeyframesBlock("map-search-pulse");
+
+    expect(block).toContain("0 0 0 6px rgba(34, 211, 238, 1)");
+    expect(keyframes).toContain("0 0 0 34px rgba(34, 211, 238, 0)");
+    expect(keyframes).toContain("0 0 48px rgba(34, 211, 238, 0.72)");
+  });
+
   it("draws triangle markers inside unclipped buttons so search pulses radiate", () => {
     const campColorBlock = getStandaloneCssBlock(".map-marker--camp::before");
 
@@ -410,6 +419,16 @@ function getCssBlock(selector: string): string {
 
   if (!match || match[1] === undefined) {
     throw new Error(`Missing CSS block for ${selector}`);
+  }
+
+  return match[1];
+}
+
+function getKeyframesBlock(name: string): string {
+  const match = globalsCss.match(new RegExp(`@keyframes\\s+${name}\\s*\\{([\\s\\S]*?)\\n\\}`));
+
+  if (!match || match[1] === undefined) {
+    throw new Error(`Missing keyframes for ${name}`);
   }
 
   return match[1];

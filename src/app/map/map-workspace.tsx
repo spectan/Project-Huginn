@@ -781,11 +781,11 @@ export default function MapWorkspace({
     (coordinate: MapCoordinate): WorkspaceMarker[] => getHoverMarkersAtCoordinate(
       displayedMarkersWithEditPreview,
       markerVisibility,
-      roadwayEditMode,
       coordinate,
-      mapSize
+      mapSize,
+      { includePathMarkers: true }
     ),
-    [displayedMarkersWithEditPreview, mapSize, markerVisibility, roadwayEditMode]
+    [displayedMarkersWithEditPreview, mapSize, markerVisibility]
   );
 
   const showTouchMarkerDetails = useCallback(
@@ -820,7 +820,13 @@ export default function MapWorkspace({
         return false;
       }
 
-      const markersAtCoordinate = getVisibleMarkersAtCoordinate(coordinate);
+      const markersAtCoordinate = getHoverMarkersAtCoordinate(
+        displayedMarkersWithEditPreview,
+        markerVisibility,
+        coordinate,
+        mapSize,
+        { includePathMarkers: roadwayEditMode }
+      );
       selectCoordinate(coordinate);
       setHoveredMarker(null);
 
@@ -847,7 +853,7 @@ export default function MapWorkspace({
       });
       return true;
     },
-    [canViewMap, canWriteMapMarkers, getVisibleMarkersAtCoordinate, selectCoordinate, visualMap]
+    [canViewMap, canWriteMapMarkers, displayedMarkersWithEditPreview, mapSize, markerVisibility, roadwayEditMode, selectCoordinate, visualMap]
   );
 
   const startLongPress = useCallback(
@@ -1094,9 +1100,9 @@ export default function MapWorkspace({
       const markersAtCoordinate = getHoverMarkersAtCoordinate(
         displayedMarkersWithEditPreview,
         markerVisibility,
-        roadwayEditMode,
         mapCoordinate,
-        mapSize
+        mapSize,
+        { includePathMarkers: roadwayEditMode }
       );
 
       selectCoordinate(mapCoordinate);
@@ -1711,15 +1717,15 @@ export default function MapWorkspace({
                 ? getHoverMarkersAtCoordinate(
                     displayedMarkersWithEditPreview,
                     markerVisibility,
-                    roadwayEditMode,
                     coordinate,
-                    mapSize
+                    mapSize,
+                    { includePathMarkers: true }
                   )
                 : [];
               const hoverMarkers = getUniqueMarkers(markersUnderPointer.length === 0
                 ? [marker]
                 : [...markersUnderPointer, marker]
-              ).filter((hoverMarker) => canUseMarkerDetails(hoverMarker, roadwayEditMode));
+              );
 
               if (hoverMarkers.length === 0) {
                 setHoveredMarker(null);
@@ -1861,7 +1867,7 @@ export default function MapWorkspace({
           })}
         />
       ) : null}
-      {hoveredMarker !== null && hoveredMarker.markers.some((marker) => canUseMarkerDetails(marker, roadwayEditMode)) ? (
+      {hoveredMarker !== null ? (
         <MarkerHoverDetails hoveredMarker={hoveredMarker} markerColors={markerColors} />
       ) : null}
       {dialog !== null && map !== null ? (
@@ -1882,6 +1888,11 @@ export default function MapWorkspace({
             setDialog,
             setFormError
           )}
+          onDeedPreviewChange={(marker) => setDialog((current) => (
+            current?.mode === "edit" && current.marker.id === marker.id
+              ? { ...current, marker }
+              : current
+          ))}
           onSubmit={(event) => void submitMarkerForm(event, dialog, map.id, updateMarkers, setAnnotations, setDialog, setFormError).then((saved) => {
             if (saved) {
               setQuickDeedDraft(null);
@@ -3171,6 +3182,7 @@ function MarkerDialog({
   map,
   noteCategories,
   onClose,
+  onDeedPreviewChange,
   onDisbandDeed,
   onSubmit
 }: {
@@ -3179,6 +3191,7 @@ function MarkerDialog({
   map: WorkspaceMap;
   noteCategories: NoteCategory[];
   onClose(): void;
+  onDeedPreviewChange(marker: Extract<WorkspaceMarker, { type: "deed" }>): void;
   onDisbandDeed(marker: Extract<WorkspaceMarker, { type: "deed" }>): void;
   onSubmit(event: FormEvent<HTMLFormElement>): void;
 }) {
@@ -3216,6 +3229,7 @@ function MarkerDialog({
           key={dialog.mode === "edit" ? dialog.marker.id : `${markerType}:${coordinate.x}:${coordinate.y}`}
           markerType={markerType}
           noteCategories={noteCategories}
+          onDeedPreviewChange={onDeedPreviewChange}
         />
         {error !== null ? <p className="map-auth-error">{error}</p> : null}
         <div className="map-dialog-actions">
@@ -3297,11 +3311,13 @@ function DialogHeader({ onClose, title }: { onClose(): void; title: string }) {
 function MarkerFields({
   dialog,
   markerType,
-  noteCategories
+  noteCategories,
+  onDeedPreviewChange
 }: {
   dialog: DialogState;
   markerType: MarkerType;
   noteCategories: NoteCategory[];
+  onDeedPreviewChange?(marker: Extract<WorkspaceMarker, { type: "deed" }>): void;
 }) {
   const marker = dialog.mode === "edit" ? dialog.marker : null;
 
@@ -3328,16 +3344,44 @@ function MarkerFields({
   if (markerType === "deed") {
     const deed = marker?.type === "deed" ? marker : null;
     const initialDimensions = dialog.mode === "create" ? dialog.initialDeedDimensions : undefined;
+    const deedDimensionValue = (field: keyof DeedDirectionalDimensions): number => {
+      if (deed !== null) {
+        return deed[field];
+      }
+
+      return initialDimensions?.[field] ?? 5;
+    };
+    const deedDimensionInputProps = (field: keyof DeedDirectionalDimensions) => (
+      deed === null
+        ? { defaultValue: deedDimensionValue(field) }
+        : { value: deedDimensionValue(field) }
+    );
+    const handleDimensionChange = (
+      field: keyof DeedDirectionalDimensions,
+      value: string
+    ) => {
+      const nextValue = parseCoordinateParam(value);
+
+      if (deed === null || nextValue === null) {
+        return;
+      }
+
+      onDeedPreviewChange?.({
+        ...deed,
+        [field]: nextValue
+      });
+    };
+
     return (
       <>
         <label><span>Name</span><input name="name" required defaultValue={deed?.name ?? ""} /></label>
         <label><span>Mayor</span><input name="founder" required defaultValue={deed?.founder ?? ""} /></label>
         <label><span>Founding date</span><input name="foundingDate" type="date" defaultValue={deed?.foundingDate ?? ""} /></label>
         <div className="map-position-fields">
-          <label><span>North</span><input key={`north:${deed?.north ?? initialDimensions?.north ?? 5}`} name="north" required type="number" min={0} defaultValue={deed?.north ?? initialDimensions?.north ?? 5} /></label>
-          <label><span>West</span><input key={`west:${deed?.west ?? initialDimensions?.west ?? 5}`} name="west" required type="number" min={0} defaultValue={deed?.west ?? initialDimensions?.west ?? 5} /></label>
-          <label><span>East</span><input key={`east:${deed?.east ?? initialDimensions?.east ?? 5}`} name="east" required type="number" min={0} defaultValue={deed?.east ?? initialDimensions?.east ?? 5} /></label>
-          <label><span>South</span><input key={`south:${deed?.south ?? initialDimensions?.south ?? 5}`} name="south" required type="number" min={0} defaultValue={deed?.south ?? initialDimensions?.south ?? 5} /></label>
+          <label><span>North</span><input name="north" required type="number" min={0} {...deedDimensionInputProps("north")} onChange={(event) => handleDimensionChange("north", event.currentTarget.value)} /></label>
+          <label><span>West</span><input name="west" required type="number" min={0} {...deedDimensionInputProps("west")} onChange={(event) => handleDimensionChange("west", event.currentTarget.value)} /></label>
+          <label><span>East</span><input name="east" required type="number" min={0} {...deedDimensionInputProps("east")} onChange={(event) => handleDimensionChange("east", event.currentTarget.value)} /></label>
+          <label><span>South</span><input name="south" required type="number" min={0} {...deedDimensionInputProps("south")} onChange={(event) => handleDimensionChange("south", event.currentTarget.value)} /></label>
           <label><span>Perimeter</span><input key={`perimeter:${deed?.perimeter ?? 5}`} name="perimeter" required type="number" min={0} max={100} defaultValue={deed?.perimeter ?? 5} /></label>
         </div>
       </>
@@ -4749,19 +4793,19 @@ function isInsideMap(coordinate: MapCoordinate, map: WorkspaceMap): boolean {
 function getHoverMarkersAtCoordinate(
   markers: WorkspaceMarker[],
   visibility: MarkerVisibility,
-  roadwayEditMode: boolean,
   coordinate: MapCoordinate,
-  mapSize: { heightPx: number; widthPx: number }
+  mapSize: { heightPx: number; widthPx: number },
+  options: { includePathMarkers: boolean }
 ): WorkspaceMarker[] {
   const eligibleMarkers = markers.filter((marker) => (
     isMarkerVisible(marker, visibility) &&
-    canUseMarkerDetails(marker, roadwayEditMode)
+    (options.includePathMarkers || !isPathMarker(marker))
   ));
   const directMarkers = eligibleMarkers.filter((marker) => isDirectMarkerHit(marker, coordinate));
   const directMarkerIds = new Set(directMarkers.map((marker) => marker.id));
   const areaMarkers = eligibleMarkers.filter((marker) => (
     !directMarkerIds.has(marker.id) &&
-    isMarkerAreaHit(marker, coordinate, visibility, roadwayEditMode, mapSize)
+    isMarkerAreaHit(marker, coordinate, visibility, mapSize)
   ));
 
   return getUniqueMarkers([...directMarkers, ...areaMarkers]);
@@ -4783,11 +4827,10 @@ function isMarkerAreaHit(
   marker: WorkspaceMarker,
   coordinate: MapCoordinate,
   visibility: MarkerVisibility,
-  roadwayEditMode: boolean,
   mapSize: { heightPx: number; widthPx: number }
 ): boolean {
   if (isPathMarker(marker)) {
-    return roadwayEditMode && isPathCoordinateHit(marker, coordinate);
+    return isPathCoordinateHit(marker, coordinate);
   }
 
   if (!visibility.overlays) {
@@ -5039,10 +5082,6 @@ function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility):
   }
 
   return visibility.notes;
-}
-
-function canUseMarkerDetails(marker: WorkspaceMarker, roadwayEditMode: boolean): boolean {
-  return !isPathMarker(marker) || roadwayEditMode;
 }
 
 function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: PathMarkerType }> {

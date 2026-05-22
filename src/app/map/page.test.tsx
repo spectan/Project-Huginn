@@ -2393,6 +2393,50 @@ describe("MapPage", () => {
     ));
   });
 
+  it("updates the edited deed overlay while directional dimension fields change", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
+      clientX: 500,
+      clientY: 600
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Deed Oak Harbour" }));
+
+    const initialOverlay = screen.getByTestId("deed-overlay-deed-1");
+    const initialLeft = Number.parseFloat(initialOverlay.style.left);
+    const initialTop = Number.parseFloat(initialOverlay.style.top);
+
+    fireEvent.change(screen.getByLabelText("North"), { target: { value: "8" } });
+    fireEvent.change(screen.getByLabelText("West"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("East"), { target: { value: "9" } });
+    fireEvent.change(screen.getByLabelText("South"), { target: { value: "6" } });
+
+    const overlay = screen.getByTestId("deed-overlay-deed-1");
+    expect(overlay.style.left).toBe(`${initialLeft - 2}px`);
+    expect(overlay.style.top).toBe(`${initialTop - 3}px`);
+    expect(overlay.style.width).toBe("17px");
+    expect(overlay.style.height).toBe("15px");
+  });
+
   it("preserves single digit tower creator numbers from the combined creator field", async () => {
     const savedTower = {
       damage: "1.25",
@@ -4527,7 +4571,89 @@ describe("MapPage", () => {
     expect(menu.style.overflowY).toBe("auto");
   });
 
-  it("uses roadway edit mode before paths show hover details or marker actions", () => {
+  it("shows bridge, canal, and tunnel hover details in normal mode while keeping marker actions behind roadway edit mode", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          id: "bridge-1",
+          name: "Cedar Bridge",
+          notes: "River crossing",
+          points: [
+            { x: 100, y: 120 },
+            { x: 140, y: 120 }
+          ],
+          type: "bridge",
+          width: 2,
+          x: 100,
+          y: 120
+        },
+        {
+          id: "canal-1",
+          name: "West Canal",
+          notes: "Boat route",
+          points: [
+            { x: 110, y: 150 },
+            { x: 150, y: 150 }
+          ],
+          type: "canal",
+          width: 2,
+          x: 110,
+          y: 150
+        },
+        {
+          id: "tunnel-1",
+          name: "North Tunnel",
+          notes: "Mine route",
+          points: [
+            { x: 130, y: 180 },
+            { x: 170, y: 180 }
+          ],
+          type: "tunnel",
+          width: 2,
+          x: 130,
+          y: 180
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const bridge = screen.getByTestId("path-marker-bridge-1");
+    const canal = screen.getByTestId("path-marker-canal-1");
+    const tunnel = screen.getByTestId("path-marker-tunnel-1");
+    fireEvent.mouseMove(bridge, {
+      clientX: 120,
+      clientY: 121
+    });
+
+    let pathDetails = screen.getByRole("tooltip", { name: "Map items at 120, 121" });
+    expect(within(pathDetails).getByText("Cedar Bridge")).toBeTruthy();
+    expect(within(pathDetails).getByText("Bridge | 2 points | Width 2")).toBeTruthy();
+
+    fireEvent.mouseMove(canal, {
+      clientX: 130,
+      clientY: 151
+    });
+    pathDetails = screen.getByRole("tooltip", { name: "Map items at 130, 151" });
+    expect(within(pathDetails).getByText("West Canal")).toBeTruthy();
+    expect(within(pathDetails).getByText("Canal | 2 points | Width 2")).toBeTruthy();
+
+    fireEvent.mouseMove(tunnel, {
+      clientX: 140,
+      clientY: 181
+    });
+    pathDetails = screen.getByRole("tooltip", { name: "Map items at 140, 181" });
+    expect(within(pathDetails).getByText("North Tunnel")).toBeTruthy();
+    expect(within(pathDetails).getByText("Tunnel | 2 points | Width 2")).toBeTruthy();
+
+    fireEvent.contextMenu(bridge, {
+      clientX: 120,
+      clientY: 121
+    });
+    expect(screen.queryByRole("menu", { name: "Marker actions" })).toBeNull();
+  });
+
+  it("uses roadway edit mode before paths expose marker actions", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -4582,16 +4708,6 @@ describe("MapPage", () => {
     const bridge = screen.getByTestId("path-marker-bridge-1");
     const canal = screen.getByTestId("path-marker-canal-1");
     const highway = screen.getByTestId("path-marker-highway-1");
-
-    for (const path of [bridge, canal, highway]) {
-      fireEvent.mouseMove(path, {
-        clientX: 150,
-        clientY: 130
-      });
-    }
-    expect(screen.queryByRole("tooltip", { name: "Bridge: Cedar Bridge" })).toBeNull();
-    expect(screen.queryByRole("tooltip", { name: "Canal: West Canal" })).toBeNull();
-    expect(screen.queryByRole("tooltip", { name: "Highway: East Road" })).toBeNull();
 
     for (const path of [bridge, canal, highway]) {
       fireEvent.contextMenu(path, {

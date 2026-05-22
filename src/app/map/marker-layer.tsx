@@ -110,27 +110,27 @@ function renderMarker(
       return null;
     }
 
-    const canInteract = roadwayEditMode;
+    const canUseActions = roadwayEditMode;
 
     return (
       <svg aria-label={`${getPathTypeLabel(marker.type)} path layer`} className="map-path-svg" key={marker.id}>
         <polyline
           aria-label={`${getPathTypeLabel(marker.type)} ${marker.name || "path"} from ${marker.x}, ${marker.y}`}
-          className={getPathClassName(isHighlighted, canInteract)}
+          className={getPathClassName(isHighlighted, true)}
           data-testid={`path-marker-${marker.id}`}
           fill="none"
-          onContextMenu={canInteract ? (event) => onContextMenu(marker, event) : undefined}
-          onMouseEnter={canInteract ? (event) => onHoverMove(marker, event) : undefined}
-          onMouseLeave={canInteract ? onHoverEnd : undefined}
-          onMouseMove={canInteract ? (event) => onHoverMove(marker, event) : undefined}
+          onContextMenu={canUseActions ? (event) => onContextMenu(marker, event) : undefined}
+          onMouseEnter={(event) => onHoverMove(marker, event)}
+          onMouseLeave={onHoverEnd}
+          onMouseMove={(event) => onHoverMove(marker, event)}
           opacity={getPathOpacity(marker.type, markerOpacities)}
           points={getPathSvgPoints(marker.points, marker.width, view)}
-          role={canInteract ? "button" : undefined}
+          role={canUseActions ? "button" : undefined}
           stroke={getPathColor(marker.type, markerColors)}
           strokeLinecap="square"
           strokeLinejoin="miter"
           strokeWidth={getPathStrokeWidth(marker.width, view)}
-          tabIndex={canInteract ? 0 : undefined}
+          tabIndex={canUseActions ? 0 : undefined}
         />
       </svg>
     );
