@@ -39,7 +39,7 @@ export default async function MapPage({ searchParams }: MapPageProps) {
 
 async function getWorkspaceData(
   viewer: Awaited<ReturnType<typeof getCurrentViewer>>,
-  requestedMapId?: string
+  requestedMapSlug?: string
 ) {
   if (viewer === null) {
     return null;
@@ -50,6 +50,7 @@ async function getWorkspaceData(
     findUserFavoriteServerId(viewer.id)
   ]);
   const readableServers = getReadableServerSummaries(viewer, servers);
+  const requestedMapId = resolveMapIdFromSlug(requestedMapSlug, readableServers);
   const initialMapId = getInitialMapServerId(requestedMapId, favoriteServerId, readableServers);
   const map = initialMapId === undefined ? null : await findActiveMap(initialMapId);
 
@@ -99,6 +100,26 @@ export function getInitialMapServerId(
   }
 
   return readableServers[0]?.id;
+}
+
+export function resolveMapIdFromSlug(
+  slug: string | undefined,
+  servers: Array<{ id: string }>
+): string | undefined {
+  if (slug === undefined) return undefined;
+
+  // Exact match — backward compat for old URLs that already use full DB IDs
+  if (servers.some((s) => s.id === slug)) {
+    return slug;
+  }
+
+  // Try with map- prefix (e.g., "celebration" → "map-celebration")
+  const prefixedId = `map-${slug}`;
+  if (servers.some((s) => s.id === prefixedId)) {
+    return prefixedId;
+  }
+
+  return undefined;
 }
 
 export function getReadableServerSummaries<T extends { id: string }>(

@@ -5218,9 +5218,13 @@ function updateBrowserLayer(layerId: string): void {
 
 function navigateToServer(serverId: string): void {
   const url = new URL(window.location.href);
-  url.searchParams.set("server", serverId);
+  url.searchParams.set("server", getMapSlug(serverId));
   url.searchParams.delete("layer");
   window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+}
+
+function getMapSlug(mapId: string): string {
+  return mapId.startsWith("map-") ? mapId.slice(4) : mapId;
 }
 
 function getCoordinateUrl(coordinate: MapCoordinate, serverId?: string): URL {
@@ -5228,7 +5232,7 @@ function getCoordinateUrl(coordinate: MapCoordinate, serverId?: string): URL {
   url.searchParams.set("x", String(coordinate.x));
   url.searchParams.set("y", String(coordinate.y));
   if (serverId !== undefined) {
-    url.searchParams.set("server", serverId);
+    url.searchParams.set("server", getMapSlug(serverId));
   }
   return url;
 }
