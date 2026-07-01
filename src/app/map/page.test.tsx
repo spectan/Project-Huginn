@@ -1059,7 +1059,7 @@ describe("MapPage", () => {
     expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140&server=map-1`);
     expect(screen.getByRole("menuitem", { name: "Annotation" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Tower" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Deed" })).toBeTruthy();
@@ -1145,7 +1145,7 @@ describe("MapPage", () => {
     expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140&server=map-1`);
     expect(screen.queryByRole("menuitem", { name: "Tower" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Deed" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Note" })).toBeNull();
@@ -1155,6 +1155,33 @@ describe("MapPage", () => {
     expect(screen.queryByRole("menuitem", { name: "Camp" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Minedoor" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Locate Soul" })).toBeNull();
+  });
+
+  it("copies a coordinate link that includes the current server when the URL has no server", async () => {
+    const clipboardWrite = mockClipboardWrite();
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialSettings: {
+        ...DEFAULT_USER_MAP_SETTINGS,
+        favoriteServerId: "map-1"
+      },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+
+    const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
+    fireEvent.click(coordinateCopyButton);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140&server=map-1`);
   });
 
   it("renders square marker overlays and tower centers", () => {
@@ -5587,7 +5614,7 @@ describe("MapPage", () => {
     expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 250, 300" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=250&y=300`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=250&y=300&server=map-1`);
     expect(screen.getByTestId("context-marker-row-tower-1")).toBeTruthy();
     expect(screen.getByText("Mako 945")).toBeTruthy();
     expect(screen.getByText("Tower | QL 89.50 | DMG 0.25")).toBeTruthy();

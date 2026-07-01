@@ -3,10 +3,12 @@
 import Image from "next/image";
 import {
   useCallback,
+  createContext,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
+  useContext,
   useState,
   useSyncExternalStore,
   type CSSProperties,
@@ -296,6 +298,8 @@ const EVENT_FEED_RESIZE_HANDLES: EventFeedResizeHandleDefinition[] = [
   { horizontalDirection: -1, id: "bottom-left", verticalDirection: 1 },
   { horizontalDirection: 1, id: "bottom-right", verticalDirection: 1 }
 ];
+
+const MapIdContext = createContext<string | undefined>(undefined);
 
 type TopPanelState = "account" | "settings" | null;
 
@@ -1652,6 +1656,7 @@ export default function MapWorkspace({
   );
 
   return (
+  <MapIdContext.Provider value={map?.id}>
     <main className="map-page" aria-label="Map workspace">
       {canViewMap && map !== null && visualMap !== null ? (
         <section
@@ -1980,6 +1985,7 @@ export default function MapWorkspace({
         </button>
       </div>
     </main>
+  </MapIdContext.Provider>
   );
 }
 
@@ -3109,8 +3115,9 @@ function CoordinateCopyRow({
   coordinate: MapCoordinate;
   label: string;
 }) {
+  const mapId = useContext(MapIdContext);
   const coordinateLabel = `${coordinate.x}, ${coordinate.y}`;
-  const copyLink = () => copyCoordinateLink(coordinate);
+  const copyLink = () => copyCoordinateLink(coordinate, mapId);
 
   return (
     <div className="map-context-coordinate-row">
@@ -5216,19 +5223,22 @@ function navigateToServer(serverId: string): void {
   window.location.assign(`${url.pathname}${url.search}${url.hash}`);
 }
 
-function getCoordinateUrl(coordinate: MapCoordinate): URL {
+function getCoordinateUrl(coordinate: MapCoordinate, serverId?: string): URL {
   const url = new URL(window.location.href);
   url.searchParams.set("x", String(coordinate.x));
   url.searchParams.set("y", String(coordinate.y));
+  if (serverId !== undefined) {
+    url.searchParams.set("server", serverId);
+  }
   return url;
 }
 
-function copyCoordinateLink(coordinate: MapCoordinate): void {
+function copyCoordinateLink(coordinate: MapCoordinate, serverId?: string): void {
   if (typeof navigator === "undefined" || navigator.clipboard === undefined) {
     return;
   }
 
-  void navigator.clipboard.writeText(getCoordinateUrl(coordinate).toString());
+  void navigator.clipboard.writeText(getCoordinateUrl(coordinate, serverId).toString());
 }
 
 function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
