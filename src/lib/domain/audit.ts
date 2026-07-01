@@ -1,9 +1,7 @@
 const COORDINATE_METADATA_KEYS = new Set([
   "coordinate",
   "coordinates",
-  "position",
-  "x",
-  "y"
+  "position"
 ]);
 
 export function assertNoCoordinateMetadata(

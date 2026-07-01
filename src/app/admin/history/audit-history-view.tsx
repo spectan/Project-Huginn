@@ -26,6 +26,8 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
                 <th>Actor</th>
                 <th>Action</th>
                 <th>Target</th>
+                <th>X</th>
+                <th>Y</th>
                 <th>Map</th>
                 <th>Metadata</th>
               </tr>
@@ -39,9 +41,23 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
                   <td>{event.actorUsername}</td>
                   <td>{formatAction(event.action)}</td>
                   <td>
-                    <span>{formatTargetType(event.targetType)}</span>
-                    {event.targetId !== null ? <small>{event.targetId}</small> : null}
+                    {event.x !== null && event.y !== null && event.mapId !== null ? (
+                      <a
+                        href={`/map?server=${getMapSlug(event.mapId)}&x=${event.x}&y=${event.y}`}
+                        title={`View ${formatTargetType(event.targetType)} at ${event.x}, ${event.y}`}
+                      >
+                        <span>{formatTargetType(event.targetType)}</span>
+                        {event.targetId !== null ? <small>{event.targetId}</small> : null}
+                      </a>
+                    ) : (
+                      <>
+                        <span>{formatTargetType(event.targetType)}</span>
+                        {event.targetId !== null ? <small>{event.targetId}</small> : null}
+                      </>
+                    )}
                   </td>
+                  <td>{event.x !== null ? event.x : "—"}</td>
+                  <td>{event.y !== null ? event.y : "—"}</td>
                   <td>{event.mapName.length > 0 ? event.mapName : "None"}</td>
                   <td>
                     <code>{formatMetadata(event.metadata)}</code>
@@ -74,6 +90,10 @@ export function AuditHistoryAccessDenied({ message }: { message: string }) {
       <section className="history-empty">{message}</section>
     </main>
   );
+}
+
+function getMapSlug(mapId: string): string {
+  return mapId.startsWith("map-") ? mapId.slice(4) : mapId;
 }
 
 function formatTimestamp(value: string): string {

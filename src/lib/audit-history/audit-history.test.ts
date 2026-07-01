@@ -33,7 +33,8 @@ describe("listAuditHistory", () => {
             metadata: {
               markerType: "tower",
               sessionToken: "secret",
-              x: 100
+              x: 100,
+              y: 200
             },
             targetId: "tower-1",
             targetType: "TOWER"
@@ -54,12 +55,17 @@ describe("listAuditHistory", () => {
             actorUsername: "Mako",
             createdAt: "2026-05-10T04:00:00.000Z",
             id: "event-1",
+            mapId: "map-1",
             mapName: "Wurm",
             metadata: {
-              markerType: "tower"
+              markerType: "tower",
+              x: 100,
+              y: 200
             },
             targetId: "tower-1",
-            targetType: "TOWER"
+            targetType: "TOWER",
+            x: 100,
+            y: 200
           }
         ],
         nextCursor: null

@@ -834,7 +834,9 @@ export async function disbandDeedMarker(
     metadata: {
       convertedTo: "note",
       markerType: "deed",
-      noteCategory: conversion.category.name
+      noteCategory: conversion.category.name,
+      x: existing.x,
+      y: existing.y
     },
     targetId: conversion.deletedDeed.id,
     targetType: "DEED"
@@ -1016,7 +1018,11 @@ export async function deleteMarker(
     action: "MARKER_DELETED",
     actorUserId: input.actor.id,
     mapId: deleted.mapId,
-    metadata: { markerType: input.markerType },
+    metadata: {
+      markerType: input.markerType,
+      x: "x" in deleted ? deleted.x : undefined,
+      y: "y" in deleted ? deleted.y : undefined
+    },
     targetId: deleted.id,
     targetType: getAuditTargetType(input.markerType)
   });
@@ -1368,7 +1374,9 @@ async function auditMarkerWrite(
       placementDistanceTiles:
         marker.type === "tower" ? TOWER_PLACEMENT_DISTANCE_TILES : undefined,
       protectionDistanceTiles:
-        marker.type === "tower" ? TOWER_PROTECTION_DISTANCE_TILES : undefined
+        marker.type === "tower" ? TOWER_PROTECTION_DISTANCE_TILES : undefined,
+      x: marker.x,
+      y: marker.y
     },
     targetId: marker.id,
     targetType: getAuditTargetType(marker.type)

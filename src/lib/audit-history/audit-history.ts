@@ -13,9 +13,7 @@ const REDACTED_METADATA_KEYS = new Set([
   "position",
   "secret",
   "sessiontoken",
-  "token",
-  "x",
-  "y"
+  "token"
 ]);
 
 type Actor = UserAccess & {
@@ -93,10 +91,13 @@ export type AuditHistoryEvent = {
   actorUsername: string;
   createdAt: string;
   id: string;
+  mapId: string | null;
   mapName: string;
   metadata: Record<string, unknown>;
   targetId: string | null;
   targetType: AuditHistoryTargetType;
+  x: number | null;
+  y: number | null;
 };
 
 export async function listAuditHistory(
@@ -170,16 +171,30 @@ function encodeCursor(record: AuditHistoryRecord): string {
 }
 
 function serializeAuditEvent(record: AuditHistoryRecord): AuditHistoryEvent {
+  const metadata = sanitizeMetadata(record.metadata);
   return {
     action: record.action,
     actorUsername: record.actor?.username ?? "System",
     createdAt: record.createdAt.toISOString(),
     id: record.id,
+    mapId: record.mapId,
     mapName: record.map?.name ?? "",
-    metadata: sanitizeMetadata(record.metadata),
+    metadata,
     targetId: record.targetId,
-    targetType: record.targetType
+    targetType: record.targetType,
+    x: extractCoordinate(metadata, "x"),
+    y: extractCoordinate(metadata, "y")
   };
+}
+
+function extractCoordinate(metadata: Record<string, unknown>, key: "x" | "y"): number | null {
+  const value = metadata[key];
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  return null;
 }
 
 async function recordFailedAuthorization(
