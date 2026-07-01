@@ -1636,6 +1636,21 @@ export default function MapWorkspace({
     };
   }, [canViewMap, map, userMapSettings]);
 
+  useEffect(() => {
+    if (!canViewMap || map === null || typeof window === "undefined") {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+    const currentServer = url.searchParams.get("server");
+    const expectedSlug = getMapSlug(map.id);
+
+    if (currentServer !== expectedSlug) {
+      url.searchParams.set("server", expectedSlug);
+      window.history.replaceState(null, "", url);
+    }
+  }, [canViewMap, map]);
+
   const stageStyle = useMemo(
     () => ({
       height: `${mapSize.heightPx}px`,

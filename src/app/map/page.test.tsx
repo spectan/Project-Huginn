@@ -1053,13 +1053,13 @@ describe("MapPage", () => {
     const menu = screen.getByRole("menu", { name: "Map actions" });
     expect(menu.className).toContain("map-context-menu");
     expect(screen.getByText("125, 140")).toBeTruthy();
-    expect(window.location.href).toBe(`${window.location.origin}/map?x=125&y=140`);
+    expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=125&y=140`);
     const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
     expect(screen.getByText("125, 140").closest("button")).toBe(coordinateCopyButton);
     expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140&server=1`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?server=1&x=125&y=140`);
     expect(screen.getByRole("menuitem", { name: "Annotation" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Tower" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Deed" })).toBeTruthy();
@@ -1139,13 +1139,13 @@ describe("MapPage", () => {
 
     expect(screen.getByRole("menu", { name: "Map actions" })).toBeTruthy();
     expect(screen.getByText("125, 140")).toBeTruthy();
-    expect(window.location.href).toBe(`${window.location.origin}/map?x=125&y=140`);
+    expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=125&y=140`);
     const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
     expect(screen.getByText("125, 140").closest("button")).toBe(coordinateCopyButton);
     expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 125, 140" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140&server=1`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?server=1&x=125&y=140`);
     expect(screen.queryByRole("menuitem", { name: "Tower" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Deed" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "Note" })).toBeNull();
@@ -1181,7 +1181,7 @@ describe("MapPage", () => {
 
     const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=125&y=140&server=1`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?server=1&x=125&y=140`);
   });
 
   it("renders square marker overlays and tower centers", () => {
@@ -1511,7 +1511,7 @@ describe("MapPage", () => {
     expect(screen.getByLabelText("East")).toHaveProperty("value", "5");
     expect(screen.getByLabelText("South")).toHaveProperty("value", "7");
     expect(screen.getByLabelText("Perimeter")).toHaveProperty("value", "5");
-    expect(window.location.href).toBe(`${window.location.origin}/map?x=105&y=207`);
+    expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=105&y=207`);
 
     fireEvent.click(screen.getByRole("button", { name: "Close marker dialog" }));
 
@@ -4920,7 +4920,7 @@ describe("MapPage", () => {
 
     const reticule = screen.getByTestId("selected-coordinate-reticule");
     expect(reticule.getAttribute("aria-label")).toBe("Selected coordinate 125, 140");
-    expect(window.location.href).toBe(`${window.location.origin}/map?x=125&y=140`);
+    expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=125&y=140`);
   });
 
   it("plans one temporary route with tile and meter distance", async () => {
@@ -5614,13 +5614,13 @@ describe("MapPage", () => {
     expect(coordinateCopyButton.querySelector(".map-context-coordinate-icon")).toBeTruthy();
     expect(screen.queryByRole("menuitem", { name: "Copy coordinates 250, 300" })).toBeNull();
     fireEvent.click(coordinateCopyButton);
-    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?x=250&y=300&server=1`);
+    expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?server=1&x=250&y=300`);
     expect(screen.getByTestId("context-marker-row-tower-1")).toBeTruthy();
     expect(screen.getByText("Mako 945")).toBeTruthy();
     expect(screen.getByText("Tower | QL 89.50 | DMG 0.25")).toBeTruthy();
     expect(screen.getByText("Tower type: Freedom Isles")).toBeTruthy();
     expect(screen.getByTestId("context-marker-row-tower-1").style.getPropertyValue("--map-context-marker-color")).toBe("#ffffff");
-    expect(window.location.href).toBe(`${window.location.origin}/map?x=250&y=300`);
+    expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=250&y=300`);
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit Tower Mako 945" }));
 
     expect(screen.getByRole("dialog", { name: "Edit Tower" })).toBeTruthy();
