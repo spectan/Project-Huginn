@@ -3031,11 +3031,11 @@ function WildernessOverlay({
         ctx.fill();
       }
 
-      const applyMask = () => {
+      const finalize = () => {
         if (isCancelled) {
           return;
         }
-        // Threshold alpha to eliminate anti-aliased gradients
+        // Threshold alpha to binary: eliminate anti-aliased gradients
         const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
         const data = imageData.data;
         for (let i = 3; i < data.length; i += 4) {
@@ -3049,20 +3049,40 @@ function WildernessOverlay({
         const maskImg = document.createElement("img");
         maskImg.crossOrigin = "anonymous";
         maskImg.onload = () => {
-          if (!isCancelled) {
-            ctx.drawImage(maskImg, 0, 0);
-            applyMask();
+          if (isCancelled) {
+            return;
           }
+          // Draw mask to a temp canvas and read its pixels directly
+          const maskCanvas = document.createElement("canvas");
+          maskCanvas.width = canvasWidth;
+          maskCanvas.height = canvasHeight;
+          const maskCtx = maskCanvas.getContext("2d");
+          if (maskCtx === null) {
+            finalize();
+            return;
+          }
+          maskCtx.drawImage(maskImg, 0, 0);
+          const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight).data;
+
+          // Get main canvas pixels and clear alpha where mask says water
+          const mainData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+          const pixels = mainData.data;
+          for (let i = 3; i < pixels.length; i += 4) {
+            if ((maskData[i] ?? 0) > 0) {
+              pixels[i] = 0;
+            }
+          }
+          ctx.putImageData(mainData, 0, 0);
+          finalize();
         };
         maskImg.onerror = () => {
-          // If mask fails to load, still show the overlay without water masking
           if (!isCancelled) {
-            applyMask();
+            finalize();
           }
         };
         maskImg.src = waterMaskUrl;
       } else {
-        applyMask();
+        finalize();
       }
     }, 0);
 
