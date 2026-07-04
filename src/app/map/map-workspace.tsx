@@ -3031,7 +3031,7 @@ function WildernessOverlay({
         ctx.fill();
       }
 
-      const finalize = () => {
+      const applyMask = () => {
         if (isCancelled) {
           return;
         }
@@ -3049,40 +3049,19 @@ function WildernessOverlay({
         const maskImg = document.createElement("img");
         maskImg.crossOrigin = "anonymous";
         maskImg.onload = () => {
-          if (isCancelled) {
-            return;
+          if (!isCancelled) {
+            ctx.drawImage(maskImg, 0, 0);
+            applyMask();
           }
-          // Draw mask to a temp canvas and read its pixels directly
-          const maskCanvas = document.createElement("canvas");
-          maskCanvas.width = canvasWidth;
-          maskCanvas.height = canvasHeight;
-          const maskCtx = maskCanvas.getContext("2d");
-          if (maskCtx === null) {
-            finalize();
-            return;
-          }
-          maskCtx.drawImage(maskImg, 0, 0);
-          const maskData = maskCtx.getImageData(0, 0, canvasWidth, canvasHeight).data;
-
-          // Get main canvas pixels and clear alpha where mask says water
-          const mainData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
-          const pixels = mainData.data;
-          for (let i = 3; i < pixels.length; i += 4) {
-            if ((maskData[i] ?? 0) > 0) {
-              pixels[i] = 0;
-            }
-          }
-          ctx.putImageData(mainData, 0, 0);
-          finalize();
         };
         maskImg.onerror = () => {
           if (!isCancelled) {
-            finalize();
+            applyMask();
           }
         };
         maskImg.src = waterMaskUrl;
       } else {
-        finalize();
+        applyMask();
       }
     }, 0);
 
