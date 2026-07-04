@@ -3050,7 +3050,9 @@ function WildernessOverlay({
         maskImg.crossOrigin = "anonymous";
         maskImg.onload = () => {
           if (!isCancelled) {
+            ctx.imageSmoothingEnabled = false;
             ctx.drawImage(maskImg, 0, 0, canvasWidth, canvasHeight);
+            ctx.imageSmoothingEnabled = true;
             applyMask();
           }
         };
