@@ -24,6 +24,83 @@ const OFFICIAL_EVENT_FEED_URLS = {
 };
 
 const MAX_EVENTS_PER_SERVER = 100;
+const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
+const DISBAND_PATTERN = /^The settlement of (.+?) has just been disbanded/i;
+
+function extractDeedNameFromDisbandMessage(message) {
+  const match = message.match(DISBAND_PATTERN);
+  return match?.[1]?.trim() ?? null;
+}
+
+function formatDisbandDate(timestamp) {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+}
+
+async function handleDisbandEvents(mapId, events) {
+  const disbandEvents = events
+    .map((event) => ({
+      deedName: extractDeedNameFromDisbandMessage(event.message),
+      timestamp: event.timestamp
+    }))
+    .filter((event) => event.deedName !== null);
+
+  if (disbandEvents.length === 0) {
+    return;
+  }
+
+  for (const { deedName, timestamp } of disbandEvents) {
+    try {
+      const deed = await prisma.deed.findFirst({
+        where: { deletedAt: null, mapId, name: deedName }
+      });
+
+      if (deed === null) {
+        console.log(`    ${deedName}: deed not found, skipping`);
+        continue;
+      }
+
+      const category = await prisma.noteCategory.upsert({
+        create: { mapId, name: ABANDONED_DEED_CATEGORY_NAME },
+        update: {},
+        where: { mapId_name: { mapId, name: ABANDONED_DEED_CATEGORY_NAME } }
+      });
+
+      const deletedAt = new Date();
+      const deleteExpiresAt = new Date(
+        deletedAt.getTime() + 72 * 60 * 60 * 1000
+      );
+
+      await prisma.$transaction([
+        prisma.note.create({
+          data: {
+            category: ABANDONED_DEED_CATEGORY_NAME,
+            mapId,
+            text: `Disbanded - ${formatDisbandDate(timestamp)}`,
+            title: deed.name,
+            x: deed.x,
+            y: deed.y
+          }
+        }),
+        prisma.deed.update({
+          data: {
+            deletedAt,
+            deleteExpiresAt
+          },
+          where: { id: deed.id }
+        })
+      ]);
+
+      console.log(`    ${deedName}: disbanded → note created, deed soft-deleted`);
+    } catch (error) {
+      console.error(`    ${deedName}: error handling disband -`, error instanceof Error ? error.message : String(error));
+    }
+  }
+}
 
 function parseEventFeedXml(xml) {
   const events = [];
@@ -101,6 +178,7 @@ async function syncAllEvents() {
               timestamp: event.timestamp
             }))
           });
+          await handleDisbandEvents(mapId, newEvents);
         }
 
         const allEvents = await prisma.event.findMany({
