@@ -6,8 +6,8 @@ const dockerignore = readFileSync(".dockerignore", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
 
 describe("environment configuration", () => {
-  it("does not require an unused auth secret in Compose", () => {
-    expect(compose).not.toContain("AUTH_SECRET");
+  it("requires AUTH_SECRET in Compose for production auth", () => {
+    expect(compose).toContain("AUTH_SECRET");
   });
 
   it("does not provide runnable placeholder secrets in the example env file", () => {

@@ -12,7 +12,10 @@ describe("assertNoCoordinateMetadata", () => {
   });
 
   it("rejects top-level coordinate keys", () => {
-    expect(() => assertNoCoordinateMetadata({ x: 12 })).toThrow(
+    expect(() => assertNoCoordinateMetadata({ coordinate: "12,20" })).toThrow(
+      "Audit metadata must not store marker coordinates"
+    );
+    expect(() => assertNoCoordinateMetadata({ position: { x: 12, y: 20 } })).toThrow(
       "Audit metadata must not store marker coordinates"
     );
   });
