@@ -3076,6 +3076,7 @@ function WildernessOverlay({
       style={{
         ...imageStyle,
         backgroundImage: `url("${overlaySrc}")`,
+        backgroundSize: "100% 100%",
         opacity: opacity / 100
       }}
     />
