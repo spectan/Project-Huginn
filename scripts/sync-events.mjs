@@ -2,6 +2,8 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
 const OFFICIAL_EVENT_FEED_URLS = {
   Affliction: "http://affliction.wurmonline.com/battles/server_feed.xml",
   Cadence: "https://cadence.game.wurmonline.com/battles/server_feed.xml",
@@ -29,7 +31,12 @@ function parseEventFeedXml(xml) {
   let match;
 
   while ((match = messageRegex.exec(xml)) !== null) {
-    const message = match[1].replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+    const message = match[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
     const timestamp = Number.parseInt(match[2], 10);
 
     if (message !== "" && Number.isFinite(timestamp)) {
@@ -41,86 +48,97 @@ function parseEventFeedXml(xml) {
 }
 
 async function syncAllEvents() {
-  console.log(`Starting event sync at ${new Date().toISOString()}`);
+  console.log(`[${new Date().toISOString()}] Starting event sync`);
 
-  const maps = await prisma.map.findMany({
-    select: { id: true, name: true },
-    where: { isActive: true }
-  });
+  try {
+    const maps = await prisma.map.findMany({
+      select: { id: true, name: true },
+      where: { isActive: true }
+    });
 
-  const mapByName = new Map(maps.map((m) => [m.name, m.id]));
-  let synced = 0;
-  let failed = 0;
+    const mapByName = new Map(maps.map((m) => [m.name, m.id]));
+    let synced = 0;
+    let failed = 0;
 
-  for (const [serverName, url] of Object.entries(OFFICIAL_EVENT_FEED_URLS)) {
-    const mapId = mapByName.get(serverName);
+    for (const [serverName, url] of Object.entries(OFFICIAL_EVENT_FEED_URLS)) {
+      const mapId = mapByName.get(serverName);
 
-    if (mapId === undefined) {
-      continue;
-    }
-
-    try {
-      const response = await fetch(url, { cache: "no-store" });
-
-      if (!response.ok) {
-        console.log(`Failed to fetch events for ${serverName}: ${response.status}`);
-        failed++;
+      if (mapId === undefined) {
         continue;
       }
 
-      const xml = await response.text();
-      const events = parseEventFeedXml(xml);
+      try {
+        const response = await fetch(url, { cache: "no-store" });
 
-      if (events.length === 0) {
-        console.log(`No events for ${serverName}`);
+        if (!response.ok) {
+          console.log(`  ${serverName}: fetch failed (${response.status})`);
+          failed++;
+          continue;
+        }
+
+        const xml = await response.text();
+        const events = parseEventFeedXml(xml);
+
+        if (events.length === 0) {
+          console.log(`  ${serverName}: no events`);
+          synced++;
+          continue;
+        }
+
+        const existingEvents = await prisma.event.findMany({
+          select: { message: true, timestamp: true },
+          where: { mapId }
+        });
+
+        const existingSet = new Set(existingEvents.map((e) => `${e.timestamp}:${e.message}`));
+        const newEvents = events.filter((e) => !existingSet.has(`${e.timestamp}:${e.message}`));
+
+        if (newEvents.length > 0) {
+          await prisma.event.createMany({
+            data: newEvents.map((event) => ({
+              mapId,
+              message: event.message,
+              timestamp: event.timestamp
+            }))
+          });
+        }
+
+        const allEvents = await prisma.event.findMany({
+          orderBy: { timestamp: "desc" },
+          select: { id: true },
+          where: { mapId }
+        });
+
+        if (allEvents.length > MAX_EVENTS_PER_SERVER) {
+          const toDelete = allEvents.slice(MAX_EVENTS_PER_SERVER);
+          await prisma.event.deleteMany({
+            where: { id: { in: toDelete.map((e) => e.id) } }
+          });
+        }
+
+        console.log(`  ${serverName}: ${events.length} events (${newEvents.length} new)`);
         synced++;
-        continue;
+      } catch (error) {
+        console.error(`  ${serverName}: ${error instanceof Error ? error.message : String(error)}`);
+        failed++;
       }
-
-      const existingEvents = await prisma.event.findMany({
-        select: { message: true, timestamp: true },
-        where: { mapId }
-      });
-
-      const existingSet = new Set(existingEvents.map((e) => `${e.timestamp}:${e.message}`));
-      const newEvents = events.filter((e) => !existingSet.has(`${e.timestamp}:${e.message}`));
-
-      if (newEvents.length > 0) {
-        await prisma.event.createMany({
-          data: newEvents.map((event) => ({
-            mapId,
-            message: event.message,
-            timestamp: event.timestamp
-          }))
-        });
-      }
-
-      const allEvents = await prisma.event.findMany({
-        orderBy: { timestamp: "desc" },
-        select: { id: true },
-        where: { mapId }
-      });
-
-      if (allEvents.length > MAX_EVENTS_PER_SERVER) {
-        const toDelete = allEvents.slice(MAX_EVENTS_PER_SERVER);
-        await prisma.event.deleteMany({
-          where: { id: { in: toDelete.map((e) => e.id) } }
-        });
-      }
-
-      console.log(`Synced ${events.length} events for ${serverName} (${newEvents.length} new)`);
-      synced++;
-    } catch (error) {
-      console.error(`Error syncing ${serverName}:`, error instanceof Error ? error.message : String(error));
-      failed++;
     }
-  }
 
-  console.log(`Done. Synced: ${synced}, Failed: ${failed}`);
-  await prisma.$disconnect();
+    console.log(`[${new Date().toISOString()}] Sync complete. Success: ${synced}, Failed: ${failed}`);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Sync error:`, error instanceof Error ? error.message : String(error));
+  }
 }
 
-syncAllEvents().catch((error) => {
+async function run() {
+  console.log("Event sync service starting...");
+
+  await syncAllEvents();
+
+  setInterval(syncAllEvents, SYNC_INTERVAL_MS);
+}
+
+run().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

@@ -34,6 +34,16 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  sync:
+    command: ["node", "scripts/sync-events.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    image: mapsamuelzone-app:latest
+    restart: unless-stopped
+
   db:
     image: postgres:17-alpine
     environment:
