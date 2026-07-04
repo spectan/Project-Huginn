@@ -1704,6 +1704,7 @@ export default function MapWorkspace({
             color={markerColors.wildernessOverlay}
             markers={displayedMarkersWithEditPreview}
             imageStyle={imageStyle}
+            map={visualMap}
             mapSize={mapSize}
             opacity={markerOpacities.wildernessOverlay}
             visible={markerVisibility.wildernessOverlay}
@@ -2955,6 +2956,7 @@ function TileHighlightOverlay({
 
 function WildernessOverlay({
   color,
+  map,
   markers,
   imageStyle,
   mapSize,
@@ -2962,6 +2964,7 @@ function WildernessOverlay({
   visible
 }: {
   color: string;
+  map: WorkspaceMap | null;
   markers: WorkspaceMarker[];
   imageStyle: CSSProperties;
   mapSize: { heightPx: number; widthPx: number };
@@ -2973,12 +2976,17 @@ function WildernessOverlay({
     [markers]
   );
 
+  const waterMaskUrl = useMemo(() => {
+    if (map === null) return null;
+    return `/maps/${map.name.toLowerCase()}-water-mask.png`;
+  }, [map]);
+
   const canvasKey = useMemo(() => {
     const deedKey = deeds
       .map((deed) => `${deed.id}:${deed.x}:${deed.y}:${deed.north}:${deed.south}:${deed.east}:${deed.west}:${deed.perimeter}`)
       .join(",");
-    return `${mapSize.widthPx}x${mapSize.heightPx}|${color}|${deedKey}`;
-  }, [color, mapSize, deeds]);
+    return `${mapSize.widthPx}x${mapSize.heightPx}|${color}|${deedKey}|${waterMaskUrl ?? "no-mask"}`;
+  }, [color, mapSize, deeds, waterMaskUrl]);
 
   const [overlaySrc, setOverlaySrc] = useState<string | null>(null);
 
@@ -3028,8 +3036,30 @@ function WildernessOverlay({
         ctx.fill();
       }
 
-      if (!isCancelled) {
-        setOverlaySrc(canvas.toDataURL());
+      const applyMask = () => {
+        if (!isCancelled) {
+          setOverlaySrc(canvas.toDataURL());
+        }
+      };
+
+      if (waterMaskUrl !== null) {
+        const maskImg = document.createElement("img");
+        maskImg.crossOrigin = "anonymous";
+        maskImg.onload = () => {
+          if (!isCancelled) {
+            ctx.drawImage(maskImg, 0, 0, canvasWidth, canvasHeight);
+            applyMask();
+          }
+        };
+        maskImg.onerror = () => {
+          // If mask fails to load, still show the overlay without water masking
+          if (!isCancelled) {
+            applyMask();
+          }
+        };
+        maskImg.src = waterMaskUrl;
+      } else {
+        applyMask();
       }
     }, 0);
 
@@ -3037,7 +3067,7 @@ function WildernessOverlay({
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [canvasKey, visible]);
+  }, [canvasKey, visible, waterMaskUrl]);
 
   if (!visible || overlaySrc === null) {
     return null;
