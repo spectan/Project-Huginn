@@ -3032,9 +3032,17 @@ function WildernessOverlay({
       }
 
       const applyMask = () => {
-        if (!isCancelled) {
-          setOverlaySrc(canvas.toDataURL());
+        if (isCancelled) {
+          return;
         }
+        // Threshold alpha to eliminate anti-aliased gradients
+        const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
+        const data = imageData.data;
+        for (let i = 3; i < data.length; i += 4) {
+          data[i] = (data[i] ?? 0) > 0 ? 255 : 0;
+        }
+        ctx.putImageData(imageData, 0, 0);
+        setOverlaySrc(canvas.toDataURL());
       };
 
       if (waterMaskUrl !== null) {
