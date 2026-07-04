@@ -139,6 +139,20 @@ export function MapSettingsOverlay({
               })}
             />
             <LayerControlRow
+              checked={markerVisibility.wildernessOverlay}
+              colorLabel="Unique Spawn Area color"
+              colorValue={markerColors.wildernessOverlay}
+              label="Unique Spawn Area"
+              opacityLabel="Unique Spawn Area opacity"
+              opacityValue={markerOpacities.wildernessOverlay}
+              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, wildernessOverlay: value })}
+              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, wildernessOverlay: value })}
+              onToggle={() => onMarkerVisibilityChange({
+                ...markerVisibility,
+                wildernessOverlay: !markerVisibility.wildernessOverlay
+              })}
+            />
+            <LayerControlRow
               checked={markerVisibility.towerNames}
               label="Tower Names"
               onToggle={() => onMarkerVisibilityChange({

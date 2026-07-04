@@ -168,6 +168,7 @@ export type MarkerVisibility = {
   towers: boolean;
   towerNames: boolean;
   tunnels: boolean;
+  wildernessOverlay: boolean;
 };
 
 export type MarkerColors = {
@@ -185,6 +186,7 @@ export type MarkerColors = {
   sectorGrid: string;
   towers: string;
   tunnels: string;
+  wildernessOverlay: string;
 };
 
 export type MarkerOpacities = {
@@ -200,6 +202,7 @@ export type MarkerOpacities = {
   sectorGrid: number;
   towers: number;
   tunnels: number;
+  wildernessOverlay: number;
 };
 
 export type TileHighlightSettings = {

@@ -3093,6 +3093,7 @@ describe("MapPage", () => {
       .map((element) => element.getAttribute("data-layer-category") ?? element.getAttribute("data-layer-row"));
     expect(orderedLayerItems).toEqual([
       "Overlays",
+      "Unique Spawn Area",
       "Tower Names",
       "Deed Names",
       "Sector Grid",

@@ -1700,6 +1700,14 @@ export default function MapWorkspace({
             map={visualMap}
             tileHighlight={tileHighlight}
           />
+          <WildernessOverlay
+            color={markerColors.wildernessOverlay}
+            markers={displayedMarkersWithEditPreview}
+            imageStyle={imageStyle}
+            mapSize={mapSize}
+            opacity={markerOpacities.wildernessOverlay}
+            visible={markerVisibility.wildernessOverlay}
+          />
           <div
             className="map-stage"
             data-testid="map-stage"
@@ -2940,6 +2948,111 @@ function TileHighlightOverlay({
         ...imageStyle,
         backgroundImage: `url("${overlay.src}")`,
         opacity: tileHighlight.opacity / 100
+      }}
+    />
+  );
+}
+
+function WildernessOverlay({
+  color,
+  markers,
+  imageStyle,
+  mapSize,
+  opacity,
+  visible
+}: {
+  color: string;
+  markers: WorkspaceMarker[];
+  imageStyle: CSSProperties;
+  mapSize: { heightPx: number; widthPx: number };
+  opacity: number;
+  visible: boolean;
+}) {
+  const deeds = useMemo(
+    () => markers.filter((marker): marker is Extract<WorkspaceMarker, { type: "deed" }> => marker.type === "deed"),
+    [markers]
+  );
+
+  const canvasKey = useMemo(() => {
+    const deedKey = deeds
+      .map((deed) => `${deed.id}:${deed.x}:${deed.y}:${deed.north}:${deed.south}:${deed.east}:${deed.west}:${deed.perimeter}`)
+      .join(",");
+    return `${mapSize.widthPx}x${mapSize.heightPx}|${color}|${deedKey}`;
+  }, [color, mapSize, deeds]);
+
+  const [overlaySrc, setOverlaySrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (!visible || deeds.length === 0) {
+      setOverlaySrc(null);
+      return () => {
+        isCancelled = true;
+      };
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const maxCanvasDimension = 1024;
+      const scale = Math.min(
+        1,
+        maxCanvasDimension / Math.max(mapSize.widthPx, mapSize.heightPx)
+      );
+      const canvasWidth = Math.max(1, Math.round(mapSize.widthPx * scale));
+      const canvasHeight = Math.max(1, Math.round(mapSize.heightPx * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+      const ctx = canvas.getContext("2d");
+
+      if (ctx === null) {
+        if (!isCancelled) {
+          setOverlaySrc(null);
+        }
+        return;
+      }
+
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      ctx.globalCompositeOperation = "destination-out";
+
+      for (const deed of deeds) {
+        const maxEW = Math.max(deed.east, deed.west) + deed.perimeter;
+        const maxNS = Math.max(deed.north, deed.south) + deed.perimeter;
+        const radius = (Math.sqrt(maxEW * maxEW + maxNS * maxNS) + 40) * scale;
+        const cx = deed.x * scale;
+        const cy = deed.y * scale;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      if (!isCancelled) {
+        setOverlaySrc(canvas.toDataURL());
+      }
+    }, 0);
+
+    return () => {
+      isCancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [canvasKey, visible]);
+
+  if (!visible || overlaySrc === null) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      className="map-wilderness-overlay"
+      data-testid="wilderness-overlay"
+      style={{
+        ...imageStyle,
+        backgroundImage: `url("${overlaySrc}")`,
+        backgroundSize: "100% 100%",
+        opacity: opacity / 100
       }}
     />
   );
