@@ -22,6 +22,7 @@ const EVENT_SECTIONS: Array<{
 
 export type WurmMapsEventKind =
   | "deed"
+  | "event"
   | "holySite"
   | "lightningStrike"
   | "mission"

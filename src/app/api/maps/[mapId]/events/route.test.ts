@@ -8,26 +8,7 @@ const mocks = vi.hoisted(() => ({
     isAdmin: false;
     mapPermissions?: readonly [{ accessLevel: "READ"; isOperator: false; mapId: string }];
   },
-  eventFeed: {
-    events: [
-      {
-        id: "deed-1",
-        kind: "deed",
-        label: "Deed",
-        message: "The settlement of Finally Fixing This Bridge has just been disbanded by Rory.",
-        subtype: 2,
-        timestamp: 1778286018
-      }
-    ],
-    fetchedAt: "2026-05-13T04:00:00.000Z",
-    serverStatus: {
-      status: "online",
-      uptimeSeconds: 53207,
-      weather: "A light breeze is coming from the south.",
-      wurmTime: "It is 18:30:03 on day of Awakening."
-    },
-    sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
-  },
+  storedEvents: [] as Array<{ id: string; message: string; timestamp: number }>,
   map: {
     id: "map-1",
     name: "Celebration"
@@ -45,11 +26,22 @@ vi.mock("@/lib/markers/database", () => ({
   findActiveMap: vi.fn(async (mapId?: string) => (mapId === "map-1" ? mocks.map : null))
 }));
 
-vi.mock("@/lib/wurmmaps/event-feed", () => ({
-  fetchWurmMapsEventFeed: vi.fn(async () => ({ ok: true, value: mocks.eventFeed }))
+vi.mock("@/lib/events/database", () => ({
+  listEventsForMap: vi.fn(async (_mapId: string) => mocks.storedEvents),
+  upsertEvents: vi.fn(async () => undefined)
 }));
 
-import { fetchWurmMapsEventFeed } from "@/lib/wurmmaps/event-feed";
+vi.mock("@/lib/events/event-feed", () => ({
+  fetchOfficialEventFeed: vi.fn(async () => ({
+    events: [
+      { id: "event-1", message: "A new mission is available!", timestamp: 1778385063 }
+    ],
+    fetchedAt: "2026-05-13T04:00:00.000Z",
+    sourceUrl: "https://celebration.wurmonline.com/battles/server_feed.xml"
+  })),
+  getOfficialFeedUrl: vi.fn(() => "https://celebration.wurmonline.com/battles/server_feed.xml")
+}));
+
 import { GET } from "./route";
 
 describe("GET /api/maps/[mapId]/events", () => {
@@ -60,6 +52,7 @@ describe("GET /api/maps/[mapId]/events", () => {
       id: "map-1",
       name: "Celebration"
     };
+    mocks.storedEvents = [];
   });
 
   it("requires map read access", async () => {
@@ -71,7 +64,37 @@ describe("GET /api/maps/[mapId]/events", () => {
     expect(response.status).toBe(403);
   });
 
-  it("returns the normalized event feed for the requested map", async () => {
+  it("returns stored events when available", async () => {
+    mocks.currentViewer = {
+      accessLevel: "READ",
+      approvalStatus: "APPROVED",
+      id: "user-1",
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+      ]
+    };
+    mocks.storedEvents = [
+      { id: "stored-1", message: "Test event", timestamp: 1778385063 }
+    ];
+
+    const response = await GET(new Request("http://localhost/api/maps/map-1/events"), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.feed.events).toHaveLength(1);
+    expect(body.feed.events[0]).toMatchObject({
+      id: "stored-1",
+      kind: "event",
+      label: "Event",
+      message: "Test event",
+      timestamp: 1778385063
+    });
+  });
+
+  it("fetches from official feed when no stored events", async () => {
     mocks.currentViewer = {
       accessLevel: "READ",
       approvalStatus: "APPROVED",
@@ -86,9 +109,14 @@ describe("GET /api/maps/[mapId]/events", () => {
       params: Promise.resolve({ mapId: "map-1" })
     });
 
-    await expect(response.json()).resolves.toEqual({ feed: mocks.eventFeed });
+    const body = await response.json();
     expect(response.status).toBe(200);
-    expect(fetchWurmMapsEventFeed).toHaveBeenCalledWith("Celebration");
+    expect(body.feed.events).toHaveLength(1);
+    expect(body.feed.events[0]).toMatchObject({
+      kind: "event",
+      label: "Event",
+      message: "A new mission is available!"
+    });
   });
 
   it("returns 404 when the requested map is missing", async () => {

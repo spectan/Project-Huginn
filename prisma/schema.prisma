@@ -138,6 +138,7 @@ model Map {
   paths           PathMarker[]
   noteCategories  NoteCategory[]
   auditEvents     AuditEvent[]
+  events          Event[]
   userSettings    UserMapSettings[]
   userPermissions UserMapPermission[]
 
@@ -439,4 +440,16 @@ model AuditEvent {
   @@index([action, createdAt])
   @@index([mapId, createdAt])
   @@map("audit_events")
+}
+
+model Event {
+  id        String   @id @default(cuid())
+  mapId     String
+  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  message   String
+  timestamp Int
+  createdAt DateTime @default(now())
+
+  @@index([mapId, timestamp])
+  @@map("events")
 }
