@@ -3001,13 +3001,8 @@ function WildernessOverlay({
     }
 
     const timeoutId = window.setTimeout(() => {
-      const maxCanvasDimension = 1024;
-      const scale = Math.min(
-        1,
-        maxCanvasDimension / Math.max(mapSize.widthPx, mapSize.heightPx)
-      );
-      const canvasWidth = Math.max(1, Math.round(mapSize.widthPx * scale));
-      const canvasHeight = Math.max(1, Math.round(mapSize.heightPx * scale));
+      const canvasWidth = mapSize.widthPx;
+      const canvasHeight = mapSize.heightPx;
       const canvas = document.createElement("canvas");
       canvas.width = canvasWidth;
       canvas.height = canvasHeight;
@@ -3027,9 +3022,9 @@ function WildernessOverlay({
       for (const deed of deeds) {
         const maxEW = Math.max(deed.east, deed.west) + deed.perimeter;
         const maxNS = Math.max(deed.north, deed.south) + deed.perimeter;
-        const radius = (Math.sqrt(maxEW * maxEW + maxNS * maxNS) + 40) * scale;
-        const cx = deed.x * scale;
-        const cy = deed.y * scale;
+        const radius = Math.sqrt(maxEW * maxEW + maxNS * maxNS) + 40;
+        const cx = deed.x;
+        const cy = deed.y;
 
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
@@ -3081,7 +3076,6 @@ function WildernessOverlay({
       style={{
         ...imageStyle,
         backgroundImage: `url("${overlaySrc}")`,
-        backgroundSize: "100% 100%",
         opacity: opacity / 100
       }}
     />
