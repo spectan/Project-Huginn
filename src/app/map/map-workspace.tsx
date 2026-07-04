@@ -1702,6 +1702,7 @@ export default function MapWorkspace({
           />
           <WildernessOverlay
             color={markerColors.wildernessOverlay}
+            layerName={selectedMapLayer?.name ?? null}
             markers={displayedMarkersWithEditPreview}
             imageStyle={imageStyle}
             map={visualMap}
@@ -2956,6 +2957,7 @@ function TileHighlightOverlay({
 
 function WildernessOverlay({
   color,
+  layerName,
   map,
   markers,
   imageStyle,
@@ -2964,6 +2966,7 @@ function WildernessOverlay({
   visible
 }: {
   color: string;
+  layerName: string | null;
   map: WorkspaceMap | null;
   markers: WorkspaceMarker[];
   imageStyle: CSSProperties;
@@ -2977,9 +2980,11 @@ function WildernessOverlay({
   );
 
   const waterMaskUrl = useMemo(() => {
-    if (map === null) return null;
-    return `/maps/${map.name.toLowerCase()}-water-mask.png`;
-  }, [map]);
+    if (map === null || layerName === null) return null;
+    const server = map.name.toLowerCase();
+    const layerSuffix = layerName === "Terrain" ? "terrain" : "topo";
+    return `/maps/${server}-${layerSuffix}-water-mask.png`;
+  }, [map, layerName]);
 
   const canvasKey = useMemo(() => {
     const deedKey = deeds

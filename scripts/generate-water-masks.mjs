@@ -8,7 +8,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MAPS_DIR = path.join(__dirname, "..", "public", "maps");
 
 function isWaterPixel(r, g, b) {
-  // Exclude pure black which may be artifacts/voids
   if (r === 0 && g === 0 && b === 0) return true;
   return b > r + 20 && b > g + 20;
 }
@@ -21,7 +20,6 @@ async function generateWaterMask(topoPath, outputPath) {
 
   const raw = await img.raw().toBuffer();
 
-  // Create mask at native resolution: land = transparent, water = opaque white
   const mask = Buffer.alloc(width * height * 4);
 
   for (let i = 0; i < width * height; i++) {
@@ -54,18 +52,18 @@ async function generateWaterMask(topoPath, outputPath) {
 
 async function main() {
   const files = fs.readdirSync(MAPS_DIR)
-    .filter(f => f.endsWith("-topo.png"))
+    .filter(f => f.endsWith(".png") && !f.endsWith("-water-mask.png") && f !== "wurm-map.png")
     .sort();
 
-  console.log(`Found ${files.length} topography maps\n`);
+  console.log(`Found ${files.length} map images\n`);
 
   for (const file of files) {
-    const topoPath = path.join(MAPS_DIR, file);
-    const maskName = file.replace("-topo.png", "-water-mask.png");
+    const mapPath = path.join(MAPS_DIR, file);
+    const maskName = file.replace(".png", "-water-mask.png");
     const outputPath = path.join(MAPS_DIR, maskName);
 
     try {
-      await generateWaterMask(topoPath, outputPath);
+      await generateWaterMask(mapPath, outputPath);
     } catch (error) {
       console.error(`  Failed: ${error.message}`);
     }
