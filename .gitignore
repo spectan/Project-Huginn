@@ -29,6 +29,7 @@ postgres-data/
 *.sqlite
 *.sqlite3
 *.db
+backups/
 
 # local raw map source files
 Celebration-classic*.png
