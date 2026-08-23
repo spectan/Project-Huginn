@@ -928,12 +928,15 @@ function getLocateSoulDirectionLine(
     x: view.x + (x + 0.5) * view.zoom,
     y: view.y + (y + 0.5) * view.zoom
   };
-  const end = getPolarPoint(center, Math.max(10, 14 * view.zoom), angleDegrees);
+  const markerRadius = Math.max(5, 5 * view.zoom);
+  const lineLength = Math.max(15, 20 * view.zoom);
+  const start = getPolarPoint(center, markerRadius, angleDegrees);
+  const end = getPolarPoint(center, markerRadius + lineLength, angleDegrees);
 
   return {
-    x1: center.x,
+    x1: start.x,
     x2: end.x,
-    y1: center.y,
+    y1: start.y,
     y2: end.y
   };
 }
