@@ -385,20 +385,6 @@ body {
   pointer-events: none;
 }
 
-.map-locate-soul-direction-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
-}
-
-.map-locate-soul-direction {
-  pointer-events: none;
-  stroke-linecap: round;
-}
-
 .map-locate-soul-overlay {
   pointer-events: none;
 }

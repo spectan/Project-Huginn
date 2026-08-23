@@ -502,7 +502,6 @@ function renderMarker(
       y: marker.y
     });
     const offMapLine = getLocateSoulOffMapLine(marker.x, marker.y, geometry.centerAngleDegrees, mapSize, view);
-    const directionLine = getLocateSoulDirectionLine(marker.x, marker.y, geometry.centerAngleDegrees, view);
 
     return (
       <div className="map-marker-group" key={marker.id}>
@@ -534,19 +533,6 @@ function renderMarker(
             />
           </svg>
         ) : null}
-        <svg aria-hidden="true" className="map-locate-soul-direction-svg">
-          <line
-            className="map-locate-soul-direction"
-            data-testid={`locate-soul-direction-${marker.id}`}
-            opacity={1}
-            stroke={markerColors.locateSouls}
-            strokeWidth={Math.max(2, 2 * view.zoom)}
-            x1={formatSvgNumber(directionLine.x1)}
-            x2={formatSvgNumber(directionLine.x2)}
-            y1={formatSvgNumber(directionLine.y1)}
-            y2={formatSvgNumber(directionLine.y2)}
-          />
-        </svg>
         <button
           aria-label={`Locate Soul ${marker.targetName} at ${marker.x}, ${marker.y}`}
           className={getMarkerClassName("map-marker map-marker--locate-soul", isHighlighted, isRelocatable)}
@@ -916,29 +902,6 @@ function getPositiveBoundaryDistance(origin: number, direction: number, boundary
 
   const distance = (boundary - origin) / direction;
   return distance <= 0 ? null : distance;
-}
-
-function getLocateSoulDirectionLine(
-  x: number,
-  y: number,
-  angleDegrees: number,
-  view: MarkerLayerView
-): { x1: number; x2: number; y1: number; y2: number } {
-  const center = {
-    x: view.x + (x + 0.5) * view.zoom,
-    y: view.y + (y + 0.5) * view.zoom
-  };
-  const markerRadius = Math.max(5, 5 * view.zoom);
-  const lineLength = Math.max(15, 20 * view.zoom);
-  const start = getPolarPoint(center, markerRadius, angleDegrees);
-  const end = getPolarPoint(center, markerRadius + lineLength, angleDegrees);
-
-  return {
-    x1: start.x,
-    x2: end.x,
-    y1: start.y,
-    y2: end.y
-  };
 }
 
 function getPathStrokeWidth(width: number, view: MarkerLayerView): number {
