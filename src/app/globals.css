@@ -545,7 +545,16 @@ body {
 }
 
 .map-marker--locate-soul {
+  background: transparent;
   box-shadow: none;
+}
+
+.map-marker--locate-soul::before {
+  position: absolute;
+  inset: 0;
+  clip-path: polygon(50% 0, 0 100%, 100% 100%);
+  content: "";
+  background: var(--map-locate-soul-color, #a855f7);
 }
 
 .map-deed-overlay {

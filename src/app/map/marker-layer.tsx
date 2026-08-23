@@ -542,7 +542,7 @@ function renderMarker(
           onMouseLeave={onHoverEnd}
           onMouseMove={(event) => onHoverMove(marker, event)}
           onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-          style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.locateSouls, view)}
+          style={getLocateSoulMarkerStyle(marker.x, marker.y, markerColors.locateSouls, view)}
           type="button"
         />
       </div>
@@ -639,6 +639,10 @@ function getCampMarkerStyle(x: number, y: number, color: string, view: MarkerLay
   };
 }
 
+type LocateSoulMarkerStyle = CSSProperties & {
+  "--map-locate-soul-color": string;
+};
+
 type MinedoorMarkerStyle = CSSProperties & {
   "--map-minedoor-color": string;
 };
@@ -655,6 +659,14 @@ function getMinedoorMarkerStyle(x: number, y: number, color: string, view: Marke
   return {
     ...getSingleTileStyle(x, y, view),
     "--map-minedoor-color": color
+  };
+}
+
+function getLocateSoulMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): LocateSoulMarkerStyle {
+  return {
+    ...getCenterTileStyle(x, y, view),
+    "--map-locate-soul-color": color,
+    opacity: 1
   };
 }
 

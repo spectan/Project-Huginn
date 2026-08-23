@@ -2644,7 +2644,7 @@ function getLegendItems(markerColors: MarkerColors): LegendItem[] {
     { color: markerColors.rifts, id: "rift", label: "Rift", variant: "triangle" },
     { color: markerColors.camps, id: "camp", label: "Camp", variant: "triangle" },
     { color: markerColors.minedoors, id: "minedoor", label: "Minedoor", variant: "minedoor" },
-    { color: markerColors.locateSouls, id: "locate-soul", label: "Locate Soul", variant: "square" },
+    { color: markerColors.locateSouls, id: "locate-soul", label: "Locate Soul", variant: "triangle" },
     { color: markerColors.bridges, id: "bridge", label: "Bridge", variant: "line" },
     { color: markerColors.canals, id: "canal", label: "Canal", variant: "line" },
     { color: markerColors.highways, id: "highway", label: "Highway", variant: "line" },
