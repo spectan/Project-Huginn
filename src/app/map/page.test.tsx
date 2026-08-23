@@ -1423,10 +1423,10 @@ describe("MapPage", () => {
     expect(minedoor.style.height).toBe("1px");
     expect(minedoor.className).toContain("map-marker--minedoor");
     const locateSoul = screen.getByRole("button", { name: "Locate Soul Funkiey at 930, 1030" });
-    expect(locateSoul.style.left).toBe("929px");
-    expect(locateSoul.style.top).toBe("1029px");
-    expect(locateSoul.style.width).toBe("3px");
-    expect(locateSoul.style.height).toBe("3px");
+    expect(locateSoul.style.left).toBe("926px");
+    expect(locateSoul.style.top).toBe("1026px");
+    expect(locateSoul.style.width).toBe("9px");
+    expect(locateSoul.style.height).toBe("9px");
     expect(locateSoul.style.opacity).toBe("1");
     expect(locateSoul.className).toContain("map-marker--locate-soul");
     const locateSoulOverlay = screen.getByTestId("locate-soul-overlay-locate-soul-1");

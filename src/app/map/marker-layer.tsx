@@ -540,7 +540,7 @@ function renderMarker(
             data-testid={`locate-soul-direction-${marker.id}`}
             opacity={1}
             stroke={markerColors.locateSouls}
-            strokeWidth={Math.max(1, 1.5 * view.zoom)}
+            strokeWidth={Math.max(2, 2 * view.zoom)}
             x1={formatSvgNumber(directionLine.x1)}
             x2={formatSvgNumber(directionLine.x2)}
             y1={formatSvgNumber(directionLine.y1)}
@@ -678,7 +678,12 @@ function getMinedoorMarkerStyle(x: number, y: number, color: string, view: Marke
 
 function getLocateSoulMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): LocateSoulMarkerStyle {
   return {
-    ...getCenterTileStyle(x, y, view),
+    ...getScreenRectStyle({
+      height: 9,
+      width: 9,
+      x: x - 4,
+      y: y - 4
+    }, view),
     "--map-locate-soul-color": color,
     opacity: 1
   };
@@ -923,7 +928,7 @@ function getLocateSoulDirectionLine(
     x: view.x + (x + 0.5) * view.zoom,
     y: view.y + (y + 0.5) * view.zoom
   };
-  const end = getPolarPoint(center, Math.max(6, 8 * view.zoom), angleDegrees);
+  const end = getPolarPoint(center, Math.max(10, 14 * view.zoom), angleDegrees);
 
   return {
     x1: center.x,
