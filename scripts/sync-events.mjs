@@ -64,7 +64,7 @@ async function handleDisbandEvents(mapId, events) {
         continue;
       }
 
-      const category = await prisma.noteCategory.upsert({
+      await prisma.noteCategory.upsert({
         create: { mapId, name: ABANDONED_DEED_CATEGORY_NAME },
         update: {},
         where: { mapId_name: { mapId, name: ABANDONED_DEED_CATEGORY_NAME } }

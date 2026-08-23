@@ -27,7 +27,7 @@ vi.mock("@/lib/markers/database", () => ({
 }));
 
 vi.mock("@/lib/events/database", () => ({
-  listEventsForMap: vi.fn(async (_mapId: string) => mocks.storedEvents),
+  listEventsForMap: vi.fn(async () => mocks.storedEvents),
   upsertEvents: vi.fn(async () => undefined)
 }));
 

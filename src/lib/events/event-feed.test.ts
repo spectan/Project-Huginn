@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   EVENT_FEED_DISPLAY_LIMIT,
-  MAX_EVENTS_PER_SERVER,
   fetchOfficialEventFeed,
   getOfficialFeedUrl,
   parseEventFeedXml

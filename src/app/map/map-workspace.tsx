@@ -2999,7 +2999,6 @@ function WildernessOverlay({
     let isCancelled = false;
 
     if (!visible || deeds.length === 0) {
-      setOverlaySrc(null);
       return () => {
         isCancelled = true;
       };
@@ -3020,14 +3019,28 @@ function WildernessOverlay({
         return;
       }
 
+      const MAP_EDGE_INSET_TILES = 510;
+      const DEED_EXCLUSION_DISTANCE_TILES = 30;
+
       ctx.fillStyle = color;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
       ctx.globalCompositeOperation = "destination-out";
 
+      // Uniques cannot spawn within 510 tiles of the map edge.
+      const innerLeft = MAP_EDGE_INSET_TILES;
+      const innerTop = MAP_EDGE_INSET_TILES;
+      const innerRight = canvasWidth - MAP_EDGE_INSET_TILES;
+      const innerBottom = canvasHeight - MAP_EDGE_INSET_TILES;
+
+      ctx.fillRect(0, 0, canvasWidth, innerTop);
+      ctx.fillRect(0, innerBottom, canvasWidth, canvasHeight - innerBottom);
+      ctx.fillRect(0, innerTop, innerLeft, innerBottom - innerTop);
+      ctx.fillRect(innerRight, innerTop, canvasWidth - innerRight, innerBottom - innerTop);
+
       for (const deed of deeds) {
         const maxEW = Math.max(deed.east, deed.west) + deed.perimeter;
         const maxNS = Math.max(deed.north, deed.south) + deed.perimeter;
-        const radius = Math.sqrt(maxEW * maxEW + maxNS * maxNS) + 40;
+        const radius = Math.sqrt(maxEW * maxEW + maxNS * maxNS) + DEED_EXCLUSION_DISTANCE_TILES;
         const cx = deed.x;
         const cy = deed.y;
 
@@ -3074,6 +3087,8 @@ function WildernessOverlay({
       isCancelled = true;
       window.clearTimeout(timeoutId);
     };
+    // canvasKey already encodes color, mapSize, and deeds; adding them would be redundant.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasKey, visible, waterMaskUrl]);
 
   if (!visible || overlaySrc === null) {
