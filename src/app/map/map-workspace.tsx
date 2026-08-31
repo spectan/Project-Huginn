@@ -440,7 +440,43 @@ export default function MapWorkspace({
   const hasInitializedSettingsSaveRef = useRef(false);
   const pendingManualViewRef = useRef<ViewState | null>(null);
   const viewUpdateFrameRef = useRef<number | null>(null);
+  const [committedView, setCommittedView] = useState<ViewState | null>(null);
+  const markerWorldRef = useRef<HTMLDivElement | null>(null);
   const view = manualView ?? urlCoordinateView ?? fittedView;
+  const viewRef = useRef(view);
+
+  useEffect(() => {
+    viewRef.current = view;
+  }, [view]);
+
+  const markerView = isDragging && committedView !== null ? committedView : view;
+
+  const applyMarkerWorldTransform = useCallback((nextView: ViewState, baseView: ViewState) => {
+    const world = markerWorldRef.current;
+
+    if (world === null) {
+      return;
+    }
+
+    const ratio = nextView.zoom / baseView.zoom;
+    const tx = nextView.x - ratio * baseView.x;
+    const ty = nextView.y - ratio * baseView.y;
+
+    world.style.transform = `translate3d(${formatPixels(tx)}, ${formatPixels(ty)}, 0) scale(${formatZoom(ratio)})`;
+    world.style.transformOrigin = "0 0";
+  }, []);
+
+  useEffect(() => {
+    if (!isDragging) {
+      const world = markerWorldRef.current;
+
+      if (world !== null) {
+        world.style.transform = "";
+        world.style.transformOrigin = "";
+      }
+    }
+  }, [view, isDragging]);
+
   const flushPendingView = useCallback(() => {
     if (viewUpdateFrameRef.current !== null) {
       window.cancelAnimationFrame(viewUpdateFrameRef.current);
@@ -500,16 +536,16 @@ export default function MapWorkspace({
   const visibleMarkers = useMemo(
     () => getVisibleMarkers(
       displayedMarkersWithEditPreview,
-      view,
+      markerView,
       viewport,
       markerVisibility,
       dialog?.mode === "edit" && !isPathMarker(dialog.marker) ? dialog.marker.id : null
     ),
-    [dialog, displayedMarkersWithEditPreview, markerVisibility, view, viewport]
+    [dialog, displayedMarkersWithEditPreview, markerVisibility, markerView, viewport]
   );
   const visibleNameMarkers = useMemo(
-    () => getVisibleNameMarkers(displayedMarkersWithEditPreview, view, viewport, markerVisibility),
-    [displayedMarkersWithEditPreview, markerVisibility, view, viewport]
+    () => getVisibleNameMarkers(displayedMarkersWithEditPreview, markerView, viewport, markerVisibility),
+    [displayedMarkersWithEditPreview, markerVisibility, markerView, viewport]
   );
   const hoveredMarkers = hoveredMarker?.markers ?? [];
   const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
@@ -1000,12 +1036,14 @@ export default function MapWorkspace({
     }
 
     const center = getPointerCenter(firstPointer, secondPointer);
+    const currentView = viewRef.current;
+    setCommittedView(currentView);
     pinchZoomRef.current = {
       pointerIds: [firstPointer.pointerId, secondPointer.pointerId],
       startDistance,
-      startMapX: (center.clientX - view.x) / view.zoom,
-      startMapY: (center.clientY - view.y) / view.zoom,
-      startZoom: view.zoom
+      startMapX: (center.clientX - currentView.x) / currentView.zoom,
+      startMapY: (center.clientY - currentView.y) / currentView.zoom,
+      startZoom: currentView.zoom
     };
     dragRef.current = null;
     setIsDragging(false);
@@ -1013,7 +1051,7 @@ export default function MapWorkspace({
     setContextMenu(null);
     setHoveredMarker(null);
     return true;
-  }, [view.x, view.y, view.zoom]);
+  }, []);
 
   const startQuickDeedDrag = useCallback(
     (event: {
@@ -1368,14 +1406,16 @@ export default function MapWorkspace({
 
       event.preventDefault();
       setContextMenu(null);
+      const currentView = viewRef.current;
+      setCommittedView(currentView);
       dragRef.current = {
         hasMoved: false,
         pointerId: event.pointerId,
         startClientX: event.clientX,
         startClientY: event.clientY,
-        startX: view.x,
-        startY: view.y,
-        startZoom: view.zoom
+        startX: currentView.x,
+        startY: currentView.y,
+        startZoom: currentView.zoom
       };
       setIsDragging(true);
     }
@@ -1421,15 +1461,18 @@ export default function MapWorkspace({
               const nextZoom = pinchZoom.startZoom * (distance / pinchZoom.startDistance);
 
               if (nextZoom <= minZoom) {
-                scheduleViewUpdate(getFitView(viewport, mapSize));
+                const nextView = getFitView(viewport, mapSize);
+                applyMarkerWorldTransform(nextView, markerView);
+                scheduleViewUpdate(nextView);
               } else {
                 const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
-
-                scheduleViewUpdate({
+                const nextView = {
                   x: center.clientX - pinchZoom.startMapX * zoom,
                   y: center.clientY - pinchZoom.startMapY * zoom,
                   zoom
-                });
+                };
+                applyMarkerWorldTransform(nextView, markerView);
+                scheduleViewUpdate(nextView);
               }
             }
           }
@@ -1453,11 +1496,13 @@ export default function MapWorkspace({
         return;
       }
 
-      scheduleViewUpdate({
+      const nextView = {
         x: drag.startX + deltaX,
         y: drag.startY + deltaY,
         zoom: drag.startZoom
-      });
+      };
+      applyMarkerWorldTransform(nextView, markerView);
+      scheduleViewUpdate(nextView);
     }
 
     function endDrag(event: PointerEvent) {
@@ -1489,7 +1534,7 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [finishPointerDrag, flushPendingView, mapSize, scheduleViewUpdate, viewport]);
+  }, [applyMarkerWorldTransform, finishPointerDrag, flushPendingView, mapSize, markerView, scheduleViewUpdate, viewport]);
 
   useEffect(() => {
     function handleQuickDeedDrag(event: PointerEvent) {
@@ -1799,95 +1844,107 @@ export default function MapWorkspace({
               <MissionGridOverlay color={markerColors.missionGrid} opacity={markerOpacities.missionGrid} />
             ) : null}
           </div>
-          <MarkerLayer
-            activeRelocatableMarkerId={dialog?.mode === "edit" && !isPathMarker(dialog.marker) ? dialog.marker.id : null}
-            highlightedMarkerIds={highlightedMarkerIds}
-            mapSize={mapSize}
-            markerColors={markerColors}
-            markerOpacities={markerOpacities}
-            markers={visibleMarkers}
-            noteCategories={noteCategories}
-            noteCategoryColors={noteCategoryColors}
-            noteCategoryMarkerShapes={noteCategoryMarkerShapes}
-            noteCategoryPipSizes={noteCategoryPipSizes}
-            onContextMenu={handleMarkerContextMenu}
-            onDeedOverlayPointerDown={handleDeedResizePointerDown}
-            onHoverEnd={scheduleHoverClose}
-            onHoverMove={(marker, event) => {
-              const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
-              const markersUnderPointer = visualMap !== null && isInsideMap(coordinate, visualMap)
-                ? getHoverMarkersAtCoordinate(
-                    displayedMarkersWithEditPreview,
-                    markerVisibility,
-                    coordinate,
-                    mapSize,
-                    { includePathMarkers: true }
-                  )
-                : [];
-              const hoverMarkers = getUniqueMarkers(markersUnderPointer.length === 0
-                ? [marker]
-                : [...markersUnderPointer, marker]
-              );
-
-              if (hoverMarkers.length === 0) {
-                setHoveredMarker(null);
-                return;
-              }
-
-              setHoveredMarker({
-                coordinate,
-                markers: hoverMarkers,
-                screenX: event.clientX,
-                screenY: event.clientY
-              });
+          <div
+            ref={markerWorldRef}
+            style={{
+              height: `${mapSize.heightPx}px`,
+              left: 0,
+              pointerEvents: "none",
+              position: "absolute",
+              top: 0,
+              width: `${mapSize.widthPx}px`
             }}
-            onMarkerPointerDown={handleMarkerRelocationPointerDown}
-            roadwayEditMode={roadwayEditMode}
-            view={view}
-            visibility={markerVisibility}
-          />
-          {pathDraft !== null ? (
-            <PathDraftLayer
-              draft={pathDraft}
-              onPointPointerDown={handlePathPointPointerDown}
-              view={view}
+          >
+            <MarkerLayer
+              activeRelocatableMarkerId={dialog?.mode === "edit" && !isPathMarker(dialog.marker) ? dialog.marker.id : null}
+              highlightedMarkerIds={highlightedMarkerIds}
+              mapSize={mapSize}
+              markerColors={markerColors}
+              markerOpacities={markerOpacities}
+              markers={visibleMarkers}
+              noteCategories={noteCategories}
+              noteCategoryColors={noteCategoryColors}
+              noteCategoryMarkerShapes={noteCategoryMarkerShapes}
+              noteCategoryPipSizes={noteCategoryPipSizes}
+              onContextMenu={handleMarkerContextMenu}
+              onDeedOverlayPointerDown={handleDeedResizePointerDown}
+              onHoverEnd={scheduleHoverClose}
+              onHoverMove={(marker, event) => {
+                const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+                const markersUnderPointer = visualMap !== null && isInsideMap(coordinate, visualMap)
+                  ? getHoverMarkersAtCoordinate(
+                      displayedMarkersWithEditPreview,
+                      markerVisibility,
+                      coordinate,
+                      mapSize,
+                      { includePathMarkers: true }
+                    )
+                  : [];
+                const hoverMarkers = getUniqueMarkers(markersUnderPointer.length === 0
+                  ? [marker]
+                  : [...markersUnderPointer, marker]
+                );
+
+                if (hoverMarkers.length === 0) {
+                  setHoveredMarker(null);
+                  return;
+                }
+
+                setHoveredMarker({
+                  coordinate,
+                  markers: hoverMarkers,
+                  screenX: event.clientX,
+                  screenY: event.clientY
+                });
+              }}
+              onMarkerPointerDown={handleMarkerRelocationPointerDown}
+              roadwayEditMode={roadwayEditMode}
+              view={markerView}
+              visibility={markerVisibility}
             />
-          ) : null}
-          {routePlannerPoints !== null ? (
-            <RoutePlannerLayer
-              points={routePlannerPoints}
-              view={view}
+            {pathDraft !== null ? (
+              <PathDraftLayer
+                draft={pathDraft}
+                onPointPointerDown={handlePathPointPointerDown}
+                view={markerView}
+              />
+            ) : null}
+            {routePlannerPoints !== null ? (
+              <RoutePlannerLayer
+                points={routePlannerPoints}
+                view={markerView}
+              />
+            ) : null}
+            {searchLinesEnabled && searchTerm.length > 0 && renderedSelectedCoordinate !== null ? (
+              <SearchLineLayer
+                markers={displayedMarkersWithEditPreview}
+                markerVisibility={markerVisibility}
+                selectedCoordinate={renderedSelectedCoordinate}
+                view={markerView}
+              />
+            ) : null}
+            {quickDeedDraft !== null ? (
+              <QuickDeedDraftLayer
+                color={markerColors.deeds}
+                draft={quickDeedDraft}
+                opacity={markerOpacities.deeds}
+                view={markerView}
+              />
+            ) : null}
+            <DeedNameLayer
+              hiddenDeedLabelId={hiddenDeedLabelId}
+              markers={visibleNameMarkers}
+              view={markerView}
+              visibility={markerVisibility}
             />
-          ) : null}
-          {searchLinesEnabled && searchTerm.length > 0 && renderedSelectedCoordinate !== null ? (
-            <SearchLineLayer
-              markers={displayedMarkersWithEditPreview}
-              markerVisibility={markerVisibility}
-              selectedCoordinate={renderedSelectedCoordinate}
-              view={view}
+            <TowerNameLayer
+              hiddenTowerLabelId={hiddenTowerLabelId}
+              markers={visibleNameMarkers}
+              view={markerView}
+              visibility={markerVisibility}
             />
-          ) : null}
-          {quickDeedDraft !== null ? (
-            <QuickDeedDraftLayer
-              color={markerColors.deeds}
-              draft={quickDeedDraft}
-              opacity={markerOpacities.deeds}
-              view={view}
-            />
-          ) : null}
-          <DeedNameLayer
-            hiddenDeedLabelId={hiddenDeedLabelId}
-            markers={visibleNameMarkers}
-            view={view}
-            visibility={markerVisibility}
-          />
-          <TowerNameLayer
-            hiddenTowerLabelId={hiddenTowerLabelId}
-            markers={visibleNameMarkers}
-            view={view}
-            visibility={markerVisibility}
-          />
-          <SelectedCoordinateReticule coordinate={renderedSelectedCoordinate} view={view} />
+            <SelectedCoordinateReticule coordinate={renderedSelectedCoordinate} view={markerView} />
+          </div>
         </section>
       ) : (
         <section className="map-locked" aria-label="Map access required">
