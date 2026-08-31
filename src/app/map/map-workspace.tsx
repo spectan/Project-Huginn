@@ -1731,11 +1731,13 @@ export default function MapWorkspace({
   );
   const imageStyle = useMemo<CSSProperties>(
     () => ({
-      height: formatPixels(mapSize.heightPx * view.zoom),
-      left: formatPixels(view.x),
+      height: formatPixels(mapSize.heightPx),
       position: "absolute",
-      top: formatPixels(view.y),
-      width: formatPixels(mapSize.widthPx * view.zoom)
+      top: 0,
+      left: 0,
+      transform: `translate3d(${formatPixels(view.x)}, ${formatPixels(view.y)}, 0) scale(${formatZoom(view.zoom)})`,
+      transformOrigin: "0 0",
+      width: formatPixels(mapSize.widthPx)
     }),
     [mapSize.heightPx, mapSize.widthPx, view.x, view.y, view.zoom]
   );

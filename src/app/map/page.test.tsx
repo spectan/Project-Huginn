@@ -797,8 +797,9 @@ describe("MapPage", () => {
     expect(stage.contains(mapImage)).toBe(false);
     expect(mapImage.style.left).toBe("0px");
     expect(mapImage.style.top).toBe("0px");
-    expect(mapImage.style.width).toBe("1024px");
-    expect(mapImage.style.height).toBe("1024px");
+    expect(mapImage.style.width).toBe("2048px");
+    expect(mapImage.style.height).toBe("2048px");
+    expect(mapImage.style.transform).toContain("scale(0.5)");
   });
 
   it("renders markers in an unscaled screen-space layer", async () => {
