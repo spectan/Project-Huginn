@@ -3495,6 +3495,7 @@ function MarkerHoverDetails({
       className="map-hover-details"
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
+      onWheel={(event) => event.stopPropagation()}
       role="tooltip"
       style={getHoverDetailsStyle(hoveredMarker.screenX, hoveredMarker.screenY)}
     >
