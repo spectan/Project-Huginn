@@ -1925,7 +1925,7 @@ export default function MapWorkspace({
           })}
         />
       ) : null}
-      {hoveredMarker !== null ? (
+      {hoveredMarker !== null && contextMenu === null ? (
         <MarkerHoverDetails
           hoveredMarker={hoveredMarker}
           markerColors={markerColors}
@@ -5785,12 +5785,14 @@ function getMarkerTypeTitle(markerType: MarkerType): string {
 }
 
 function getHoverDetailsStyle(screenX: number, screenY: number): CSSProperties {
-  return getBoundedFixedPosition(
+  const { left, top } = getBoundedFixedPosition(
     screenX + HOVER_DETAILS_OFFSET_PX,
     screenY + HOVER_DETAILS_OFFSET_PX,
     HOVER_DETAILS_MAX_WIDTH_PX,
     HOVER_DETAILS_MAX_HEIGHT_PX
   );
+
+  return { left, top };
 }
 
 function getTowerContextMeta(marker: Extract<WorkspaceMarker, { type: "tower" }>): string {

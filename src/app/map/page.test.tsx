@@ -4681,7 +4681,7 @@ describe("MapPage", () => {
     expect(screen.queryByRole("menu", { name: "Marker actions" })).toBeNull();
   });
 
-  it("uses roadway edit mode before paths expose marker actions", () => {
+  it("uses roadway edit mode before paths expose marker actions", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -4744,6 +4744,9 @@ describe("MapPage", () => {
       });
     }
     expect(screen.queryByRole("menu", { name: "Marker actions" })).toBeNull();
+
+    fireEvent.pointerDown(screen.getByTestId("map-stage"), { button: 0, pointerId: 1 });
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "Map actions" })).toBeNull());
 
     expect(screen.queryByRole("group", { name: "Roadway Edit Mode" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
