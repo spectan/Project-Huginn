@@ -5017,7 +5017,7 @@ function getCenteredPosition(
 }
 
 const VIEWPORT_CULL_MARKER_THRESHOLD = 500;
-const VIEWPORT_CULL_BUFFER_TILES = 64;
+const VIEWPORT_CULL_BUFFER_RATIO = 0.5;
 const VIEWPORT_CULL_MIN_TILES = 32;
 
 type ViewportBounds = {
@@ -5026,6 +5026,14 @@ type ViewportBounds = {
   minX: number;
   minY: number;
 };
+
+function getViewportCullBufferTiles(view: ViewState, viewport: ViewportSize): number {
+  return Math.max(
+    VIEWPORT_CULL_MIN_TILES,
+    (viewport.width / view.zoom) * VIEWPORT_CULL_BUFFER_RATIO,
+    (viewport.height / view.zoom) * VIEWPORT_CULL_BUFFER_RATIO
+  );
+}
 
 function getViewportBounds(
   view: ViewState,
@@ -5126,7 +5134,7 @@ function getVisibleMarkers(
     return markers;
   }
 
-  const bounds = getViewportBounds(view, viewport, Math.max(VIEWPORT_CULL_MIN_TILES, VIEWPORT_CULL_BUFFER_TILES));
+  const bounds = getViewportBounds(view, viewport, getViewportCullBufferTiles(view, viewport));
 
   return markers.filter((marker) => (
     marker.id === activeRelocatableMarkerId || isMarkerInViewport(marker, bounds, visibility)
@@ -5143,7 +5151,7 @@ function getVisibleNameMarkers(
     return markers;
   }
 
-  const bounds = getViewportBounds(view, viewport, VIEWPORT_CULL_MIN_TILES);
+  const bounds = getViewportBounds(view, viewport, getViewportCullBufferTiles(view, viewport));
 
   return markers.filter((marker) => {
     if (marker.type === "deed" && !visibility.deeds) {
