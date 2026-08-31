@@ -883,7 +883,6 @@ body {
   gap: 8px;
   min-width: 188px;
   max-width: min(280px, calc(100vw - 32px));
-  max-height: min(420px, calc(100vh - 32px));
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 8px;
   padding: 10px;
@@ -893,27 +892,6 @@ body {
   font-size: 13px;
   line-height: 1.25;
   pointer-events: auto;
-  overflow-y: auto;
-  scrollbar-color: rgba(148, 163, 184, 0.6) rgba(15, 23, 42, 0.5);
-  scrollbar-width: thin;
-}
-
-.map-hover-details::-webkit-scrollbar {
-  width: 8px;
-}
-
-.map-hover-details::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
-  border-radius: 4px;
-}
-
-.map-hover-details::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.6);
-  border-radius: 4px;
-}
-
-.map-hover-details::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.85);
 }
 
 .map-hover-details-list {
