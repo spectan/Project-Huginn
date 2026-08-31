@@ -2028,7 +2028,7 @@ describe("MapPage", () => {
     expect(screen.queryByLabelText("New category")).toBeNull();
   });
 
-  it("shows cursor-following dark hover details instead of inline hover cards", () => {
+  it("shows cursor-following dark hover details instead of inline hover cards", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -2085,7 +2085,7 @@ describe("MapPage", () => {
     expect(screen.queryByText("Creator")).toBeNull();
 
     fireEvent.mouseLeave(tower);
-    expect(screen.queryByRole("tooltip", { name: "Map items at 320, 330" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("tooltip", { name: "Map items at 320, 330" })).toBeNull());
 
     const deed = screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" });
     fireEvent.mouseMove(deed, {
@@ -4793,7 +4793,7 @@ describe("MapPage", () => {
     expect(screen.getByRole("menu", { name: "Marker actions" })).toBeTruthy();
   });
 
-  it("shows tower name labels until the tower is hovered for details", () => {
+  it("shows tower name labels until the tower is hovered for details", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -4831,10 +4831,10 @@ describe("MapPage", () => {
 
     fireEvent.mouseLeave(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }));
 
-    expect(screen.getByTestId("tower-name-label-tower-1").textContent).toBe("Mako 945");
+    await waitFor(() => expect(screen.getByTestId("tower-name-label-tower-1").textContent).toBe("Mako 945"));
   });
 
-  it("shows deed name labels until the deed is hovered for details", () => {
+  it("shows deed name labels until the deed is hovered for details", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
         {
@@ -4876,7 +4876,7 @@ describe("MapPage", () => {
 
     fireEvent.mouseLeave(screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" }));
 
-    expect(screen.getByTestId("deed-name-label-deed-1").textContent).toBe("Oak Harbour");
+    await waitFor(() => expect(screen.getByTestId("deed-name-label-deed-1").textContent).toBe("Oak Harbour"));
   });
 
   it("renders a selected-coordinate reticule from shared coordinate links", async () => {

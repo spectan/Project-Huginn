@@ -377,6 +377,8 @@ export default function MapWorkspace({
     useState<EventFeedPanelSize>(initialSettings.eventFeedPanelSize);
   const [topPanel, setTopPanel] = useState<TopPanelState>(null);
   const [roadwayEditMode, setRoadwayEditMode] = useState(false);
+  const isHoveringDetailsRef = useRef(false);
+  const hoverCloseTimeoutRef = useRef<number | null>(null);
   const [roadwayEditPanelPosition, setRoadwayEditPanelPosition] =
     useState<TileHighlightPanelPosition | null>(initialSettings.roadwayEditPanelPosition);
   const [tileHighlight, setTileHighlight] = useState<TileHighlightSettings>(initialSettings.tileHighlight);
@@ -391,6 +393,32 @@ export default function MapWorkspace({
   const [routePlannerSpeedKmh, setRoutePlannerSpeedKmh] = useState(initialSettings.routePlannerSpeedKmh);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
   const [isEventFeedOpen, setIsEventFeedOpen] = useState(false);
+
+  const cancelHoverClose = useCallback(() => {
+    if (hoverCloseTimeoutRef.current !== null) {
+      window.clearTimeout(hoverCloseTimeoutRef.current);
+      hoverCloseTimeoutRef.current = null;
+    }
+  }, []);
+
+  const scheduleHoverClose = useCallback(() => {
+    cancelHoverClose();
+
+    hoverCloseTimeoutRef.current = window.setTimeout(() => {
+      hoverCloseTimeoutRef.current = null;
+
+      if (!isHoveringDetailsRef.current) {
+        setHoveredMarker(null);
+      }
+    }, 150);
+  }, [cancelHoverClose]);
+
+  useEffect(() => {
+    return () => {
+      cancelHoverClose();
+    };
+  }, [cancelHoverClose]);
+
   const [eventFeedState, setEventFeedState] = useState<{
     feed: WurmMapsEventFeed | null;
     mapId: string | null;
@@ -1740,7 +1768,7 @@ export default function MapWorkspace({
             noteCategoryPipSizes={noteCategoryPipSizes}
             onContextMenu={handleMarkerContextMenu}
             onDeedOverlayPointerDown={handleDeedResizePointerDown}
-            onHoverEnd={() => setHoveredMarker(null)}
+            onHoverEnd={scheduleHoverClose}
             onHoverMove={(marker, event) => {
               const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
               const markersUnderPointer = visualMap !== null && isInsideMap(coordinate, visualMap)
@@ -1898,7 +1926,18 @@ export default function MapWorkspace({
         />
       ) : null}
       {hoveredMarker !== null ? (
-        <MarkerHoverDetails hoveredMarker={hoveredMarker} markerColors={markerColors} />
+        <MarkerHoverDetails
+          hoveredMarker={hoveredMarker}
+          markerColors={markerColors}
+          onMouseEnter={() => {
+            isHoveringDetailsRef.current = true;
+            cancelHoverClose();
+          }}
+          onMouseLeave={() => {
+            isHoveringDetailsRef.current = false;
+            scheduleHoverClose();
+          }}
+        />
       ) : null}
       {dialog !== null && map !== null ? (
         <MarkerDialog
@@ -3435,10 +3474,14 @@ function MarkerDialog({
 
 function MarkerHoverDetails({
   hoveredMarker,
-  markerColors
+  markerColors,
+  onMouseEnter,
+  onMouseLeave
 }: {
   hoveredMarker: HoveredMarkerState;
   markerColors: MarkerColors;
+  onMouseEnter(): void;
+  onMouseLeave(): void;
 }) {
   if (hoveredMarker.markers.length === 0) {
     return null;
@@ -3450,6 +3493,8 @@ function MarkerHoverDetails({
     <section
       aria-label={title}
       className="map-hover-details"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       role="tooltip"
       style={getHoverDetailsStyle(hoveredMarker.screenX, hoveredMarker.screenY)}
     >
