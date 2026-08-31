@@ -379,6 +379,7 @@ export default function MapWorkspace({
   const [roadwayEditMode, setRoadwayEditMode] = useState(false);
   const isHoveringDetailsRef = useRef(false);
   const hoverCloseTimeoutRef = useRef<number | null>(null);
+
   const [roadwayEditPanelPosition, setRoadwayEditPanelPosition] =
     useState<TileHighlightPanelPosition | null>(initialSettings.roadwayEditPanelPosition);
   const [tileHighlight, setTileHighlight] = useState<TileHighlightSettings>(initialSettings.tileHighlight);
@@ -413,12 +414,6 @@ export default function MapWorkspace({
     }, 150);
   }, [cancelHoverClose]);
 
-  useEffect(() => {
-    return () => {
-      cancelHoverClose();
-    };
-  }, [cancelHoverClose]);
-
   const [eventFeedState, setEventFeedState] = useState<{
     feed: WurmMapsEventFeed | null;
     mapId: string | null;
@@ -443,7 +438,38 @@ export default function MapWorkspace({
   const deedResizeDragRef = useRef<DeedResizeDragState | null>(null);
   const quickDeedDragRef = useRef<QuickDeedDragState | null>(null);
   const hasInitializedSettingsSaveRef = useRef(false);
+  const pendingManualViewRef = useRef<ViewState | null>(null);
+  const viewUpdateFrameRef = useRef<number | null>(null);
   const view = manualView ?? urlCoordinateView ?? fittedView;
+  const flushPendingView = useCallback(() => {
+    if (viewUpdateFrameRef.current !== null) {
+      window.cancelAnimationFrame(viewUpdateFrameRef.current);
+      viewUpdateFrameRef.current = null;
+    }
+
+    if (pendingManualViewRef.current !== null) {
+      setManualView(pendingManualViewRef.current);
+      pendingManualViewRef.current = null;
+    }
+  }, []);
+
+  const scheduleViewUpdate = useCallback((nextView: ViewState) => {
+    pendingManualViewRef.current = nextView;
+
+    if (viewUpdateFrameRef.current === null) {
+      viewUpdateFrameRef.current = window.requestAnimationFrame(() => {
+        viewUpdateFrameRef.current = null;
+        flushPendingView();
+      });
+    }
+  }, [flushPendingView]);
+
+  useEffect(() => {
+    return () => {
+      cancelHoverClose();
+      flushPendingView();
+    };
+  }, [cancelHoverClose, flushPendingView]);
   const markers = localMarkers ?? initialMarkers;
   const allMarkers = useMemo(() => [...markers, ...annotations], [annotations, markers]);
   const searchTerm = searchQuery.trim().toLowerCase();
@@ -470,6 +496,20 @@ export default function MapWorkspace({
       return displayedMarkers.map((marker) => marker.id === dialog.marker.id ? dialog.marker : marker);
     },
     [dialog, displayedMarkers, pathDraft]
+  );
+  const visibleMarkers = useMemo(
+    () => getVisibleMarkers(
+      displayedMarkersWithEditPreview,
+      view,
+      viewport,
+      markerVisibility,
+      dialog?.mode === "edit" && !isPathMarker(dialog.marker) ? dialog.marker.id : null
+    ),
+    [dialog, displayedMarkersWithEditPreview, markerVisibility, view, viewport]
+  );
+  const visibleNameMarkers = useMemo(
+    () => getVisibleNameMarkers(displayedMarkersWithEditPreview, view, viewport, markerVisibility),
+    [displayedMarkersWithEditPreview, markerVisibility, view, viewport]
   );
   const hoveredMarkers = hoveredMarker?.markers ?? [];
   const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
@@ -1381,11 +1421,11 @@ export default function MapWorkspace({
               const nextZoom = pinchZoom.startZoom * (distance / pinchZoom.startDistance);
 
               if (nextZoom <= minZoom) {
-                setManualView(getFitView(viewport, mapSize));
+                scheduleViewUpdate(getFitView(viewport, mapSize));
               } else {
                 const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
 
-                setManualView({
+                scheduleViewUpdate({
                   x: center.clientX - pinchZoom.startMapX * zoom,
                   y: center.clientY - pinchZoom.startMapY * zoom,
                   zoom
@@ -1413,7 +1453,7 @@ export default function MapWorkspace({
         return;
       }
 
-      setManualView({
+      scheduleViewUpdate({
         x: drag.startX + deltaX,
         y: drag.startY + deltaY,
         zoom: drag.startZoom
@@ -1430,11 +1470,13 @@ export default function MapWorkspace({
         if (pinchZoom !== null && pinchZoom.pointerIds.includes(event.pointerId)) {
           pinchZoomRef.current = null;
           dragRef.current = null;
+          flushPendingView();
           setIsDragging(false);
           return;
         }
       }
 
+      flushPendingView();
       finishPointerDrag(event);
     }
 
@@ -1447,7 +1489,7 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [finishPointerDrag, mapSize, viewport]);
+  }, [finishPointerDrag, flushPendingView, mapSize, scheduleViewUpdate, viewport]);
 
   useEffect(() => {
     function handleQuickDeedDrag(event: PointerEvent) {
@@ -1731,7 +1773,7 @@ export default function MapWorkspace({
           <WildernessOverlay
             color={markerColors.wildernessOverlay}
             layerName={selectedMapLayer?.name ?? null}
-            markers={displayedMarkersWithEditPreview}
+            markers={visibleMarkers}
             imageStyle={imageStyle}
             map={visualMap}
             mapSize={mapSize}
@@ -1761,7 +1803,7 @@ export default function MapWorkspace({
             mapSize={mapSize}
             markerColors={markerColors}
             markerOpacities={markerOpacities}
-            markers={displayedMarkersWithEditPreview}
+            markers={visibleMarkers}
             noteCategories={noteCategories}
             noteCategoryColors={noteCategoryColors}
             noteCategoryMarkerShapes={noteCategoryMarkerShapes}
@@ -1833,13 +1875,13 @@ export default function MapWorkspace({
           ) : null}
           <DeedNameLayer
             hiddenDeedLabelId={hiddenDeedLabelId}
-            markers={displayedMarkersWithEditPreview}
+            markers={visibleNameMarkers}
             view={view}
             visibility={markerVisibility}
           />
           <TowerNameLayer
             hiddenTowerLabelId={hiddenTowerLabelId}
-            markers={displayedMarkersWithEditPreview}
+            markers={visibleNameMarkers}
             view={view}
             visibility={markerVisibility}
           />
@@ -4913,6 +4955,148 @@ function getCenteredPosition(
     x: (viewport.width - mapSize.widthPx * zoom) / 2,
     y: (viewport.height - mapSize.heightPx * zoom) / 2
   };
+}
+
+const VIEWPORT_CULL_MARKER_THRESHOLD = 500;
+const VIEWPORT_CULL_BUFFER_TILES = 64;
+const VIEWPORT_CULL_MIN_TILES = 32;
+
+type ViewportBounds = {
+  maxX: number;
+  maxY: number;
+  minX: number;
+  minY: number;
+};
+
+function getViewportBounds(
+  view: ViewState,
+  viewport: ViewportSize,
+  bufferTiles: number
+): ViewportBounds {
+  const halfWidthTiles = viewport.width / view.zoom / 2;
+  const halfHeightTiles = viewport.height / view.zoom / 2;
+  const centerX = -view.x / view.zoom + halfWidthTiles;
+  const centerY = -view.y / view.zoom + halfHeightTiles;
+
+  return {
+    maxX: centerX + halfWidthTiles + bufferTiles,
+    maxY: centerY + halfHeightTiles + bufferTiles,
+    minX: centerX - halfWidthTiles - bufferTiles,
+    minY: centerY - halfHeightTiles - bufferTiles
+  };
+}
+
+function isMarkerInViewport(
+  marker: WorkspaceMarker,
+  bounds: ViewportBounds,
+  visibility: MarkerVisibility
+): boolean {
+  if (isPathMarker(marker)) {
+    for (let index = 1; index < marker.points.length; index += 1) {
+      const start = marker.points[index - 1];
+      const end = marker.points[index];
+
+      if (
+        start !== undefined &&
+        end !== undefined &&
+        segmentIntersectsViewport(start, end, bounds)
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  if (marker.type === "deed") {
+    const left = marker.x - marker.west - (visibility.deedPerimeters ? marker.perimeter : 0);
+    const right = marker.x + marker.east + (visibility.deedPerimeters ? marker.perimeter : 0);
+    const top = marker.y - marker.north - (visibility.deedPerimeters ? marker.perimeter : 0);
+    const bottom = marker.y + marker.south + (visibility.deedPerimeters ? marker.perimeter : 0);
+
+    return left <= bounds.maxX && right >= bounds.minX && top <= bounds.maxY && bottom >= bounds.minY;
+  }
+
+  return marker.x >= bounds.minX && marker.x <= bounds.maxX && marker.y >= bounds.minY && marker.y <= bounds.maxY;
+}
+
+function segmentIntersectsViewport(
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  bounds: ViewportBounds
+): boolean {
+  if (
+    (start.x >= bounds.minX && start.x <= bounds.maxX && start.y >= bounds.minY && start.y <= bounds.maxY) ||
+    (end.x >= bounds.minX && end.x <= bounds.maxX && end.y >= bounds.minY && end.y <= bounds.maxY)
+  ) {
+    return true;
+  }
+
+  const deltaX = end.x - start.x;
+  const deltaY = end.y - start.y;
+
+  if (deltaX === 0 && deltaY === 0) {
+    return false;
+  }
+
+  const tLeft = (bounds.minX - start.x) / deltaX;
+  const tRight = (bounds.maxX - start.x) / deltaX;
+  const tTop = (bounds.minY - start.y) / deltaY;
+  const tBottom = (bounds.maxY - start.y) / deltaY;
+
+  const tEnter = Math.max(
+    Math.min(tLeft, tRight),
+    Math.min(tTop, tBottom)
+  );
+  const tExit = Math.min(
+    Math.max(tLeft, tRight),
+    Math.max(tTop, tBottom)
+  );
+
+  return tEnter <= tExit && tExit >= 0 && tEnter <= 1;
+}
+
+function getVisibleMarkers(
+  markers: WorkspaceMarker[],
+  view: ViewState,
+  viewport: ViewportSize,
+  visibility: MarkerVisibility,
+  activeRelocatableMarkerId: string | null
+): WorkspaceMarker[] {
+  if (viewport.width === 0 || viewport.height === 0 || markers.length <= VIEWPORT_CULL_MARKER_THRESHOLD) {
+    return markers;
+  }
+
+  const bounds = getViewportBounds(view, viewport, Math.max(VIEWPORT_CULL_MIN_TILES, VIEWPORT_CULL_BUFFER_TILES));
+
+  return markers.filter((marker) => (
+    marker.id === activeRelocatableMarkerId || isMarkerInViewport(marker, bounds, visibility)
+  ));
+}
+
+function getVisibleNameMarkers(
+  markers: WorkspaceMarker[],
+  view: ViewState,
+  viewport: ViewportSize,
+  visibility: MarkerVisibility
+): WorkspaceMarker[] {
+  if (viewport.width === 0 || viewport.height === 0 || markers.length <= VIEWPORT_CULL_MARKER_THRESHOLD) {
+    return markers;
+  }
+
+  const bounds = getViewportBounds(view, viewport, VIEWPORT_CULL_MIN_TILES);
+
+  return markers.filter((marker) => {
+    if (marker.type === "deed" && !visibility.deeds) {
+      return false;
+    }
+
+    if (marker.type === "tower" && !visibility.towers) {
+      return false;
+    }
+
+    return isMarkerInViewport(marker, bounds, visibility);
+  });
 }
 
 function getMapCoordinate(clientX: number, clientY: number, view: ViewState) {

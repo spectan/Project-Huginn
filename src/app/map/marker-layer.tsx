@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties, MouseEvent, PointerEvent } from "react";
+import React, { type CSSProperties, type MouseEvent, type PointerEvent } from "react";
 import {
   RIFT_OVERLAY_DISTANCE_TILES,
   TOWER_PLACEMENT_DISTANCE_TILES,
@@ -20,6 +20,7 @@ import type {
   MarkerOpacities,
   MarkerVisibility,
   NoteCategory,
+  PathWorkspaceMarker,
   WorkspaceMarker
 } from "@/lib/markers/marker-types";
 import type {
@@ -55,7 +56,7 @@ type MarkerLayerView = {
   zoom: number;
 };
 
-export function MarkerLayer({
+export const MarkerLayer = React.memo(function MarkerLayer({
   activeRelocatableMarkerId,
   highlightedMarkerIds,
   mapSize,
@@ -75,15 +76,59 @@ export function MarkerLayer({
   view,
   visibility
 }: MarkerLayerProps) {
+  const pathMarkers: PathWorkspaceMarker[] = [];
+  const nonPathMarkers: Exclude<WorkspaceMarker, PathWorkspaceMarker>[] = [];
+
+  for (const marker of markers) {
+    if (isPathMarker(marker)) {
+      pathMarkers.push(marker);
+    } else {
+      nonPathMarkers.push(marker);
+    }
+  }
+
   return (
     <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
-      {markers.map((marker) => renderMarker(marker, activeRelocatableMarkerId, highlightedMarkerIds, mapSize, markerColors, markerOpacities, noteCategories, noteCategoryColors, noteCategoryMarkerShapes, noteCategoryPipSizes, onContextMenu, onDeedOverlayPointerDown, onHoverEnd, onHoverMove, onMarkerPointerDown, roadwayEditMode, view, visibility))}
+      {nonPathMarkers.map((marker) => renderMarker(marker, activeRelocatableMarkerId, highlightedMarkerIds, mapSize, markerColors, markerOpacities, noteCategories, noteCategoryColors, noteCategoryMarkerShapes, noteCategoryPipSizes, onContextMenu, onDeedOverlayPointerDown, onHoverEnd, onHoverMove, onMarkerPointerDown, roadwayEditMode, view, visibility))}
+      {pathMarkers.length > 0 ? (
+        <svg aria-label="Roadway paths" className="map-path-svg" data-testid="map-paths-svg">
+          {pathMarkers.map((marker) => {
+            if (!isPathVisible(marker, visibility)) {
+              return null;
+            }
+
+            const canUseActions = roadwayEditMode;
+
+            return (
+              <polyline
+                aria-label={`${getPathTypeLabel(marker.type)} ${marker.name || "path"} from ${marker.x}, ${marker.y}`}
+                className={getPathClassName(highlightedMarkerIds.has(marker.id), canUseActions)}
+                data-testid={`path-marker-${marker.id}`}
+                fill="none"
+                key={marker.id}
+                onContextMenu={canUseActions ? (event) => onContextMenu(marker, event) : undefined}
+                onMouseEnter={(event) => onHoverMove(marker, event)}
+                onMouseLeave={onHoverEnd}
+                onMouseMove={(event) => onHoverMove(marker, event)}
+                opacity={getPathOpacity(marker.type, markerOpacities)}
+                points={getPathSvgPoints(marker.points, marker.width, view)}
+                role={canUseActions ? "button" : undefined}
+                stroke={getPathColor(marker.type, markerColors)}
+                strokeLinecap="square"
+                strokeLinejoin="miter"
+                strokeWidth={getPathStrokeWidth(marker.width, view)}
+                tabIndex={canUseActions ? 0 : undefined}
+              />
+            );
+          })}
+        </svg>
+      ) : null}
     </div>
   );
-}
+});
 
 function renderMarker(
-  marker: WorkspaceMarker,
+  marker: Exclude<WorkspaceMarker, PathWorkspaceMarker>,
   activeRelocatableMarkerId: string | null,
   highlightedMarkerIds: Set<string>,
   mapSize: { heightPx: number; widthPx: number },
@@ -104,37 +149,6 @@ function renderMarker(
 ) {
   const isHighlighted = highlightedMarkerIds.has(marker.id);
   const isRelocatable = activeRelocatableMarkerId === marker.id;
-
-  if (isPathMarker(marker)) {
-    if (!isPathVisible(marker, visibility)) {
-      return null;
-    }
-
-    const canUseActions = roadwayEditMode;
-
-    return (
-      <svg aria-label={`${getPathTypeLabel(marker.type)} path layer`} className="map-path-svg" key={marker.id}>
-        <polyline
-          aria-label={`${getPathTypeLabel(marker.type)} ${marker.name || "path"} from ${marker.x}, ${marker.y}`}
-          className={getPathClassName(isHighlighted, true)}
-          data-testid={`path-marker-${marker.id}`}
-          fill="none"
-          onContextMenu={canUseActions ? (event) => onContextMenu(marker, event) : undefined}
-          onMouseEnter={(event) => onHoverMove(marker, event)}
-          onMouseLeave={onHoverEnd}
-          onMouseMove={(event) => onHoverMove(marker, event)}
-          opacity={getPathOpacity(marker.type, markerOpacities)}
-          points={getPathSvgPoints(marker.points, marker.width, view)}
-          role={canUseActions ? "button" : undefined}
-          stroke={getPathColor(marker.type, markerColors)}
-          strokeLinecap="square"
-          strokeLinejoin="miter"
-          strokeWidth={getPathStrokeWidth(marker.width, view)}
-          tabIndex={canUseActions ? 0 : undefined}
-        />
-      </svg>
-    );
-  }
 
   if (marker.type === "tower") {
     if (!visibility.towers) {
@@ -700,7 +714,7 @@ function getNoteMarkerStyle(x: number, y: number, size: number, color: string, v
   };
 }
 
-function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }> {
+export function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }> {
   return marker.type === "bridge" || marker.type === "canal" || marker.type === "highway" || marker.type === "tunnel";
 }
 
