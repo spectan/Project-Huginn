@@ -62,7 +62,7 @@ describe("AccountOverlay", () => {
     expect(within(permissionsGroup).queryByText("Defiance")).toBeNull();
     expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(screen.getByText("Project Huginn - v1.1.5")).toBeTruthy();
+    expect(screen.getByText("Project Huginn - v1.2.0")).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Overlays" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Towers" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Deeds" })).toBeNull();
