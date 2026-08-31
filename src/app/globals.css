@@ -244,6 +244,7 @@ body {
 .map-marker--relocatable,
 .map-deed-center--relocatable {
   cursor: grab;
+  z-index: 10;
 }
 
 .map-marker--relocatable:active,
