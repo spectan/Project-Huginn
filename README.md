@@ -61,7 +61,7 @@ A shared, web-based mapping utility for Wurm Online. Project Huginn lets communi
 
 ### Event Feed
 
-- WurmMaps event feed integration for server-specific celebrations and events.
+- Wurm XML event feed integration for server-specific celebrations and events.
 - Resizable, repositionable event feed panel with automatic refresh.
 
 ## Requirements
@@ -153,8 +153,6 @@ POSTGRES_DB=wurm_map_util
 INITIAL_ADMIN_USERNAME=<admin-username>
 INITIAL_ADMIN_PASSWORD=<strong-admin-password>
 POSTGRES_URL=postgresql://wurm:<long-random-password>@db:5432/wurm_map_util
-WURMMAPS_EVENT_FEED_TIMEOUT_MS=3000
-WURMMAPS_STAT_DELEGATE_BASE_URL=https://wurmmaps.xyz/APIs/stat-delegate.php
 ```
 
 Store sensitive values securely. The application reads environment variables from `.env` at build time and runtime through Docker Compose.
