@@ -908,6 +908,53 @@ describe("MapPage", () => {
     );
   });
 
+  it("keeps the map image and marker layer aligned during a pan before the next render", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          damage: "0.25",
+          id: "tower-1",
+          makerName: "Mako",
+          makerNumber: "945",
+          ql: "89.50",
+          type: "tower",
+          x: 250,
+          y: 300
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+    const mapImage = screen.getByAltText("Wurm Online map");
+    const markerWorld = screen.getByTestId("map-marker-layer").parentElement as HTMLDivElement;
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+      pointerId: 1
+    });
+    fireEvent.pointerMove(window, {
+      clientX: 140,
+      clientY: 125,
+      pointerId: 1
+    });
+
+    expect(stage.style.transform).toBe("translate(40px, 25px) scale(1)");
+    expect(mapImage.style.transform).toBe("translate3d(40px, 25px, 0) scale(1)");
+    expect(markerWorld.style.transform).toBe("translate3d(40px, 25px, 0) scale(1)");
+
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(stage.style.transform).toBe("translate(40px, 25px) scale(1)")
+    );
+  });
+
   it("supports dragging the map to pan from marker overlays", async () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [

@@ -442,6 +442,10 @@ export default function MapWorkspace({
   const viewUpdateFrameRef = useRef<number | null>(null);
   const [committedView, setCommittedView] = useState<ViewState | null>(null);
   const markerWorldRef = useRef<HTMLDivElement | null>(null);
+  const mapImageRef = useRef<HTMLImageElement | null>(null);
+  const mapStageRef = useRef<HTMLDivElement | null>(null);
+  const tileHighlightRef = useRef<HTMLDivElement | null>(null);
+  const wildernessRef = useRef<HTMLDivElement | null>(null);
   const view = manualView ?? urlCoordinateView ?? fittedView;
   const viewRef = useRef(view);
 
@@ -466,6 +470,57 @@ export default function MapWorkspace({
     world.style.transformOrigin = "0 0";
   }, []);
 
+  const applyMapImageTransform = useCallback((nextView: ViewState) => {
+    const image = mapImageRef.current;
+
+    if (image === null) {
+      return;
+    }
+
+    image.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
+    image.style.transformOrigin = "0 0";
+  }, []);
+
+  const applyTileHighlightTransform = useCallback((nextView: ViewState) => {
+    const overlay = tileHighlightRef.current;
+
+    if (overlay === null) {
+      return;
+    }
+
+    overlay.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
+    overlay.style.transformOrigin = "0 0";
+  }, []);
+
+  const applyWildernessTransform = useCallback((nextView: ViewState) => {
+    const overlay = wildernessRef.current;
+
+    if (overlay === null) {
+      return;
+    }
+
+    overlay.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
+    overlay.style.transformOrigin = "0 0";
+  }, []);
+
+  const applyMapStageTransform = useCallback((nextView: ViewState) => {
+    const stage = mapStageRef.current;
+
+    if (stage === null) {
+      return;
+    }
+
+    stage.style.transform = `translate(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}) scale(${formatZoom(nextView.zoom)})`;
+  }, []);
+
+  const applyDirectTransforms = useCallback((nextView: ViewState, baseView: ViewState) => {
+    applyMapImageTransform(nextView);
+    applyTileHighlightTransform(nextView);
+    applyWildernessTransform(nextView);
+    applyMapStageTransform(nextView);
+    applyMarkerWorldTransform(nextView, baseView);
+  }, [applyMapImageTransform, applyTileHighlightTransform, applyWildernessTransform, applyMapStageTransform, applyMarkerWorldTransform]);
+
   useEffect(() => {
     if (!isDragging) {
       const world = markerWorldRef.current;
@@ -474,8 +529,13 @@ export default function MapWorkspace({
         world.style.transform = "";
         world.style.transformOrigin = "";
       }
+
+      applyMapImageTransform(view);
+      applyTileHighlightTransform(view);
+      applyWildernessTransform(view);
+      applyMapStageTransform(view);
     }
-  }, [view, isDragging]);
+  }, [isDragging, view, applyMapImageTransform, applyTileHighlightTransform, applyWildernessTransform, applyMapStageTransform]);
 
   const flushPendingView = useCallback(() => {
     if (viewUpdateFrameRef.current !== null) {
@@ -859,20 +919,23 @@ export default function MapWorkspace({
       const minZoom = getFitZoom(viewport, mapSize);
 
       if (nextZoom <= minZoom) {
-        return getFitView(viewport, mapSize);
+        const nextView = getFitView(viewport, mapSize);
+        applyDirectTransforms(nextView, view);
+        return nextView;
       }
 
       const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
       const mapX = (clientX - current.x) / current.zoom;
       const mapY = (clientY - current.y) / current.zoom;
-
-      return {
+      const nextView = {
         x: clientX - mapX * zoom,
         y: clientY - mapY * zoom,
         zoom
       };
+      applyDirectTransforms(nextView, view);
+      return nextView;
     });
-  }, [mapSize, viewport]);
+  }, [mapSize, viewport, view, applyDirectTransforms]);
 
   const handleWheel = useCallback(
     (event: React.WheelEvent<HTMLElement>) => {
@@ -1462,7 +1525,7 @@ export default function MapWorkspace({
 
               if (nextZoom <= minZoom) {
                 const nextView = getFitView(viewport, mapSize);
-                applyMarkerWorldTransform(nextView, markerView);
+                applyDirectTransforms(nextView, markerView);
                 scheduleViewUpdate(nextView);
               } else {
                 const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
@@ -1471,7 +1534,7 @@ export default function MapWorkspace({
                   y: center.clientY - pinchZoom.startMapY * zoom,
                   zoom
                 };
-                applyMarkerWorldTransform(nextView, markerView);
+                applyDirectTransforms(nextView, markerView);
                 scheduleViewUpdate(nextView);
               }
             }
@@ -1501,7 +1564,7 @@ export default function MapWorkspace({
         y: drag.startY + deltaY,
         zoom: drag.startZoom
       };
-      applyMarkerWorldTransform(nextView, markerView);
+      applyDirectTransforms(nextView, markerView);
       scheduleViewUpdate(nextView);
     }
 
@@ -1534,7 +1597,7 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endDrag);
       window.removeEventListener("pointercancel", endDrag);
     };
-  }, [applyMarkerWorldTransform, finishPointerDrag, flushPendingView, mapSize, markerView, scheduleViewUpdate, viewport]);
+  }, [applyDirectTransforms, finishPointerDrag, flushPendingView, mapSize, markerView, scheduleViewUpdate, viewport]);
 
   useEffect(() => {
     function handleQuickDeedDrag(event: PointerEvent) {
@@ -1807,18 +1870,21 @@ export default function MapWorkspace({
             height={visualMap.heightPx}
             onDragStart={preventNativeDrag}
             priority
+            ref={mapImageRef}
             src={visualMap.imageSrc}
             style={imageStyle}
             unoptimized
             width={visualMap.widthPx}
           />
           <TileHighlightOverlay
+            containerRef={tileHighlightRef}
             imageStyle={imageStyle}
             map={visualMap}
             tileHighlight={tileHighlight}
           />
           <WildernessOverlay
             color={markerColors.wildernessOverlay}
+            containerRef={wildernessRef}
             layerName={selectedMapLayer?.name ?? null}
             markers={visibleMarkers}
             imageStyle={imageStyle}
@@ -1831,6 +1897,7 @@ export default function MapWorkspace({
             className="map-stage"
             data-testid="map-stage"
             data-zoom={formatZoom(view.zoom)}
+            ref={mapStageRef}
             style={stageStyle}
           >
             {markerVisibility.sectorGrid ? (
@@ -3020,10 +3087,12 @@ function SelectedCoordinateReticule({
 }
 
 function TileHighlightOverlay({
+  containerRef,
   imageStyle,
   map,
   tileHighlight
 }: {
+  containerRef: React.Ref<HTMLDivElement>;
   imageStyle: CSSProperties;
   map: WorkspaceMap;
   tileHighlight: TileHighlightSettings;
@@ -3083,6 +3152,7 @@ function TileHighlightOverlay({
 
   return (
     <div
+      ref={containerRef}
       aria-hidden="true"
       className="map-tile-highlight-overlay"
       data-testid="tile-highlight-overlay"
@@ -3097,6 +3167,7 @@ function TileHighlightOverlay({
 
 function WildernessOverlay({
   color,
+  containerRef,
   layerName,
   map,
   markers,
@@ -3106,6 +3177,7 @@ function WildernessOverlay({
   visible
 }: {
   color: string;
+  containerRef: React.Ref<HTMLDivElement>;
   layerName: string | null;
   map: WorkspaceMap | null;
   markers: WorkspaceMarker[];
@@ -3237,6 +3309,7 @@ function WildernessOverlay({
 
   return (
     <div
+      ref={containerRef}
       aria-hidden="true"
       className="map-wilderness-overlay"
       data-testid="wilderness-overlay"
@@ -6112,5 +6185,5 @@ function formatZoom(value: number): string {
 }
 
 function formatPixels(value: number): string {
-  return `${Number(value.toFixed(2))}px`;
+  return `${Number(value.toFixed(4))}px`;
 }
