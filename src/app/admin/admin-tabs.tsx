@@ -18,7 +18,7 @@ const tabs = [
   { href: "/admin/accounts", label: "Accounts" },
   { href: "/admin/history", label: "History Log" },
   { href: "/admin/deleted-markers", label: "Deleted Markers" },
-  { href: "/admin/watermark-reveal", label: "Reveal Watermark" },
+  { href: "/admin/watermark-reveal", label: "Watermark" },
 ] as const;
 
 export function AdminTabs({ currentRoute }: AdminTabsProps) {

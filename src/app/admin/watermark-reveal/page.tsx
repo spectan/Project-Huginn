@@ -22,7 +22,7 @@ export default async function WatermarkRevealPage() {
 function WatermarkRevealAccessDenied() {
   return (
     <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/watermark-reveal" title="Reveal Watermark" />
+      <AdminHeader currentRoute="/admin/watermark-reveal" title="Watermark" />
       <section className="history-empty">Admin access is required</section>
     </main>
   );

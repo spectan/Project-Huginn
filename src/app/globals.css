@@ -1920,7 +1920,9 @@ body {
 }
 
 .map-account-permissions-toggle {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
   padding: 4px 0;
   border: 0;
@@ -1934,8 +1936,22 @@ body {
   cursor: pointer;
 }
 
+.map-account-permissions-toggle::after {
+  content: "▼";
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.map-account-permissions-toggle[aria-expanded="true"]::after {
+  content: "▲";
+}
+
 .map-account-permissions-toggle:hover {
   color: #e5e7eb;
+}
+
+.map-account-permissions-toggle:hover::after {
+  opacity: 1;
 }
 
 .map-account-permissions-toggle:focus-visible {

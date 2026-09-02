@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AdminHeader } from "../admin-header";
 
 type MapOption = {
@@ -63,9 +63,16 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
     }
   }
 
-  async function handlePaste(event: React.ClipboardEvent) {
-    const items = event.clipboardData.items;
-    for (const item of Array.from(items)) {
+  async function handlePaste(event: ClipboardEvent | React.ClipboardEvent) {
+    const clipboardData =
+      "clipboardData" in event && event.clipboardData !== null
+        ? event.clipboardData
+        : null;
+    if (clipboardData === null) {
+      return;
+    }
+
+    for (const item of Array.from(clipboardData.items)) {
       if (item.type.startsWith("image/")) {
         const file = item.getAsFile();
         if (file !== null) {
@@ -77,9 +84,16 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
     }
   }
 
+  useEffect(() => {
+    document.addEventListener("paste", handlePaste);
+    return () => {
+      document.removeEventListener("paste", handlePaste);
+    };
+  }, []);
+
   return (
     <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/watermark-reveal" title="Reveal Watermark" />
+      <AdminHeader currentRoute="/admin/watermark-reveal" title="Watermark" />
 
       <section className="history-empty">
         <form onSubmit={handleSubmit} style={{ maxWidth: 600 }}>
@@ -133,7 +147,7 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
           </div>
 
           <button type="submit" disabled={loading || file === null}>
-            {loading ? "Revealing..." : "Reveal Watermark"}
+            {loading ? "Revealing..." : "Reveal"}
           </button>
         </form>
 
