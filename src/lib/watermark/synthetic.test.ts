@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeAll } from "vitest";
 import { embedWatermark, type EmbedContext } from "./embed";
-import { extractWatermark } from "./extract";
+import { tryExtractWatermark } from "./extract";
 import sharp from "sharp";
 
 beforeAll(() => {
@@ -22,30 +22,26 @@ describe("watermark embed/extract on synthetic image", () => {
       .png()
       .toBuffer();
 
-    const payload = { username: "spectan", datestamp: "2026-09-02" };
     const context: EmbedContext = {
       mapId: "map-celebration",
       userId: "user-abc",
       layerId: "layer-terrain",
     };
 
-    const watermarked = await embedWatermark(
-      image,
-      payload,
-      context,
-      { cache: false }
-    );
+    const watermarked = await embedWatermark(image, context, { cache: false });
 
-    const result = await extractWatermark(watermarked, {
+    const result = await tryExtractWatermark(watermarked, {
       mapId: context.mapId,
-      userId: context.userId,
-      datestamp: payload.datestamp,
+      userIds: [context.userId, "user-other"],
     });
 
     console.log("synthetic result:", result);
-    console.log("max diff:", (watermarked.toString('hex') === image.toString('hex')) ? 'same' : 'different');
+    console.log(
+      "max diff:",
+      watermarked.toString("hex") === image.toString("hex") ? "same" : "different"
+    );
     expect(result.found).toBe(true);
-    expect(result.payload).toEqual(payload);
-    expect(result.checksumValid).toBe(true);
+    expect(result.userId).toBe(context.userId);
+    expect(result.confidence).toBeGreaterThan(0.75);
   });
 });

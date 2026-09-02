@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { prisma } from "@/lib/db/prisma";
-import { extractWatermark } from "@/lib/watermark/extract";
+import { extractWatermark, tryExtractWatermark } from "@/lib/watermark/extract";
 
 export async function POST(request: Request) {
   const viewer = await getCurrentViewer();
@@ -28,25 +28,23 @@ export async function POST(request: Request) {
   }
 
   const userId = formData.get("userId");
-  const datestamp = formData.get("datestamp");
-
   const imageBuffer = Buffer.from(await imageFile.arrayBuffer());
 
   let best: {
     found: boolean;
     username: string | null;
-    datestamp: string | null;
+    userId: string | null;
     confidence: number;
-    checksumValid: boolean;
+    syncConfidence: number;
   } = {
     found: false,
     username: null,
-    datestamp: null,
+    userId: null,
     confidence: 0,
-    checksumValid: false,
+    syncConfidence: 0,
   };
 
-  if (typeof userId === "string" && userId.length > 0 && typeof datestamp === "string" && datestamp.length > 0) {
+  if (typeof userId === "string" && userId.length > 0) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, username: true },
@@ -56,28 +54,17 @@ export async function POST(request: Request) {
       const result = await extractWatermark(imageBuffer, {
         mapId,
         userId: user.id,
-        datestamp,
       });
 
-      if (result.found) {
-        best = {
-          found: true,
-          username: user.username,
-          datestamp,
-          confidence: result.confidence,
-          checksumValid: result.checksumValid,
-        };
-      }
+      best = {
+        found: result.found,
+        username: user.username,
+        userId: result.userId,
+        confidence: result.confidence,
+        syncConfidence: result.syncConfidence,
+      };
     }
   } else {
-    // Try recent datestamps and all users with access to this map.
-    const today = new Date();
-    const datestamps: string[] = [];
-    for (let offsetDays = 0; offsetDays <= 7; offsetDays++) {
-      const date = new Date(today.getTime() - offsetDays * 24 * 60 * 60 * 1000);
-      datestamps.push(date.toISOString().slice(0, 10));
-    }
-
     const permissions = await prisma.userMapPermission.findMany({
       where: { mapId },
       select: { userId: true },
@@ -89,25 +76,21 @@ export async function POST(request: Request) {
       where: { id: { in: Array.from(userIds) } },
       select: { id: true, username: true },
     });
+    const usersById = new Map(users.map((u) => [u.id, u.username]));
 
-    for (const user of users) {
-      for (const datestamp of datestamps) {
-        const result = await extractWatermark(imageBuffer, {
-          mapId,
-          userId: user.id,
-          datestamp,
-        });
+    const result = await tryExtractWatermark(imageBuffer, {
+      mapId,
+      userIds: Array.from(userIds),
+    });
 
-        if (result.found && result.confidence > best.confidence) {
-          best = {
-            found: true,
-            username: user.username,
-            datestamp,
-            confidence: result.confidence,
-            checksumValid: result.checksumValid,
-          };
-        }
-      }
+    if (result.found) {
+      best = {
+        found: true,
+        username: result.userId ? usersById.get(result.userId) ?? null : null,
+        userId: result.userId,
+        confidence: result.confidence,
+        syncConfidence: result.syncConfidence,
+      };
     }
   }
 

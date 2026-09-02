@@ -51,13 +51,10 @@ export async function GET(
 
   const rawFilePath = join(process.cwd(), "public", imagePath);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const username = viewer.username;
-
   const watermarked = await embedWatermark(
     rawFilePath,
-    { username, datestamp: today },
-    { mapId, userId: viewer.id, layerId: resolvedLayerId }
+    { mapId, userId: viewer.id, layerId: resolvedLayerId },
+    { cache: true }
   );
 
   return new NextResponse(new Uint8Array(watermarked), {

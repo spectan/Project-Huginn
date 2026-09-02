@@ -4,15 +4,16 @@ import { dirname, join } from "path";
 import sharp from "sharp";
 import {
   BLOCK_SIZE,
-  QIM_POSITIONS,
-  QIM_STEP,
-  TOTAL_EMBEDDED_BITS,
+  COEFFS_PER_BLOCK,
+  MIDFREQ_INDICES,
+  SS_ALPHA,
+  TOTAL_BITS,
   assertSecret,
   buildCacheKey,
   getWatermarkCacheDir,
 } from "./config";
 import { forwardDCT2D, inverseDCT2D } from "./dct";
-import { getEmbeddedBitStream, type WatermarkPayload } from "./codec";
+import { getEmbeddedBitStream } from "./codec";
 
 function hashInput(input: string | Buffer): Promise<string> {
   const hash = createHash("sha256");
@@ -29,20 +30,8 @@ function hashInput(input: string | Buffer): Promise<string> {
   });
 }
 
-function sharpInput(input: string | Buffer) {
-  return sharp(input);
-}
-
 function clampByte(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
-}
-
-function quantizeToBit(value: number, bit: 0 | 1): number {
-  const step = QIM_STEP;
-  if (bit === 0) {
-    return Math.round(value / (2 * step)) * (2 * step);
-  }
-  return Math.round((value - step) / (2 * step)) * (2 * step) + step;
 }
 
 export interface EmbedContext {
@@ -55,9 +44,15 @@ export interface EmbedOptions {
   cache?: boolean;
 }
 
+/**
+ * Embed a spread-spectrum watermark into a map layer PNG.
+ *
+ * The payload is a fixed sync pattern plus a 16-bit hash of (mapId, userId).
+ * Each bit is spread across many 8×8 DCT blocks with interleaved assignment
+ * so that cropping only removes a fraction of each bit's samples.
+ */
 export async function embedWatermark(
   imageInput: string | Buffer,
-  payload: WatermarkPayload,
   context: EmbedContext,
   options: EmbedOptions = {}
 ): Promise<Buffer> {
@@ -66,12 +61,7 @@ export async function embedWatermark(
   const { cache = true } = options;
   const cacheDir = getWatermarkCacheDir();
   const imageHash = await hashInput(imageInput);
-  const cacheKey = buildCacheKey(
-    imageHash,
-    context.userId,
-    payload.datestamp,
-    context.layerId
-  );
+  const cacheKey = buildCacheKey(imageHash, context.userId, context.layerId);
   const cachePath = join(cacheDir, cacheKey + ".png");
 
   if (cache) {
@@ -83,7 +73,7 @@ export async function embedWatermark(
     }
   }
 
-  const { data, info } = await sharpInput(imageInput)
+  const { data, info } = await sharp(imageInput)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
@@ -106,8 +96,7 @@ export async function embedWatermark(
   const blocksH = paddedH / BLOCK_SIZE;
   const totalBlocks = blocksW * blocksH;
 
-  const watermarkBits = getEmbeddedBitStream(payload, context);
-  const bitCount = TOTAL_EMBEDDED_BITS;
+  const bitStream = getEmbeddedBitStream(context.mapId, context.userId);
 
   const modifiedLuma = new Float64Array(pixelCount);
   originalLuma.forEach((v, i) => (modifiedLuma[i] = v));
@@ -129,14 +118,15 @@ export async function embedWatermark(
     }
 
     const dct = forwardDCT2D(blockBuffer);
+    const bitIndex = b % TOTAL_BITS;
+    const bit = bitStream[bitIndex]!;
+    const sign = bit === 1 ? 1 : -1;
 
-    const bitIndex = b % bitCount;
-    const positionIndex = Math.floor(b / bitCount) % QIM_POSITIONS.length;
-    const [u, v] = QIM_POSITIONS[positionIndex]!;
-    const coeffIndex = v * BLOCK_SIZE + u;
-
-    const bit = watermarkBits[bitIndex]!;
-    dct[coeffIndex] = quantizeToBit(dct[coeffIndex]!, bit);
+    for (let k = 0; k < COEFFS_PER_BLOCK; k++) {
+      const coeffSlot = (b * COEFFS_PER_BLOCK + k) % MIDFREQ_INDICES.length;
+      const coeffIndex = MIDFREQ_INDICES[coeffSlot]!;
+      dct[coeffIndex] = dct[coeffIndex]! + sign * SS_ALPHA;
+    }
 
     const modifiedBlock = inverseDCT2D(dct);
 

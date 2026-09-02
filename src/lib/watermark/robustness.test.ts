@@ -3,114 +3,231 @@ import { existsSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
 import { embedWatermark, type EmbedContext } from "./embed";
-import { extractWatermark } from "./extract";
+import { tryExtractWatermark } from "./extract";
 
 beforeAll(() => {
-  process.env.WATERMARK_SECRET = "test-w…prod";
+  process.env.WATERMARK_SECRET = "test-watermark-secret-do-not-use-in-prod";
 });
+
+const CONFIDENCE_THRESHOLD = 0.75;
 
 describe("watermark robustness on celebration terrain", () => {
   const samplePath = join(process.cwd(), "public", "maps", "celebration-terrain.png");
 
-  it("survives JPEG re-encoding and decodes", async () => {
-    if (!existsSync(samplePath)) {
-      return;
-    }
+  it(
+    "full-resolution PNG round-trips with high confidence",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
 
-    const payload = { username: "spectan", datestamp: "2026-09-02" };
-    const context: EmbedContext = {
-      mapId: "map-celebration",
-      userId: "user-abc",
-      layerId: "layer-terrain",
-    };
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
 
-    const watermarked = await embedWatermark(samplePath, payload, context, {
-      cache: false,
-    });
-
-    // At QIM_STEP=3 the watermark is invisible but extremely fragile.
-    // Only an untouched PNG is expected to decode; JPEG at any quality
-    // should destroy it.
-    const resultRaw = await extractWatermark(watermarked, {
-      mapId: context.mapId,
-      userId: context.userId,
-      datestamp: payload.datestamp,
-    });
-    expect(resultRaw.found).toBe(true);
-    expect(resultRaw.payload).toEqual(payload);
-    expect(resultRaw.checksumValid).toBe(true);
-
-    for (const quality of [90, 80, 70]) {
-      const jpeg = await sharp(watermarked).jpeg({ quality }).toBuffer();
-      const result = await extractWatermark(jpeg, {
-        mapId: context.mapId,
-        userId: context.userId,
-        datestamp: payload.datestamp,
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
       });
-      console.log(`JPEG ${quality}:`, result);
-      expect(result.found).toBe(false);
-    }
-  }, 60000);
 
-  it("survives 50% center crop", async () => {
+      const result = await tryExtractWatermark(watermarked, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
+      console.log("raw PNG:", result);
+
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+    },
+    60000
+  );
+
+  it(
+    "decodes after JPEG re-encoding at quality 80 and 90",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
+
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
+
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
+
+      for (const quality of [90, 80]) {
+        const jpeg = await sharp(watermarked).jpeg({ quality }).toBuffer();
+        const result = await tryExtractWatermark(jpeg, {
+          mapId: context.mapId,
+          userIds: [context.userId],
+        });
+        console.log(`JPEG ${quality}:`, result);
+        expect(result.found).toBe(true);
+        expect(result.userId).toBe(context.userId);
+        expect(result.confidence).toBeGreaterThanOrEqual(CONFIDENCE_THRESHOLD);
+      }
+    },
+    120000
+  );
+
+  it(
+    "decodes after a 50% center crop",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
+
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
+
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
+
+      const { width, height } = await sharp(watermarked).metadata();
+      if (!width || !height) {
+        throw new Error("Could not read watermarked dimensions");
+      }
+
+      const cropWidth = Math.floor(width * 0.5);
+      const cropHeight = Math.floor(height * 0.5);
+      const left = Math.floor((width - cropWidth) / 2);
+      const top = Math.floor((height - cropHeight) / 2);
+
+      const cropped = await sharp(watermarked)
+        .extract({ left, top, width: cropWidth, height: cropHeight })
+        .png()
+        .toBuffer();
+
+      const result = await tryExtractWatermark(cropped, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
+      console.log("50% crop:", result);
+
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+    },
+    60000
+  );
+
+  it(
+    "decodes after a 25% center crop",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
+
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
+
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
+
+      const { width, height } = await sharp(watermarked).metadata();
+      if (!width || !height) {
+        throw new Error("Could not read watermarked dimensions");
+      }
+
+      const cropWidth = Math.floor(width * 0.25);
+      const cropHeight = Math.floor(height * 0.25);
+      const left = Math.floor((width - cropWidth) / 2);
+      const top = Math.floor((height - cropHeight) / 2);
+
+      const cropped = await sharp(watermarked)
+        .extract({ left, top, width: cropWidth, height: cropHeight })
+        .png()
+        .toBuffer();
+
+      const result = await tryExtractWatermark(cropped, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
+      console.log("25% crop:", result);
+
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+    },
+    60000
+  );
+
+  it(
+    "decodes after a non-aligned crop",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
+
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
+
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
+
+      const { width, height } = await sharp(watermarked).metadata();
+      if (!width || !height) {
+        throw new Error("Could not read watermarked dimensions");
+      }
+
+      const cropWidth = Math.floor(width * 0.5);
+      const cropHeight = Math.floor(height * 0.5);
+      const offsetX = 3;
+      const offsetY = 5;
+      const left = Math.min(offsetX, width - cropWidth);
+      const top = Math.min(offsetY, height - cropHeight);
+
+      const cropped = await sharp(watermarked)
+        .extract({ left, top, width: cropWidth, height: cropHeight })
+        .png()
+        .toBuffer();
+
+      const result = await tryExtractWatermark(cropped, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
+      console.log("non-aligned crop:", result);
+
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+    },
+    60000
+  );
+
+  it("is visually identical (PSNR > 45)", async () => {
     if (!existsSync(samplePath)) {
       return;
     }
 
-    const payload = { username: "spectan", datestamp: "2026-09-02" };
     const context: EmbedContext = {
       mapId: "map-celebration",
       userId: "user-abc",
       layerId: "layer-terrain",
     };
 
-    const watermarked = await embedWatermark(samplePath, payload, context, {
+    const watermarked = await embedWatermark(samplePath, context, {
       cache: false,
     });
 
-    const { width, height } = await sharp(watermarked).metadata();
-    if (!width || !height) {
-      throw new Error("Could not read watermarked dimensions");
-    }
-
-    const cropWidth = Math.floor(width * 0.5);
-    const cropHeight = Math.floor(height * 0.5);
-    const left = Math.floor((width - cropWidth) / 2);
-    const top = Math.floor((height - cropHeight) / 2);
-
-    const cropped = await sharp(watermarked)
-      .extract({ left, top, width: cropWidth, height: cropHeight })
-      .png()
-      .toBuffer();
-
-    const result = await extractWatermark(cropped, {
-      mapId: context.mapId,
-      userId: context.userId,
-      datestamp: payload.datestamp,
-    });
-    console.log("50% crop:", result);
-    // 50% center crop is expected to break decoding because the decoder relies
-    // on exact 8×8 block alignment with the original image origin.
-    expect(result.found).toBe(false);
-  });
-
-  it("is visually identical (SSIM > 0.99)", async () => {
-    if (!existsSync(samplePath)) {
-      return;
-    }
-
-    const payload = { username: "spectan", datestamp: "2026-09-02" };
-    const context: EmbedContext = {
-      mapId: "map-celebration",
-      userId: "user-abc",
-      layerId: "layer-terrain",
-    };
-
-    const watermarked = await embedWatermark(samplePath, payload, context, {
-      cache: false,
-    });
-
-    // Compute mean squared error as a quick invisibility check.
     const originalBuffer = await sharp(samplePath).raw().toBuffer();
     const watermarkedBuffer = await sharp(watermarked).raw().toBuffer();
 

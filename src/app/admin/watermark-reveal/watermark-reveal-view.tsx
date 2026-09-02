@@ -10,13 +10,14 @@ type MapOption = {
 type RevealResult = {
   found: boolean;
   username: string | null;
-  datestamp: string | null;
+  userId: string | null;
   confidence: number;
-  checksumValid: boolean;
+  syncConfidence: number;
 };
 
 export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
   const [file, setFile] = useState<File | null>(null);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [mapId, setMapId] = useState<string>(maps[0]?.id ?? "");
   const [result, setResult] = useState<RevealResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,9 +46,9 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
         setResult({
           found: false,
           username: null,
-          datestamp: null,
+          userId: null,
           confidence: 0,
-          checksumValid: false,
+          syncConfidence: 0,
         });
         alert(error.error ?? "Failed to reveal watermark");
       } else {
@@ -56,6 +57,8 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
       }
     } finally {
       setLoading(false);
+      setFile(null);
+      setFileInputKey((k) => k + 1);
     }
   }
 
@@ -124,6 +127,7 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
                 </p>
               )}
               <input
+                key={fileInputKey}
                 id="image"
                 type="file"
                 accept="image/png,image/jpeg"
@@ -146,15 +150,15 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
                   <strong>User:</strong> {result.username}
                 </p>
                 <p>
-                  <strong>Date:</strong> {result.datestamp}
+                  <strong>User ID:</strong> {result.userId}
                 </p>
                 <p>
                   <strong>Confidence:</strong>{" "}
                   {Math.round(result.confidence * 100)}%
                 </p>
                 <p>
-                  <strong>Checksum:</strong>{" "}
-                  {result.checksumValid ? "valid" : "invalid"}
+                  <strong>Sync confidence:</strong>{" "}
+                  {Math.round(result.syncConfidence * 100)}%
                 </p>
               </div>
             ) : (

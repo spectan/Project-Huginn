@@ -2,9 +2,8 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { existsSync } from "fs";
 import { join } from "path";
 import { embedWatermark, type EmbedContext } from "./embed";
-import { extractWatermark } from "./extract";
+import { tryExtractWatermark } from "./extract";
 import { forwardDCT2D, inverseDCT2D } from "./dct";
-import { encodePayload, decodePayloadBits } from "./codec";
 
 // These tests depend on WATERMARK_SECRET being set. We set a deterministic
 // dev secret for the test process.
@@ -31,51 +30,39 @@ describe("DCT round-trip", () => {
   });
 });
 
-describe("payload codec", () => {
-  it("round-trips a username and datestamp", () => {
-    const payload = { username: "spectan", datestamp: "2026-09-02" };
-    const context = { mapId: "map-celebration", userId: "user-123" };
-
-    const { bits } = encodePayload(payload, context);
-    const decoded = decodePayloadBits(bits);
-
-    expect(decoded.payload.username).toBe(payload.username);
-    expect(decoded.payload.datestamp).toBe(payload.datestamp);
-    expect(decoded.checksumValid).toBe(true);
-  });
-});
-
 describe("watermark embed/extract", () => {
   const samplePath = join(process.cwd(), "public", "maps", "celebration-terrain.png");
 
-  it("embeds and extracts a watermark on the celebration terrain map", async () => {
-    if (!existsSync(samplePath)) {
-      // Skip if running in an environment without the sample maps.
-      return;
-    }
+  it(
+    "embeds and extracts a watermark on the celebration terrain map",
+    async () => {
+      if (!existsSync(samplePath)) {
+        // Skip if running in an environment without the sample maps.
+        return;
+      }
 
-    const payload = { username: "spectan", datestamp: "2026-09-02" };
-    const context: EmbedContext = {
-      mapId: "map-celebration",
-      userId: "user-abc",
-      layerId: "layer-terrain",
-    };
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
 
-    const watermarked = await embedWatermark(samplePath, payload, context, {
-      cache: false,
-    });
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
 
-    expect(watermarked.length).toBeGreaterThan(0);
+      expect(watermarked.length).toBeGreaterThan(0);
 
-    const result = await extractWatermark(watermarked, {
-      mapId: context.mapId,
-      userId: context.userId,
-      datestamp: payload.datestamp,
-    });
+      const result = await tryExtractWatermark(watermarked, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
 
-    console.log("extract result:", result);
-    expect(result.found).toBe(true);
-    expect(result.payload).toEqual(payload);
-    expect(result.checksumValid).toBe(true);
-  });
+      console.log("extract result:", result);
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(0.75);
+    },
+    60000
+  );
 });
