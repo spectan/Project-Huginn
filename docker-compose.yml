@@ -14,6 +14,7 @@ services:
       MAP_STORAGE_PATH: /app/map-storage
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      WATERMARK_SECRET: ${WATERMARK_SECRET:?WATERMARK_SECRET is required}
       WURMMAPS_EVENT_FEED_TIMEOUT_MS: ${WURMMAPS_EVENT_FEED_TIMEOUT_MS:-3000}
       WURMMAPS_STAT_DELEGATE_BASE_URL: ${WURMMAPS_STAT_DELEGATE_BASE_URL:-https://wurmmaps.xyz/APIs/stat-delegate.php}
     ports:
