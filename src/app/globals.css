@@ -1926,12 +1926,6 @@ body {
   color: #fecaca;
 }
 
-.map-account-permission--global {
-  font-style: italic;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
-  padding-bottom: 4px;
-}
-
 .map-account-permissions-toggle {
   width: 100%;
   padding: 0;

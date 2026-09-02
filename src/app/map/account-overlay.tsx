@@ -164,7 +164,6 @@ function AccountPermissions({
         {permissionRows.map((row) => (
           <PermissionRow
             allowed={row.allowed}
-            isGlobal={row.isGlobal}
             key={row.label}
             label={row.label}
             value={row.value}
@@ -247,17 +246,15 @@ function getFallbackPermissionLabel(access: {
 
 function PermissionRow({
   allowed,
-  isGlobal = false,
   label,
   value
 }: {
   allowed: boolean;
-  isGlobal?: boolean;
   label: string;
   value: string;
 }) {
   return (
-    <div className={isGlobal ? "map-account-permission--global" : undefined}>
+    <div>
       <dt>{label}</dt>
       <dd className={allowed ? "map-account-permission--allowed" : "map-account-permission--denied"}>
         {value}
