@@ -77,8 +77,10 @@ export const ALIGNMENT_SAMPLE_BLOCKS = 4096;
 /**
  * The best candidate must beat the second-best candidate by at least this
  * margin to avoid false positives when multiple users look similar.
+ * Set to 0 to accept any candidate that meets the confidence/sync thresholds;
+ * the UI now shows the best match explicitly, so borderline cases are visible.
  */
-export const CONFIDENCE_MARGIN = 0.05;
+export const CONFIDENCE_MARGIN = 0;
 
 /** Where watermarked image caches are stored. */
 export function getWatermarkCacheDir(): string {

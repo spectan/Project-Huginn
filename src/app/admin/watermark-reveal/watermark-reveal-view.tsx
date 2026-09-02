@@ -200,7 +200,7 @@ export function WatermarkRevealView({
               </p>
             ) : result.userId ? (
               <p>
-                <strong>Best match:</strong> {result.username} ({result.userId}) — below threshold
+                <strong>Uncertain match:</strong> {result.username} ({result.userId}) — confidence below certainty threshold
               </p>
             ) : (
               <p>No watermark found</p>
