@@ -40,6 +40,7 @@ enum AuditAction {
   MARKER_DELETED
   MARKER_RESTORED
   MARKER_CLEANED_UP
+  MARKERS_EXPORTED
 }
 
 enum AuditTargetType {
@@ -98,6 +99,7 @@ model User {
   sessions           Session[]
   mapSettings        UserMapSettings[]
   mapPermissions     UserMapPermission[]
+  canaryMarkers      CanaryMarker[]
 
   @@index([approvalStatus])
   @@index([accessLevel])
@@ -141,6 +143,7 @@ model Map {
   events          Event[]
   userSettings    UserMapSettings[]
   userPermissions UserMapPermission[]
+  canaryMarkers   CanaryMarker[]
 
   @@index([isActive])
   @@map("maps")
@@ -452,4 +455,20 @@ model Event {
 
   @@index([mapId, timestamp])
   @@map("events")
+}
+
+model CanaryMarker {
+  id        String   @id @default(cuid())
+  mapId     String
+  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slot      Int
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mapId, userId, slot])
+  @@index([mapId, userId])
+  @@map("canary_markers")
 }

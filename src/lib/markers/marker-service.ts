@@ -147,7 +147,8 @@ type MarkerAuditAction =
   | "FAILED_AUTHORIZATION"
   | "MARKER_CREATED"
   | "MARKER_UPDATED"
-  | "MARKER_DELETED";
+  | "MARKER_DELETED"
+  | "MARKERS_EXPORTED";
 
 type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "MAP";
 
