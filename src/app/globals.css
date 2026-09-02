@@ -1920,33 +1920,27 @@ body {
 }
 
 .map-account-permissions-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: block;
   width: 100%;
-  min-height: 28px;
-  margin: -8px -8px 0;
-  padding: 4px 8px;
+  padding: 4px 0;
   border: 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 8px 8px 0 0;
-  background: rgba(148, 163, 184, 0.1);
-  color: #cbd5e1;
+  background: transparent;
+  color: #94a3b8;
   font: inherit;
   font-size: 11px;
   font-weight: 800;
   text-align: left;
+  text-transform: uppercase;
   cursor: pointer;
 }
 
 .map-account-permissions-toggle:hover {
-  background: rgba(148, 163, 184, 0.16);
-  color: #ffffff;
+  color: #e5e7eb;
 }
 
 .map-account-permissions-toggle:focus-visible {
   outline: 3px solid #2563eb;
-  outline-offset: -3px;
+  outline-offset: 2px;
 }
 
 .map-account-permissions-list--collapsed {
