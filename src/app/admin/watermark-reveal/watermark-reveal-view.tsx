@@ -195,14 +195,13 @@ export function WatermarkRevealView({
         {result !== null && (
           <div style={{ marginTop: 24 }}>
             {result.found ? (
-              <div>
-                <p>
-                  <strong>User:</strong> {result.username}
-                </p>
-                <p>
-                  <strong>User ID:</strong> {result.userId}
-                </p>
-              </div>
+              <p>
+                <strong>User:</strong> {result.username} ({result.userId})
+              </p>
+            ) : result.userId ? (
+              <p>
+                <strong>Best match:</strong> {result.username} ({result.userId}) — below threshold
+              </p>
             ) : (
               <p>No watermark found</p>
             )}

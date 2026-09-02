@@ -517,9 +517,9 @@ export async function tryExtractWatermark(
 
   return {
     found: false,
-    userId: null,
+    userId: best.userId,
     confidence: best.confidence,
-    syncConfidence,
+    syncConfidence: best.syncConfidence,
     offsetX,
     offsetY,
     scale,

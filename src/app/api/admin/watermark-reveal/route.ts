@@ -92,18 +92,16 @@ export async function POST(request: Request) {
       userIds: Array.from(userIds),
     });
 
-    if (result.found) {
-      best = {
-        found: true,
-        username: result.userId ? usersById.get(result.userId) ?? null : null,
-        userId: result.userId,
-        confidence: result.confidence,
-        syncConfidence: result.syncConfidence,
-        scale: result.scale,
-        offsetX: result.offsetX,
-        offsetY: result.offsetY,
-      };
-    }
+    best = {
+      found: result.found,
+      username: result.userId ? usersById.get(result.userId) ?? null : null,
+      userId: result.userId,
+      confidence: result.confidence,
+      syncConfidence: result.syncConfidence,
+      scale: result.scale,
+      offsetX: result.offsetX,
+      offsetY: result.offsetY,
+    };
   }
 
   return NextResponse.json(best);

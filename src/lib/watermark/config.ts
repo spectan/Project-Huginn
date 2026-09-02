@@ -78,7 +78,7 @@ export const ALIGNMENT_SAMPLE_BLOCKS = 4096;
  * The best candidate must beat the second-best candidate by at least this
  * margin to avoid false positives when multiple users look similar.
  */
-export const CONFIDENCE_MARGIN = 0.15;
+export const CONFIDENCE_MARGIN = 0.05;
 
 /** Where watermarked image caches are stored. */
 export function getWatermarkCacheDir(): string {
