@@ -1933,6 +1933,7 @@ body {
 }
 
 .map-account-permissions-toggle {
+  width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1940,7 +1941,17 @@ body {
   font: inherit;
   font-size: inherit;
   font-weight: inherit;
+  text-align: left;
   cursor: pointer;
+}
+
+.map-account-permissions-legend {
+  cursor: pointer;
+  width: 100%;
+}
+
+.map-account-permissions-legend:hover .map-account-permissions-toggle {
+  color: #ffffff;
 }
 
 .map-account-permissions-toggle:focus-visible {

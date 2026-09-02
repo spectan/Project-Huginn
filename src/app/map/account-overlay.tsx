@@ -143,11 +143,13 @@ function AccountPermissions({
 
   return (
     <fieldset className="map-account-permissions">
-      <legend>
+      <legend
+        className="map-account-permissions-legend"
+        onClick={() => setIsExpanded((current) => !current)}
+      >
         <button
           aria-expanded={isExpanded}
           className="map-account-permissions-toggle"
-          onClick={() => setIsExpanded((current) => !current)}
           type="button"
         >
           Permissions
