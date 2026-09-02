@@ -1,5 +1,6 @@
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { prisma } from "@/lib/db/prisma";
+import { AdminHeader } from "../admin-header";
 import { WatermarkRevealView } from "./watermark-reveal-view";
 
 export default async function WatermarkRevealPage() {
@@ -21,13 +22,7 @@ export default async function WatermarkRevealPage() {
 function WatermarkRevealAccessDenied() {
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>Reveal Watermark</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/watermark-reveal" title="Reveal Watermark" />
       <section className="history-empty">Admin access is required</section>
     </main>
   );

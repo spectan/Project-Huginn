@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AdminHeader } from "../admin-header";
 import type { DeletedMarkerSummary } from "@/lib/deleted-markers/deleted-marker-service";
 
 type DeletedMarkersViewProps = {
@@ -13,13 +14,7 @@ export function DeletedMarkersView({ markers }: DeletedMarkersViewProps) {
 
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>Deleted markers</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/deleted-markers" title="Deleted markers" />
       {error !== null ? <section className="history-empty">{error}</section> : null}
       {markers.length === 0 ? (
         <section className="history-empty">No restorable deleted markers</section>

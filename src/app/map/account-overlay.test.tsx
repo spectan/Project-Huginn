@@ -29,30 +29,40 @@ describe("AccountOverlay", () => {
   });
 
   it("opens account settings with privileges for an authenticated user", () => {
-    renderAccountOverlay({
-      approvalStatus: "APPROVED",
-      isAdmin: false,
-      mapPermissions: [
-        { accessLevel: "WRITE", isOperator: false, mapId: "map-celebration" },
-        { accessLevel: "NONE", isOperator: false, mapId: "map-defiance" },
-        { accessLevel: "READ", isOperator: false, mapId: "map-release" },
-        { accessLevel: "NONE", isOperator: true, mapId: "map-xanadu" }
-      ],
-      pendingApprovalCount: 0,
-      permissions: "WRITE",
-      username: "Mako"
-    }, [
-      { id: "map-celebration", name: "Celebration" },
-      { id: "map-defiance", name: "Defiance" },
-      { id: "map-release", name: "Release" },
-      { id: "map-xanadu", name: "Xanadu" }
-    ]);
+    renderAccountOverlay(
+      {
+        approvalStatus: "APPROVED",
+        isAdmin: false,
+        mapPermissions: [
+          { accessLevel: "WRITE", isOperator: false, mapId: "map-celebration" },
+          { accessLevel: "NONE", isOperator: false, mapId: "map-defiance" },
+          { accessLevel: "READ", isOperator: false, mapId: "map-release" },
+          { accessLevel: "NONE", isOperator: true, mapId: "map-xanadu" }
+        ],
+        pendingApprovalCount: 0,
+        permissions: "WRITE",
+        username: "Mako"
+      },
+      [
+        { id: "map-celebration", name: "Celebration" },
+        { id: "map-defiance", name: "Defiance" },
+        { id: "map-release", name: "Release" },
+        { id: "map-xanadu", name: "Xanadu" }
+      ]
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Mako" }));
 
     expect(screen.getByRole("dialog", { name: "Account settings" })).toBeTruthy();
     const permissionsGroup = screen.getByRole("group", { name: "Permissions" });
     expect(screen.queryByText("Status")).toBeNull();
+
+    const toggle = screen.getByRole("button", { name: "Permissions" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(toggle);
+
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Read/Write")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Release")).toBeTruthy();
@@ -70,39 +80,38 @@ describe("AccountOverlay", () => {
     expect(screen.queryByText("Approve users")).toBeNull();
   });
 
-  it("links admins to the dedicated account management pages", () => {
-    renderAccountOverlay({
-      approvalStatus: "APPROVED",
-      isAdmin: true,
-      pendingApprovalCount: 3,
-      permissions: "WRITE",
-      username: "Admin"
-    }, [
-      { id: "map-celebration", name: "Celebration" },
-      { id: "map-defiance", name: "Defiance" }
-    ]);
+  it("links admins to the administration page", () => {
+    renderAccountOverlay(
+      {
+        approvalStatus: "APPROVED",
+        isAdmin: true,
+        pendingApprovalCount: 3,
+        permissions: "WRITE",
+        username: "Admin"
+      },
+      [
+        { id: "map-celebration", name: "Celebration" },
+        { id: "map-defiance", name: "Defiance" }
+      ]
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
 
     const permissionsGroup = screen.getByRole("group", { name: "Permissions" });
-    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
-    expect(within(permissionsGroup).getByText("Defiance")).toBeTruthy();
-    expect(within(permissionsGroup).getAllByText("Admin")).toHaveLength(2);
-    expect(within(permissionsGroup).queryByText("Read/Write")).toBeNull();
-    expect(within(permissionsGroup).queryByText("Read")).toBeNull();
-    expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(screen.getByRole("link", { name: "Accounts 3 pending" }).getAttribute("href")).toBe(
-      "/admin/accounts"
+
+    fireEvent.click(screen.getByRole("button", { name: "Permissions" }));
+
+    expect(within(permissionsGroup).getByText("Global")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Admin")).toBeTruthy();
+    expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
+    expect(within(permissionsGroup).queryByText("Defiance")).toBeNull();
+    expect(screen.getByRole("link", { name: "Administration 3 pending" }).getAttribute("href")).toBe(
+      "/admin"
     );
-    expect(screen.getByRole("link", { name: "History log" }).getAttribute("href")).toBe(
-      "/admin/history"
-    );
-    expect(screen.getByRole("link", { name: "Deleted markers" }).getAttribute("href")).toBe(
-      "/admin/deleted-markers"
-    );
-    expect(screen.getByRole("link", { name: "Reveal watermark" }).getAttribute("href")).toBe(
-      "/admin/watermark-reveal"
-    );
+    expect(screen.queryByRole("link", { name: "Accounts 3 pending" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "History log" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Deleted markers" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Reveal watermark" })).toBeNull();
     expect(screen.queryByText("Manage accounts")).toBeNull();
     expect(screen.queryByLabelText("Access for Mako")).toBeNull();
   });
@@ -135,9 +144,8 @@ describe("AccountOverlay", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: "Save password" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/auth/password",
-      {
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/auth/password", {
         body: JSON.stringify({
           confirmPassword: "new secure password",
           currentPassword: "correct horse battery staple",
@@ -147,8 +155,8 @@ describe("AccountOverlay", () => {
           "content-type": "application/json"
         },
         method: "PATCH"
-      }
-    ));
+      })
+    );
     expect(await screen.findByText("Password changed")).toBeTruthy();
     expect(screen.getByLabelText("Current password")).toHaveProperty("value", "");
     expect(screen.getByLabelText("New password")).toHaveProperty("value", "");

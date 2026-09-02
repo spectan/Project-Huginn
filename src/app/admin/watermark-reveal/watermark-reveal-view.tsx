@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AdminHeader } from "../admin-header";
 
 type MapOption = {
   id: string;
@@ -78,13 +79,7 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
 
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>Reveal Watermark</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/watermark-reveal" title="Reveal Watermark" />
 
       <section className="history-empty">
         <form onSubmit={handleSubmit} style={{ maxWidth: 600 }}>

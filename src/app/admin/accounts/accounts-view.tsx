@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ChangeEvent, type FormEvent } from "react";
+import { AdminHeader } from "../admin-header";
 import type { AdminMapSummary, AdminUserSummary } from "@/lib/admin/users";
 
 type AdminAccountsViewProps = {
@@ -24,13 +25,7 @@ export function AdminAccountsView({ maps, users, viewerCanManageGlobalAccounts }
 
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>Accounts</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/accounts" title="Accounts" />
       {error !== null ? <section className="history-empty">{error}</section> : null}
       <label className="accounts-user-search">
         <span>Search users</span>
@@ -68,13 +63,7 @@ export function AdminAccountsView({ maps, users, viewerCanManageGlobalAccounts }
 export function AdminAccountsAccessDenied({ message }: { message: string }) {
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>Accounts</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/accounts" title="Accounts" />
       <section className="history-empty">{message}</section>
     </main>
   );

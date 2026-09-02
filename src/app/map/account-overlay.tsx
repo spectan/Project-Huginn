@@ -82,29 +82,20 @@ export function AccountOverlay({ isOpen, onOpenChange, servers = [], viewer }: A
             isAdmin: viewer.isAdmin,
             mapPermissions: viewer.mapPermissions ?? []
           }) ? (
-            <>
-              <a
-                aria-label={`Accounts ${viewer.pendingApprovalCount} pending`}
-                className="map-account-admin-link"
-                href="/admin/accounts"
-              >
-                <span>Accounts</span>
+            <a
+              aria-label={
+                viewer.pendingApprovalCount > 0
+                  ? `Administration ${viewer.pendingApprovalCount} pending`
+                  : "Administration"
+              }
+              className="map-account-administration-button"
+              href="/admin"
+            >
+              <span>Administration</span>
+              {viewer.pendingApprovalCount > 0 ? (
                 <span>{viewer.pendingApprovalCount} pending</span>
-              </a>
-              {viewer.isAdmin ? (
-                <>
-                  <a className="map-account-admin-link" href="/admin/history">
-                    History log
-                  </a>
-                  <a className="map-account-admin-link" href="/admin/deleted-markers">
-                    Deleted markers
-                  </a>
-                  <a className="map-account-admin-link" href="/admin/watermark-reveal">
-                    Reveal watermark
-                  </a>
-                </>
               ) : null}
-            </>
+            </a>
           ) : null}
           <button
             className="map-account-admin-button"
@@ -141,6 +132,7 @@ function AccountPermissions({
   servers: readonly AccountPermissionServer[];
   viewer: AccountViewer;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const access = {
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
@@ -151,33 +143,62 @@ function AccountPermissions({
 
   return (
     <fieldset className="map-account-permissions">
-      <legend>Permissions</legend>
-      <dl className="map-account-list map-account-permissions-list">
+      <legend>
+        <button
+          aria-expanded={isExpanded}
+          className="map-account-permissions-toggle"
+          onClick={() => setIsExpanded((current) => !current)}
+          type="button"
+        >
+          Permissions
+        </button>
+      </legend>
+      <dl
+        className={[
+          "map-account-list map-account-permissions-list",
+          !isExpanded ? "map-account-permissions-list--collapsed" : ""
+        ].join(" ").trim()}
+      >
         {permissionRows.map((row) => (
-          <PermissionRow allowed={row.allowed} key={row.label} label={row.label} value={row.value} />
+          <PermissionRow
+            allowed={row.allowed}
+            isGlobal={row.isGlobal}
+            key={row.label}
+            label={row.label}
+            value={row.value}
+          />
         ))}
       </dl>
     </fieldset>
   );
 }
 
-function getAccountPermissionRows(access: {
-  accessLevel: AccountViewer["permissions"];
-  approvalStatus: AccountViewer["approvalStatus"];
-  isAdmin: boolean;
-  mapPermissions: readonly MapPermission[];
-}, servers: readonly AccountPermissionServer[]): Array<{ allowed: boolean; label: string; value: string }> {
+function getAccountPermissionRows(
+  access: {
+    accessLevel: AccountViewer["permissions"];
+    approvalStatus: AccountViewer["approvalStatus"];
+    isAdmin: boolean;
+    mapPermissions: readonly MapPermission[];
+  },
+  servers: readonly AccountPermissionServer[]
+): Array<{ allowed: boolean; isGlobal: boolean; label: string; value: string }> {
   if (servers.length > 0) {
-    return servers.flatMap((server) => {
-      const value = getServerPermissionLabel(access, server.id);
+    const perServer = servers
+      .map((server) => ({ label: server.name, value: getServerPermissionLabel(access, server.id) }))
+      .filter((row) => row.value !== null);
 
-      return value === null ? [] : [{ allowed: true, label: server.name, value }];
-    });
+    const firstRow = perServer[0];
+
+    if (firstRow !== undefined && perServer.every((row) => row.value === firstRow.value)) {
+      return [{ allowed: true, isGlobal: true, label: "Global", value: firstRow.value! }];
+    }
+
+    return perServer.map((row) => ({ allowed: true, isGlobal: false, label: row.label, value: row.value! }));
   }
 
   const fallbackValue = getFallbackPermissionLabel(access);
 
-  return fallbackValue === null ? [] : [{ allowed: true, label: fallbackValue, value: "Allowed" }];
+  return fallbackValue === null ? [] : [{ allowed: true, isGlobal: true, label: "Global", value: fallbackValue }];
 }
 
 function getServerPermissionLabel(access: {
@@ -222,9 +243,19 @@ function getFallbackPermissionLabel(access: {
   return null;
 }
 
-function PermissionRow({ allowed, label, value }: { allowed: boolean; label: string; value: string }) {
+function PermissionRow({
+  allowed,
+  isGlobal = false,
+  label,
+  value
+}: {
+  allowed: boolean;
+  isGlobal?: boolean;
+  label: string;
+  value: string;
+}) {
   return (
-    <div>
+    <div className={isGlobal ? "map-account-permission--global" : undefined}>
       <dt>{label}</dt>
       <dd className={allowed ? "map-account-permission--allowed" : "map-account-permission--denied"}>
         {value}

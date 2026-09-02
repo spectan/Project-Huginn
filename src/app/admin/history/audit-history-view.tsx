@@ -1,3 +1,4 @@
+import { AdminHeader } from "../admin-header";
 import type { AuditHistoryEvent } from "@/lib/audit-history/audit-history";
 
 type AuditHistoryViewProps = {
@@ -8,13 +9,7 @@ type AuditHistoryViewProps = {
 export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) {
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>History</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/history" title="History" />
       {events.length === 0 ? (
         <section className="history-empty">No history events yet</section>
       ) : (
@@ -80,13 +75,7 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
 export function AuditHistoryAccessDenied({ message }: { message: string }) {
   return (
     <main className="history-page history-page--dark">
-      <header className="history-header">
-        <div>
-          <p>Admin</p>
-          <h1>History</h1>
-        </div>
-        <a href="/map">Map</a>
-      </header>
+      <AdminHeader currentRoute="/admin/history" title="History" />
       <section className="history-empty">{message}</section>
     </main>
   );

@@ -1926,6 +1926,32 @@ body {
   color: #fecaca;
 }
 
+.map-account-permission--global {
+  font-style: italic;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+  padding-bottom: 4px;
+}
+
+.map-account-permissions-toggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.map-account-permissions-toggle:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.map-account-permissions-list--collapsed {
+  display: none;
+}
+
 .map-account-admin-button {
   width: 100%;
   margin-top: 14px;
@@ -1954,6 +1980,27 @@ body {
   font-size: 14px;
   font-weight: 700;
   text-decoration: none;
+}
+
+.map-account-administration-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  margin-top: 10px;
+  border: 1px solid rgba(127, 29, 29, 0.5);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: #7f1d1d;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.map-account-administration-button:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
 }
 
 .map-auth-form {
@@ -2490,6 +2537,41 @@ body {
   border-color: rgba(248, 113, 113, 0.42);
   background: #7f1d1d;
   color: #fecaca;
+}
+
+.admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 38px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.admin-tab:hover,
+.admin-tab:focus-visible {
+  background: #1f2937;
+}
+
+.admin-tab--active {
+  border-color: rgba(96, 165, 250, 0.58);
+  background: #1e3a8a;
+  color: #bfdbfe;
 }
 
 .history-select {

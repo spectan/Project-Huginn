@@ -218,8 +218,9 @@ describe("MapPage", () => {
     const permissionsGroup = within(accountDialog).getByRole("group", { name: "Permissions" });
 
     expect(within(accountDialog).queryByText("Status")).toBeNull();
-    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Global")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Admin")).toBeTruthy();
+    expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
     expect(within(accountDialog).getByText("Project Huginn - v1.2.1")).toBeTruthy();
@@ -238,8 +239,9 @@ describe("MapPage", () => {
     const permissionsGroup = within(screen.getByRole("dialog", { name: "Account settings" }))
       .getByRole("group", { name: "Permissions" });
 
-    expect(within(permissionsGroup).getByText("Celebration")).toBeTruthy();
+    expect(within(permissionsGroup).getByText("Global")).toBeTruthy();
     expect(within(permissionsGroup).getByText("Read")).toBeTruthy();
+    expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read/Write")).toBeNull();
     expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
