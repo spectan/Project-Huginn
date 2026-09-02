@@ -59,6 +59,20 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
     }
   }
 
+  async function handlePaste(event: React.ClipboardEvent) {
+    const items = event.clipboardData.items;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file !== null) {
+          setFile(file);
+          event.preventDefault();
+          return;
+        }
+      }
+    }
+  }
+
   return (
     <main className="history-page history-page--dark">
       <header className="history-header">
@@ -89,13 +103,34 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
 
           <div style={{ marginBottom: 16 }}>
             <label htmlFor="image">Screenshot or frame</label>
-            <input
-              id="image"
-              type="file"
-              accept="image/png,image/jpeg"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              style={{ display: "block", marginTop: 4 }}
-            />
+            <div
+              onPaste={handlePaste}
+              tabIndex={0}
+              style={{
+                border: "2px dashed #666",
+                borderRadius: 8,
+                padding: 24,
+                marginTop: 4,
+                textAlign: "center",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              {file === null ? (
+                <p>Paste an image (Ctrl+V / Cmd+V) or use the file input below</p>
+              ) : (
+                <p>
+                  <strong>Ready:</strong> {file.name} ({Math.round(file.size / 1024)} KB)
+                </p>
+              )}
+              <input
+                id="image"
+                type="file"
+                accept="image/png,image/jpeg"
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                style={{ display: "block", marginTop: 12, width: "100%" }}
+              />
+            </div>
           </div>
 
           <button type="submit" disabled={loading || file === null}>
