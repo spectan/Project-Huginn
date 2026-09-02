@@ -110,8 +110,8 @@ function randomMarkerId(): string {
   return randomUUID().replaceAll("-", "").slice(0, 25);
 }
 
-function pick(values: readonly string[], random: SeededRandom): string {
-  return values[Math.floor(random() * values.length)] ?? values[0] ?? "";
+function pick<T>(values: readonly T[], random: SeededRandom): T {
+  return values[Math.floor(random() * values.length)] ?? values[0]!;
 }
 
 function hashSeed(value: string): string {
