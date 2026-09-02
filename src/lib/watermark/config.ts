@@ -50,6 +50,36 @@ export const COEFFS_PER_BLOCK = 8;
 const configuredAlpha = parseFloat(process.env.WATERMARK_ALPHA ?? "1.5");
 export const SS_ALPHA = Number.isFinite(configuredAlpha) ? configuredAlpha : 1.5;
 
+/**
+ * Candidate relative scales searched by the extractor. Zoomed-out screenshots
+ * are downscaled copies of the watermarked layer; upscaling them back toward
+ * the original resolution restores the 8×8 block grid and makes the watermark
+ * recoverable.
+ */
+export const EXTRACT_SCALE_FACTORS: number[] = [1, 2, 4, 8];
+
+/** Maximum pixel dimension allowed during alignment search. */
+export const MAX_ALIGNMENT_DIMENSION = 2048;
+
+/** Minimum sync confidence required before a watermark is considered found. */
+export const SYNC_CONFIDENCE_THRESHOLD = 0.8;
+
+/** Minimum overall bit-match confidence required for a positive detection. */
+export const CONFIDENCE_THRESHOLD = 0.75;
+
+/**
+ * Target number of blocks evaluated during the coarse alignment search.
+ * A smaller subset keeps scale/offset search fast; the final extraction always
+ * uses every block.
+ */
+export const ALIGNMENT_SAMPLE_BLOCKS = 4096;
+
+/**
+ * The best candidate must beat the second-best candidate by at least this
+ * margin to avoid false positives when multiple users look similar.
+ */
+export const CONFIDENCE_MARGIN = 0.15;
+
 /** Where watermarked image caches are stored. */
 export function getWatermarkCacheDir(): string {
   const base = process.env.MAP_STORAGE_PATH ?? process.cwd();

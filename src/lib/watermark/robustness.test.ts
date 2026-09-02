@@ -213,6 +213,76 @@ describe("watermark robustness on celebration terrain", () => {
     60000
   );
 
+  it(
+    "decodes after 50% uniform downscale (simulated zoomed-out screenshot)",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
+
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
+
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
+
+      const scaled = await sharp(watermarked)
+        .resize(1024, 1024, { kernel: sharp.kernel.lanczos3 })
+        .png()
+        .toBuffer();
+
+      const result = await tryExtractWatermark(scaled, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
+      console.log("50% downscale:", result);
+
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+    },
+    120000
+  );
+
+  it(
+    "decodes after 25% uniform downscale (simulated zoomed-out screenshot)",
+    async () => {
+      if (!existsSync(samplePath)) {
+        return;
+      }
+
+      const context: EmbedContext = {
+        mapId: "map-celebration",
+        userId: "user-abc",
+        layerId: "layer-terrain",
+      };
+
+      const watermarked = await embedWatermark(samplePath, context, {
+        cache: false,
+      });
+
+      const scaled = await sharp(watermarked)
+        .resize(512, 512, { kernel: sharp.kernel.lanczos3 })
+        .png()
+        .toBuffer();
+
+      const result = await tryExtractWatermark(scaled, {
+        mapId: context.mapId,
+        userIds: [context.userId, "user-other"],
+      });
+      console.log("25% downscale:", result);
+
+      expect(result.found).toBe(true);
+      expect(result.userId).toBe(context.userId);
+      expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+    },
+    120000
+  );
+
   it("is visually identical (PSNR > 45)", async () => {
     if (!existsSync(samplePath)) {
       return;
