@@ -62,7 +62,7 @@ describe("AccountOverlay", () => {
     expect(within(permissionsGroup).queryByText("Defiance")).toBeNull();
     expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(screen.getByText("Project Huginn - v1.2.0")).toBeTruthy();
+    expect(screen.getByText("Project Huginn - v1.2.1")).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Overlays" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Towers" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Deeds" })).toBeNull();
@@ -99,6 +99,9 @@ describe("AccountOverlay", () => {
     );
     expect(screen.getByRole("link", { name: "Deleted markers" }).getAttribute("href")).toBe(
       "/admin/deleted-markers"
+    );
+    expect(screen.getByRole("link", { name: "Reveal watermark" }).getAttribute("href")).toBe(
+      "/admin/watermark-reveal"
     );
     expect(screen.queryByText("Manage accounts")).toBeNull();
     expect(screen.queryByLabelText("Access for Mako")).toBeNull();

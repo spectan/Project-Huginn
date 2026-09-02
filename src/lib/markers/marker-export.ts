@@ -1,6 +1,6 @@
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import type { UserAccess } from "@/lib/domain/permissions";
-import { err, ok, type Result } from "@/lib/domain/result";
+import { ok, type Result } from "@/lib/domain/result";
 import { CANARY_MARKERS_PER_MAP, generateCanaryMarkers } from "@/lib/canaries/canary-service";
 import type { CanaryDependencies } from "@/lib/canaries/database";
 import {

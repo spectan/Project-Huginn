@@ -99,6 +99,9 @@ export function AccountOverlay({ isOpen, onOpenChange, servers = [], viewer }: A
                   <a className="map-account-admin-link" href="/admin/deleted-markers">
                     Deleted markers
                   </a>
+                  <a className="map-account-admin-link" href="/admin/watermark-reveal">
+                    Reveal watermark
+                  </a>
                 </>
               ) : null}
             </>

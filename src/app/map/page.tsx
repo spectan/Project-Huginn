@@ -10,6 +10,7 @@ import {
   listNoteCategories
 } from "@/lib/markers/database";
 import { listMarkers } from "@/lib/markers/marker-service";
+import type { WorkspaceMap, WorkspaceMapLayer } from "@/lib/markers/marker-types";
 import MapWorkspace from "./map-workspace";
 
 type MapPageProps = {
@@ -76,11 +77,27 @@ async function getWorkspaceData(
     favoriteServerId: mapSettings.favoriteServerId ?? favoriteServerId
   };
 
+  const watermarkedMap = applyWatermarkUrls(result.value.map);
+
   return {
     ...result.value,
+    map: watermarkedMap,
     noteCategories,
     servers: readableServers,
     settings
+  };
+}
+
+function applyWatermarkUrls(map: WorkspaceMap): WorkspaceMap {
+  const baseUrl = `/api/maps/${map.id}/image`;
+
+  return {
+    ...map,
+    imageSrc: baseUrl,
+    layers: map.layers.map((layer: WorkspaceMapLayer) => ({
+      ...layer,
+      imageSrc: `${baseUrl}?layer=${encodeURIComponent(layer.id)}`,
+    })),
   };
 }
 
