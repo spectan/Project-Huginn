@@ -36,12 +36,18 @@ export async function POST(request: Request) {
     userId: string | null;
     confidence: number;
     syncConfidence: number;
+    scale: number;
+    offsetX: number;
+    offsetY: number;
   } = {
     found: false,
     username: null,
     userId: null,
     confidence: 0,
     syncConfidence: 0,
+    scale: 1,
+    offsetX: 0,
+    offsetY: 0,
   };
 
   if (typeof userId === "string" && userId.length > 0) {
@@ -62,6 +68,9 @@ export async function POST(request: Request) {
         userId: result.userId,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
+        scale: result.scale,
+        offsetX: result.offsetX,
+        offsetY: result.offsetY,
       };
     }
   } else {
@@ -90,6 +99,9 @@ export async function POST(request: Request) {
         userId: result.userId,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
+        scale: result.scale,
+        offsetX: result.offsetX,
+        offsetY: result.offsetY,
       };
     }
   }

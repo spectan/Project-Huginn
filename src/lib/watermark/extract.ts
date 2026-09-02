@@ -88,14 +88,21 @@ function fillBlock(
   block: Float64Array,
   luma: Float64Array,
   width: number,
+  height: number,
   bx: number,
-  by: number
+  by: number,
+  offsetX = 0,
+  offsetY = 0
 ): void {
   for (let y = 0; y < BLOCK_SIZE; y++) {
-    const srcY = by * BLOCK_SIZE + y;
+    const srcY = by * BLOCK_SIZE + y + offsetY;
     for (let x = 0; x < BLOCK_SIZE; x++) {
-      const srcX = bx * BLOCK_SIZE + x;
-      block[y * BLOCK_SIZE + x] = luma[srcY * width + srcX]!;
+      const srcX = bx * BLOCK_SIZE + x + offsetX;
+      if (srcY < 0 || srcY >= height || srcX < 0 || srcX >= width) {
+        block[y * BLOCK_SIZE + x] = 128;
+      } else {
+        block[y * BLOCK_SIZE + x] = luma[srcY * width + srcX]!;
+      }
     }
   }
 }
@@ -134,25 +141,12 @@ function extractAtOffset(
   const correlations = new Float64Array(TOTAL_BITS);
   const counts = new Int32Array(TOTAL_BITS);
 
-  // Build a shifted luma view so each block can be read directly.
-  const shiftedLuma = new Float64Array(width * height);
-  if (offsetX === 0 && offsetY === 0) {
-    shiftedLuma.set(luma);
-  } else {
-    shiftedLuma.fill(128);
-    for (let y = 0; y < height - offsetY; y++) {
-      for (let x = 0; x < width - offsetX; x++) {
-        shiftedLuma[y * width + x] = luma[(y + offsetY) * width + (x + offsetX)]!;
-      }
-    }
-  }
-
   const blockBuffer = new Float64Array(64);
 
   for (let b = 0; b < blockCount; b += sampleStep) {
     const bx = b % blocksW;
     const by = Math.floor(b / blocksW);
-    fillBlock(blockBuffer, shiftedLuma, width, bx, by);
+    fillBlock(blockBuffer, luma, width, height, bx, by, offsetX, offsetY);
     const dct = forwardDCT2D(blockBuffer);
     const bitIndex = b % TOTAL_BITS;
 
