@@ -40,7 +40,8 @@ export type AuditHistoryAction =
   | "MARKER_UPDATED"
   | "MARKER_DELETED"
   | "MARKER_RESTORED"
-  | "MARKER_CLEANED_UP";
+  | "MARKER_CLEANED_UP"
+  | "MARKERS_EXPORTED";
 
 export type AuditHistoryTargetType =
   | "USER"
