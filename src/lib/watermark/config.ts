@@ -46,7 +46,8 @@ export const QIM_POSITIONS: Array<[number, number]> = [
  * introduce visible artifacts. The pixel-domain impact is approximately
  * QIM_STEP / BLOCK_SIZE per grayscale level for a single coefficient change.
  */
-export const QIM_STEP = 9.0;
+const configuredStep = parseFloat(process.env.WATERMARK_QIM_STEP ?? "3");
+export const QIM_STEP = Number.isFinite(configuredStep) ? configuredStep : 3.0;
 
 /** Maximum username length that fits in the fixed-size watermark payload. */
 export const MAX_USERNAME_BYTES = 32;
