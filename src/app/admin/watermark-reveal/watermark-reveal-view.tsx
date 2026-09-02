@@ -8,18 +8,33 @@ type MapOption = {
   name: string;
 };
 
+type UserOption = {
+  id: string;
+  username: string | null;
+};
+
 type RevealResult = {
   found: boolean;
   username: string | null;
   userId: string | null;
   confidence: number;
   syncConfidence: number;
+  scale: number;
+  offsetX: number;
+  offsetY: number;
 };
 
-export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
+export function WatermarkRevealView({
+  maps,
+  users,
+}: {
+  maps: MapOption[];
+  users: UserOption[];
+}) {
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
   const [mapId, setMapId] = useState<string>(maps[0]?.id ?? "");
+  const [userId, setUserId] = useState<string>("");
   const [result, setResult] = useState<RevealResult | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -35,6 +50,9 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
     const formData = new FormData();
     formData.append("image", file);
     formData.append("mapId", mapId);
+    if (userId.length > 0) {
+      formData.append("userId", userId);
+    }
 
     try {
       const response = await fetch("/api/admin/watermark-reveal", {
@@ -50,6 +68,9 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
           userId: null,
           confidence: 0,
           syncConfidence: 0,
+          scale: 1,
+          offsetX: 0,
+          offsetY: 0,
         });
         alert(error.error ?? "Failed to reveal watermark");
       } else {
@@ -102,12 +123,32 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
             <select
               id="mapId"
               value={mapId}
-              onChange={(e) => setMapId(e.target.value)}
+              onChange={(e) => {
+                setMapId(e.target.value);
+                setUserId("");
+              }}
               style={{ width: "100%", marginTop: 4 }}
             >
               {maps.map((map) => (
                 <option key={map.id} value={map.id}>
                   {map.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginBottom: 16 }}>
+            <label htmlFor="userId">User (optional)</label>
+            <select
+              id="userId"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              style={{ width: "100%", marginTop: 4 }}
+            >
+              <option value="">All users with map access</option>
+              {users.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.username ?? user.id}
                 </option>
               ))}
             </select>
@@ -161,18 +202,24 @@ export function WatermarkRevealView({ maps }: { maps: MapOption[] }) {
                 <p>
                   <strong>User ID:</strong> {result.userId}
                 </p>
-                <p>
-                  <strong>Confidence:</strong>{" "}
-                  {Math.round(result.confidence * 100)}%
-                </p>
-                <p>
-                  <strong>Sync confidence:</strong>{" "}
-                  {Math.round(result.syncConfidence * 100)}%
-                </p>
               </div>
             ) : (
               <p>No watermark found</p>
             )}
+            <p>
+              <strong>Confidence:</strong>{" "}
+              {Math.round(result.confidence * 100)}%
+            </p>
+            <p>
+              <strong>Sync confidence:</strong>{" "}
+              {Math.round(result.syncConfidence * 100)}%
+            </p>
+            <p>
+              <strong>Scale:</strong> {result.scale}
+            </p>
+            <p>
+              <strong>Offset:</strong> ({result.offsetX}, {result.offsetY})
+            </p>
           </div>
         )}
       </section>

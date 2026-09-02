@@ -65,7 +65,7 @@ export const MAX_ALIGNMENT_DIMENSION = 2048;
 export const SYNC_CONFIDENCE_THRESHOLD = 0.8;
 
 /** Minimum overall bit-match confidence required for a positive detection. */
-export const CONFIDENCE_THRESHOLD = 0.75;
+export const CONFIDENCE_THRESHOLD = 0.6;
 
 /**
  * Target number of blocks evaluated during the coarse alignment search.

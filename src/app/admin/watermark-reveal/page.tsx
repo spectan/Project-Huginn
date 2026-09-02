@@ -16,7 +16,12 @@ export default async function WatermarkRevealPage() {
     select: { id: true, name: true },
   });
 
-  return <WatermarkRevealView maps={maps} />;
+  const users = await prisma.user.findMany({
+    orderBy: { username: "asc" },
+    select: { id: true, username: true },
+  });
+
+  return <WatermarkRevealView maps={maps} users={users} />;
 }
 
 function WatermarkRevealAccessDenied() {
