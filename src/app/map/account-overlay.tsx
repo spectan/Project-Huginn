@@ -142,19 +142,15 @@ function AccountPermissions({
   const permissionRows = getAccountPermissionRows(access, servers);
 
   return (
-    <fieldset className="map-account-permissions">
-      <legend
-        className="map-account-permissions-legend"
+    <div className="map-account-permissions" role="group" aria-label="Permissions">
+      <button
+        aria-expanded={isExpanded}
+        className="map-account-permissions-toggle"
         onClick={() => setIsExpanded((current) => !current)}
+        type="button"
       >
-        <button
-          aria-expanded={isExpanded}
-          className="map-account-permissions-toggle"
-          type="button"
-        >
-          Permissions
-        </button>
-      </legend>
+        Permissions
+      </button>
       <dl
         className={[
           "map-account-list map-account-permissions-list",
@@ -170,7 +166,7 @@ function AccountPermissions({
           />
         ))}
       </dl>
-    </fieldset>
+    </div>
   );
 }
 

@@ -1885,14 +1885,7 @@ body {
   margin: 0;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 8px;
-  padding: 10px 8px 8px;
-}
-
-.map-account-permissions legend {
-  padding: 2px 4px;
-  color: #cbd5e1;
-  font-size: 11px;
-  font-weight: 800;
+  padding: 8px;
 }
 
 .map-account-permissions-list {
@@ -1927,30 +1920,33 @@ body {
 }
 
 .map-account-permissions-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   width: 100%;
-  padding: 0;
+  min-height: 28px;
+  margin: -8px -8px 0;
+  padding: 4px 8px;
   border: 0;
-  background: transparent;
-  color: inherit;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 8px 8px 0 0;
+  background: rgba(148, 163, 184, 0.1);
+  color: #cbd5e1;
   font: inherit;
-  font-size: inherit;
-  font-weight: inherit;
+  font-size: 11px;
+  font-weight: 800;
   text-align: left;
   cursor: pointer;
 }
 
-.map-account-permissions-legend {
-  cursor: pointer;
-  width: 100%;
-}
-
-.map-account-permissions-legend:hover .map-account-permissions-toggle {
+.map-account-permissions-toggle:hover {
+  background: rgba(148, 163, 184, 0.16);
   color: #ffffff;
 }
 
 .map-account-permissions-toggle:focus-visible {
   outline: 3px solid #2563eb;
-  outline-offset: 2px;
+  outline-offset: -3px;
 }
 
 .map-account-permissions-list--collapsed {
