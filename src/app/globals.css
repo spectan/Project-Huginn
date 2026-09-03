@@ -1366,7 +1366,8 @@ body {
 
 .map-route-planner-control,
 .map-legend-control,
-.map-event-feed-control {
+.map-event-feed-control,
+.map-share-control {
   position: relative;
   display: flex;
   align-items: center;
@@ -1396,7 +1397,8 @@ body {
 }
 
 .map-legend-button,
-.map-event-feed-button {
+.map-event-feed-button,
+.map-share-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1421,6 +1423,12 @@ body {
 .map-event-feed-button.is-active {
   border-color: rgba(250, 204, 21, 0.88);
   background: rgba(202, 138, 4, 0.3);
+  color: #ffffff;
+}
+
+.map-share-button.is-active {
+  border-color: rgba(96, 165, 250, 0.88);
+  background: rgba(37, 99, 235, 0.32);
   color: #ffffff;
 }
 
@@ -1472,6 +1480,34 @@ body {
 
 .map-legend-button-icon::after {
   width: 12px;
+}
+
+.map-share-button-icon {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 12px;
+  transform: rotate(-45deg);
+}
+
+.map-share-button-icon::before,
+.map-share-button-icon::after {
+  position: absolute;
+  top: 2px;
+  box-sizing: border-box;
+  width: 10px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  content: "";
+}
+
+.map-share-button-icon::before {
+  left: 0;
+}
+
+.map-share-button-icon::after {
+  right: 0;
 }
 
 .map-event-feed-button-icon {
@@ -1623,6 +1659,81 @@ body {
   height: 4px;
   border-radius: 999px;
   background: var(--map-legend-color, #facc15);
+}
+
+.map-share-panel {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  width: 260px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e5e7eb;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.42);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+}
+
+.map-share-panel strong {
+  font-size: 13px;
+}
+
+.map-share-expiry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 64px;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-share-expiry input,
+.map-share-url {
+  min-width: 0;
+  border: 1px solid rgba(148, 163, 184, 0.52);
+  border-radius: 6px;
+  padding: 4px 5px;
+  background: rgba(15, 23, 42, 0.68);
+  color: #ffffff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.map-share-generate,
+.map-share-copy {
+  border: 1px solid rgba(96, 165, 250, 0.62);
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: rgba(37, 99, 235, 0.32);
+  color: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.map-share-generate:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.map-share-error {
+  margin: 0;
+  color: #fca5a5;
+}
+
+.map-share-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.map-share-expires {
+  grid-column: 1 / -1;
+  color: #cbd5e1;
 }
 
 .map-event-feed-panel {
@@ -2956,6 +3067,15 @@ body {
     left: 62px;
     bottom: max(22px, env(safe-area-inset-bottom));
     width: min(190px, calc(100vw - 74px));
+    max-height: min(60vh, calc(100vh - 96px));
+    overflow-y: auto;
+  }
+
+  .map-share-panel {
+    position: fixed;
+    left: 62px;
+    bottom: max(22px, env(safe-area-inset-bottom));
+    width: min(260px, calc(100vw - 74px));
     max-height: min(60vh, calc(100vh - 96px));
     overflow-y: auto;
   }

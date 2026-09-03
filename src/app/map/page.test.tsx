@@ -277,7 +277,8 @@ describe("MapPage", () => {
     expect(Array.from(controls.children).map((child) => child.className)).toEqual([
       "map-legend-control",
       "map-route-planner-control",
-      "map-event-feed-control"
+      "map-event-feed-control",
+      "map-share-control"
     ]);
 
     expect(screen.queryByRole("dialog", { name: "Celebration event feed" })).toBeNull();
@@ -5292,7 +5293,8 @@ describe("MapPage", () => {
     expect(Array.from(bottomLeftControls?.children ?? []).map((child) => child.className)).toEqual([
       "map-legend-control",
       "map-route-planner-control",
-      "map-event-feed-control"
+      "map-event-feed-control",
+      "map-share-control"
     ]);
   });
 

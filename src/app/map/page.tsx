@@ -39,7 +39,7 @@ export default async function MapPage({ searchParams }: MapPageProps) {
   );
 }
 
-async function getWorkspaceData(
+export async function getWorkspaceData(
   viewer: Awaited<ReturnType<typeof getCurrentViewer>>,
   requestedMapSlug?: string
 ) {

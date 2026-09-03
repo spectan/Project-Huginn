@@ -105,6 +105,7 @@ model User {
   deletedPaths       PathMarker[]        @relation("PathDeletedBy")
   auditEvents        AuditEvent[]        @relation("AuditActor")
   sessions           Session[]
+  shareLinks         ShareLink[]
   mapSettings        UserMapSettings[]
   mapPermissions     UserMapPermission[]
   canaryMarkers      CanaryMarker[]
@@ -129,6 +130,25 @@ model Session {
   @@index([userId])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+model ShareLink {
+  id              String   @id @default(cuid())
+  tokenHash       String   @unique
+  mapId           String
+  map             Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
+  createdByUserId String
+  createdBy       User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  layerId         String?
+  settings        Json
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([mapId])
+  @@index([createdByUserId])
+  @@index([expiresAt])
+  @@map("share_links")
 }
 
 model Map {
@@ -156,6 +176,7 @@ model Map {
   userPermissions UserMapPermission[]
   canaryMarkers   CanaryMarker[]
   alerts          Alert[]
+  shareLinks      ShareLink[]
 
   @@index([isActive])
   @@map("maps")

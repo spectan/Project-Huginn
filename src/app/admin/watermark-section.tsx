@@ -113,7 +113,7 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
         </div>
         <p>
           <button className="admin-btn" type="submit" disabled={loading || file === null}>
-            {loading ? "Enhancing..." : "Enhance"}
+            {loading ? "Revealing..." : "Reveal"}
           </button>
         </p>
       </form>

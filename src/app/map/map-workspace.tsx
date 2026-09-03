@@ -89,6 +89,9 @@ const SECTOR_GRID_LEFT_OFFSET_PX = -16;
 const SECTOR_GRID_TOP_OFFSET_PX = 18;
 const EVENT_FEED_DISPLAY_LIMIT = 30;
 const MAP_TIP_INTERVAL_MS = 15000;
+const SHARE_LINK_MIN_HOURS = 1;
+const SHARE_LINK_MAX_HOURS = 24;
+const SHARE_LINK_DEFAULT_HOURS = 24;
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
 const TILE_SIZE_METERS = 4;
@@ -315,6 +318,7 @@ type MapWorkspaceProps = {
   map: WorkspaceMap | null;
   selectedLayerId?: string;
   servers?: readonly WorkspaceServer[];
+  shareToken?: string;
   viewer: AccountViewer | null;
 };
 
@@ -326,6 +330,7 @@ export default function MapWorkspace({
   map,
   selectedLayerId,
   servers = [],
+  shareToken,
   viewer
 }: MapWorkspaceProps) {
   const viewport = useViewportSize();
@@ -619,6 +624,7 @@ export default function MapWorkspace({
     isAdmin: viewer.isAdmin,
     mapPermissions: viewer.mapPermissions
   }, map.id);
+  const isShareMode = shareToken !== undefined;
   const canWriteMapMarkers = map !== null && viewer !== null && canWriteMarkers({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
@@ -1796,7 +1802,7 @@ export default function MapWorkspace({
   }, [visualMap]);
 
   useEffect(() => {
-    if (!canViewMap || map === null) {
+    if (!canViewMap || map === null || isShareMode) {
       return;
     }
 
@@ -1812,10 +1818,10 @@ export default function MapWorkspace({
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [canViewMap, map, userMapSettings]);
+  }, [canViewMap, isShareMode, map, userMapSettings]);
 
   useEffect(() => {
-    if (!canViewMap || map === null || typeof window === "undefined") {
+    if (!canViewMap || map === null || isShareMode || typeof window === "undefined") {
       return;
     }
 
@@ -1827,7 +1833,7 @@ export default function MapWorkspace({
       url.searchParams.set("server", expectedSlug);
       window.history.replaceState(null, "", url);
     }
-  }, [canViewMap, map]);
+  }, [canViewMap, isShareMode, map]);
 
   const stageStyle = useMemo(
     () => ({
@@ -2030,7 +2036,7 @@ export default function MapWorkspace({
           onSearchChange={setSearchQuery}
           value={searchQuery}
         >
-          {map !== null ? (
+          {!isShareMode && map !== null ? (
             <MapSelectionControls
               layers={mapLayers}
               onLayerChange={(layerId) => {
@@ -2137,6 +2143,7 @@ export default function MapWorkspace({
           })}
         />
       ) : null}
+      {isShareMode ? null : (
       <div className="map-top-controls">
         <AccountOverlay
           isOpen={topPanel === "account"}
@@ -2176,6 +2183,7 @@ export default function MapWorkspace({
           />
         ) : null}
       </div>
+      )}
       {canViewMap ? (
         <div className="map-bottom-left-controls" data-testid="map-bottom-left-controls">
           <MapLegendControl
@@ -2190,7 +2198,7 @@ export default function MapWorkspace({
             routeDistance={routePlannerPoints === null ? null : getRouteDistanceTiles(routePlannerPoints)}
             speedKmh={routePlannerSpeedKmh}
           />
-          {map !== null ? (
+          {!isShareMode && map !== null ? (
             <MapEventFeedControl
               feed={eventFeed}
               isOpen={isEventFeedOpen}
@@ -2199,6 +2207,12 @@ export default function MapWorkspace({
               onSizeChange={setEventFeedPanelSize}
               serverName={map.name}
               size={eventFeedPanelSize}
+            />
+          ) : null}
+          {!isShareMode && map !== null ? (
+            <ShareControl
+              layerId={selectedMapLayer?.id ?? ""}
+              mapId={map.id}
             />
           ) : null}
         </div>
@@ -2632,6 +2646,146 @@ function MapLegendControl({
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+type ShareControlLink = {
+  absoluteUrl: string;
+  expiresAt: string;
+};
+
+function ShareControl({
+  layerId,
+  mapId
+}: {
+  layerId: string;
+  mapId: string;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [expiresInHours, setExpiresInHours] = useState(SHARE_LINK_DEFAULT_HOURS);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState<ShareControlLink | null>(null);
+  const [isCopied, setIsCopied] = useState(false);
+  const shareUrlInputRef = useRef<HTMLInputElement | null>(null);
+
+  async function generateShareLink() {
+    setIsGenerating(true);
+    setShareError(null);
+    setShareLink(null);
+    setIsCopied(false);
+
+    try {
+      const response = await fetch(`/api/maps/${mapId}/share`, {
+        body: JSON.stringify(
+          layerId.length > 0
+            ? { expiresInHours, layerId }
+            : { expiresInHours }
+        ),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
+      const body: unknown = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setShareError(getShareErrorMessage(body));
+        return;
+      }
+
+      const created = parseShareLinkResponse(body);
+
+      if (created === null) {
+        setShareError("Share link could not be created");
+        return;
+      }
+
+      setShareLink({
+        absoluteUrl: `${window.location.origin}${created.url}`,
+        expiresAt: created.expiresAt
+      });
+    } catch {
+      setShareError("Share link could not be created");
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function copyShareLink() {
+    if (shareLink === null) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(shareLink.absoluteUrl);
+      setIsCopied(true);
+    } catch {
+      shareUrlInputRef.current?.select();
+    }
+  }
+
+  return (
+    <div className="map-share-control">
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label="Share map"
+        className={isOpen ? "map-share-button is-active" : "map-share-button"}
+        onClick={() => setIsOpen((current) => !current)}
+        title="Share map"
+        type="button"
+      >
+        <span aria-hidden="true" className="map-share-button-icon" />
+      </button>
+      {isOpen ? (
+        <section aria-label="Share read-only link" className="map-share-panel" role="dialog">
+          <strong>Share read-only link</strong>
+          <label className="map-share-expiry">
+            <span>Expires after (hours)</span>
+            <input
+              aria-label="Expires after in hours"
+              max={SHARE_LINK_MAX_HOURS}
+              min={SHARE_LINK_MIN_HOURS}
+              onChange={(event) => setExpiresInHours(clampShareLinkHours(Number(event.target.value)))}
+              step={1}
+              type="number"
+              value={expiresInHours}
+            />
+          </label>
+          <button
+            className="map-share-generate"
+            disabled={isGenerating}
+            onClick={() => void generateShareLink()}
+            type="button"
+          >
+            {isGenerating ? "Generating…" : "Generate link"}
+          </button>
+          {shareError !== null ? (
+            <p className="map-share-error" role="alert">{shareError}</p>
+          ) : null}
+          {shareLink !== null ? (
+            <div className="map-share-result">
+              <input
+                aria-label="Share link URL"
+                className="map-share-url"
+                readOnly
+                ref={shareUrlInputRef}
+                value={shareLink.absoluteUrl}
+              />
+              <button
+                className="map-share-copy"
+                onClick={() => void copyShareLink()}
+                type="button"
+              >
+                {isCopied ? "Copied" : "Copy"}
+              </button>
+              <span className="map-share-expires">
+                Expires {new Date(shareLink.expiresAt).toLocaleString()}
+              </span>
+            </div>
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -4295,6 +4449,40 @@ async function saveUserMapSettings(mapId: string, settings: UserMapSettings): Pr
   } catch {
     // Preference saves are best-effort; the next successful change will send the full settings payload.
   }
+}
+
+function clampShareLinkHours(value: number): number {
+  if (!Number.isFinite(value)) {
+    return SHARE_LINK_DEFAULT_HOURS;
+  }
+
+  return Math.min(SHARE_LINK_MAX_HOURS, Math.max(SHARE_LINK_MIN_HOURS, Math.round(value)));
+}
+
+function parseShareLinkResponse(body: unknown): { expiresAt: string; url: string } | null {
+  if (typeof body !== "object" || body === null) {
+    return null;
+  }
+
+  const { expiresAt, url } = body as Record<string, unknown>;
+
+  if (typeof expiresAt !== "string" || typeof url !== "string") {
+    return null;
+  }
+
+  return { expiresAt, url };
+}
+
+function getShareErrorMessage(body: unknown): string {
+  if (typeof body === "object" && body !== null) {
+    const { error } = body as Record<string, unknown>;
+
+    if (typeof error === "string" && error.length > 0) {
+      return error;
+    }
+  }
+
+  return "Share link could not be created";
 }
 
 type MarkerPayloadResult =

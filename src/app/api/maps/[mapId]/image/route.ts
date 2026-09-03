@@ -3,6 +3,8 @@ import { join } from "path";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
+import { createShareDependencies } from "@/lib/share/database";
+import { resolveShareLink, SHARE_LINK_INVALID_MESSAGE } from "@/lib/share/share-service";
 import { embedWatermark } from "@/lib/watermark/embed";
 
 export async function GET(
@@ -10,28 +12,51 @@ export async function GET(
   { params }: { params: Promise<{ mapId: string }> }
 ) {
   const viewer = await getCurrentViewer();
-  if (viewer === null) {
-    return NextResponse.json({ error: "Authentication is required" }, { status: 401 });
-  }
-
   const { mapId } = await params;
-  if (!canReadMap(viewer, mapId)) {
-    return NextResponse.json({ error: "Access denied" }, { status: 403 });
-  }
-
   const { searchParams } = new URL(request.url);
   const layerId = searchParams.get("layer") ?? undefined;
 
-  const user = await prisma.user.findUnique({
-    where: { id: viewer.id },
-    select: { watermarkNumber: true },
-  });
+  let watermarkUserId: string;
+  let watermarkNumber: number;
 
-  if (user === null || user.watermarkNumber === null) {
-    return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
+  if (viewer !== null) {
+    if (!canReadMap(viewer, mapId)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: viewer.id },
+      select: { watermarkNumber: true },
+    });
+
+    if (user === null || user.watermarkNumber === null) {
+      return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
+    }
+
+    watermarkUserId = viewer.id;
+    watermarkNumber = user.watermarkNumber;
+  } else {
+    const shareToken = searchParams.get("share");
+
+    if (shareToken === null || shareToken.length === 0) {
+      return NextResponse.json({ error: "Authentication is required" }, { status: 401 });
+    }
+
+    const shareResult = await resolveShareLink(shareToken, createShareDependencies());
+
+    if (!shareResult.ok || shareResult.value.link.mapId !== mapId) {
+      return NextResponse.json({ error: SHARE_LINK_INVALID_MESSAGE }, { status: 401 });
+    }
+
+    const creator = shareResult.value.link.createdBy;
+
+    if (creator.watermarkNumber === null) {
+      return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
+    }
+
+    watermarkUserId = creator.id;
+    watermarkNumber = creator.watermarkNumber;
   }
-
-  const watermarkNumber = user.watermarkNumber;
 
   let imagePath: string | null = null;
   let resolvedLayerId = "";
@@ -64,7 +89,7 @@ export async function GET(
 
   const watermarked = await embedWatermark(
     rawFilePath,
-    { mapId, userId: viewer.id, layerId: resolvedLayerId, watermarkNumber },
+    { mapId, userId: watermarkUserId, layerId: resolvedLayerId, watermarkNumber },
     { cache: true }
   );
 
