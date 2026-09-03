@@ -18,6 +18,54 @@ export type CanaryRecord = {
   userId: string;
 };
 
+export type CanaryDependencies = {
+  listCanaryMarkers(input: { mapId: string; userId: string }): Promise<CanaryRecord[]>;
+  createCanaryMarkers(input: {
+    mapId: string;
+    markers: Array<{ payload: WorkspaceMarker; slot: number }>;
+    userId: string;
+  }): Promise<CanaryRecord[]>;
+};
+
+export async function getOrCreateCanaries(
+  input: { mapId: string; userId: string },
+  bounds: Bounds,
+  dependencies: CanaryDependencies
+): Promise<WorkspaceMarker[]> {
+  const existing = await dependencies.listCanaryMarkers(input);
+
+  if (existing.length >= CANARY_MARKERS_PER_MAP) {
+    return existing.map((record) => record.payload).filter(isWorkspaceMarker);
+  }
+
+  try {
+    const generated = generateCanaryMarkers(input, bounds);
+    const created = await dependencies.createCanaryMarkers({
+      mapId: input.mapId,
+      markers: generated,
+      userId: input.userId
+    });
+
+    return created.map((record) => record.payload).filter(isWorkspaceMarker);
+  } catch {
+    // A concurrent request may have created the canaries first; fall back to listing.
+    const raced = await dependencies.listCanaryMarkers(input);
+
+    return raced.map((record) => record.payload).filter(isWorkspaceMarker);
+  }
+}
+
+function isWorkspaceMarker(payload: unknown): payload is WorkspaceMarker {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "id" in payload &&
+    "type" in payload &&
+    "x" in payload &&
+    "y" in payload
+  );
+}
+
 export function generateCanaryMarkers(
   input: { mapId: string; userId: string },
   bounds: Bounds

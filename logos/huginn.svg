@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
-  <g fill="none" stroke="#0E0F12" stroke-width="2.6" stroke-linecap="square" stroke-linejoin="miter">
-    <line x1="7" y1="4" x2="7" y2="28"></line>
-    <line x1="25" y1="4" x2="25" y2="28"></line>
-    <polyline points="7,16 12,13 16,17 20,13 25,16"></polyline>
-  </g>
-  <rect x="14.5" y="14.5" width="3" height="3" fill="#C7402B"></rect>
-</svg>

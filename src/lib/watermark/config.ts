@@ -27,9 +27,6 @@ export const BLOCK_SIZE = 16;
  */
 export const CHROMA_DELTA = 2;
 
-/** Backwards-compatible alias (was luma DITHER_DELTA in v5/v6). */
-export const DITHER_DELTA = CHROMA_DELTA;
-
 /**
  * Candidate relative scales searched by the extractor. A screenshot taken
  * zoomed out is a downscaled copy of the watermarked layer; upscaling it back
@@ -54,7 +51,6 @@ export const CONFIDENCE_MARGIN = 0.05;
 
 // Backwards-compatible aliases used by existing tests and callers.
 export const SOFT_CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD;
-export const SYNC_CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD;
 export const SYNC_SOFT_CONFIDENCE_THRESHOLD = CONFIDENCE_THRESHOLD;
 
 /** Where watermarked image caches are stored. */

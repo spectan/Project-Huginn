@@ -3,11 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: huginn-app:latest
     depends_on:
       db:
         condition: service_healthy
     environment:
-      AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:?INITIAL_ADMIN_PASSWORD is required}
       INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
@@ -16,7 +16,6 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       WATERMARK_SECRET: ${WATERMARK_SECRET:?WATERMARK_SECRET is required}
       WURMMAPS_EVENT_FEED_TIMEOUT_MS: ${WURMMAPS_EVENT_FEED_TIMEOUT_MS:-3000}
-      WURMMAPS_STAT_DELEGATE_BASE_URL: ${WURMMAPS_STAT_DELEGATE_BASE_URL:-https://wurmmaps.xyz/APIs/stat-delegate.php}
       ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
     ports:
       - "127.0.0.1:3014:3000"
@@ -43,7 +42,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
-    image: mapsamuelzone-app:latest
+    image: huginn-app:latest
     restart: unless-stopped
 
   db:

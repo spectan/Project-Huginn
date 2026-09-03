@@ -9,7 +9,6 @@ import type { MarkerType } from "@/lib/markers/marker-types";
 
 const DEFAULT_DELETED_MARKER_LIMIT = 100;
 const MAX_DELETED_MARKER_LIMIT = 100;
-const CLEANUP_BATCH_LIMIT = 100;
 
 type Actor = UserAccess & {
   id: string;
@@ -17,7 +16,6 @@ type Actor = UserAccess & {
 
 type DeletedMarkerAuditAction =
   | "FAILED_AUTHORIZATION"
-  | "MARKER_CLEANED_UP"
   | "MARKER_RESTORED";
 
 type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "SYSTEM";
@@ -37,16 +35,6 @@ type DeletedMarkerReference = {
   deleteExpiresAt: Date;
   id: string;
   mapId: string;
-};
-
-type ExpiredDeletedMarkerReference = {
-  deleteExpiresAt: Date;
-  id: string;
-  mapId: string;
-};
-
-type ExpiredDeletedPathReference = ExpiredDeletedMarkerReference & {
-  pathType: PathMarkerType;
 };
 
 type DeletedMarkerRecordBase = {
@@ -117,19 +105,6 @@ export type DeletedMarkerDependencies = {
   findDeletedPath(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedRift(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedTower(id: string): Promise<DeletedMarkerReference | null>;
-  listExpiredDeletedMarkers(input: {
-    limit: number;
-    now: Date;
-  }): Promise<{
-    camps: ExpiredDeletedMarkerReference[];
-    deeds: ExpiredDeletedMarkerReference[];
-    locateSouls: ExpiredDeletedMarkerReference[];
-    minedoors: ExpiredDeletedMarkerReference[];
-    notes: ExpiredDeletedMarkerReference[];
-    paths: ExpiredDeletedPathReference[];
-    rifts: ExpiredDeletedMarkerReference[];
-    towers: ExpiredDeletedMarkerReference[];
-  }>;
   listRestorableDeletedMarkers(input: {
     limit: number;
     now: Date;
@@ -144,14 +119,6 @@ export type DeletedMarkerDependencies = {
     towers: DeletedTowerRecord[];
   }>;
   now(): Date;
-  permanentlyDeleteCamps(ids: string[]): Promise<number>;
-  permanentlyDeleteDeeds(ids: string[]): Promise<number>;
-  permanentlyDeleteLocateSouls(ids: string[]): Promise<number>;
-  permanentlyDeleteMinedoors(ids: string[]): Promise<number>;
-  permanentlyDeleteNotes(ids: string[]): Promise<number>;
-  permanentlyDeletePaths(ids: string[]): Promise<number>;
-  permanentlyDeleteRifts(ids: string[]): Promise<number>;
-  permanentlyDeleteTowers(ids: string[]): Promise<number>;
   recordAudit(input: DeletedMarkerAuditInput): Promise<void>;
   restoreCamp(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
   restoreDeed(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
@@ -244,89 +211,6 @@ export async function restoreDeletedMarker(
     markerId: restored.id,
     markerType: input.markerType
   });
-}
-
-export async function cleanupExpiredDeletedMarkers(
-  dependencies: DeletedMarkerDependencies
-): Promise<{
-  deletedCounts: Record<MarkerType, number>;
-}> {
-  const now = dependencies.now();
-  const expired = await dependencies.listExpiredDeletedMarkers({
-    limit: CLEANUP_BATCH_LIMIT,
-    now
-  });
-  const towerCount = await deleteAndAuditExpiredMarkers(
-    "tower",
-    expired.towers,
-    now,
-    dependencies.permanentlyDeleteTowers,
-    dependencies
-  );
-  const deedCount = await deleteAndAuditExpiredMarkers(
-    "deed",
-    expired.deeds,
-    now,
-    dependencies.permanentlyDeleteDeeds,
-    dependencies
-  );
-  const noteCount = await deleteAndAuditExpiredMarkers(
-    "note",
-    expired.notes,
-    now,
-    dependencies.permanentlyDeleteNotes,
-    dependencies
-  );
-  const riftCount = await deleteAndAuditExpiredMarkers(
-    "rift",
-    expired.rifts,
-    now,
-    dependencies.permanentlyDeleteRifts,
-    dependencies
-  );
-  const campCount = await deleteAndAuditExpiredMarkers(
-    "camp",
-    expired.camps,
-    now,
-    dependencies.permanentlyDeleteCamps,
-    dependencies
-  );
-  const minedoorCount = await deleteAndAuditExpiredMarkers(
-    "minedoor",
-    expired.minedoors,
-    now,
-    dependencies.permanentlyDeleteMinedoors,
-    dependencies
-  );
-  const locateSoulCount = await deleteAndAuditExpiredMarkers(
-    "locateSoul",
-    expired.locateSouls,
-    now,
-    dependencies.permanentlyDeleteLocateSouls,
-    dependencies
-  );
-  const pathCounts = await deleteAndAuditExpiredPathMarkers(
-    expired.paths,
-    now,
-    dependencies
-  );
-
-  return {
-    deletedCounts: {
-      annotation: 0,
-      bridge: pathCounts.bridge,
-      camp: campCount,
-      canal: pathCounts.canal,
-      deed: deedCount,
-      highway: pathCounts.highway,
-      locateSoul: locateSoulCount,
-      minedoor: minedoorCount,
-      note: noteCount,
-      rift: riftCount,
-      tower: towerCount,
-      tunnel: pathCounts.tunnel
-    }
-  };
 }
 
 function getLimit(limit: number | undefined): number {
@@ -458,67 +342,6 @@ async function restoreMarker(
   }
 
   return dependencies.restoreNote(markerId, input);
-}
-
-async function deleteAndAuditExpiredMarkers(
-  markerType: MarkerType,
-  markers: ExpiredDeletedMarkerReference[],
-  now: Date,
-  deleteMarkers: (ids: string[]) => Promise<number>,
-  dependencies: DeletedMarkerDependencies
-): Promise<number> {
-  if (markers.length === 0) {
-    return 0;
-  }
-
-  const deletedCount = await deleteMarkers(markers.map((marker) => marker.id));
-
-  for (const marker of markers.slice(0, deletedCount)) {
-    await recordAudit(dependencies, {
-      action: "MARKER_CLEANED_UP",
-      actorUserId: null,
-      mapId: marker.mapId,
-      metadata: {
-        cleanedAt: now.toISOString(),
-        markerType
-      },
-      targetId: marker.id,
-      targetType: getAuditTargetType(markerType)
-    });
-  }
-
-  return deletedCount;
-}
-
-async function deleteAndAuditExpiredPathMarkers(
-  markers: ExpiredDeletedPathReference[],
-  now: Date,
-  dependencies: DeletedMarkerDependencies
-): Promise<Record<PathMarkerType, number>> {
-  const counts = { bridge: 0, canal: 0, highway: 0, tunnel: 0 };
-
-  if (markers.length === 0) {
-    return counts;
-  }
-
-  const deletedCount = await dependencies.permanentlyDeletePaths(markers.map((marker) => marker.id));
-
-  for (const marker of markers.slice(0, deletedCount)) {
-    counts[marker.pathType] += 1;
-    await recordAudit(dependencies, {
-      action: "MARKER_CLEANED_UP",
-      actorUserId: null,
-      mapId: marker.mapId,
-      metadata: {
-        cleanedAt: now.toISOString(),
-        markerType: marker.pathType
-      },
-      targetId: marker.id,
-      targetType: "PATH"
-    });
-  }
-
-  return counts;
 }
 
 async function auditAuthorizationFailure(

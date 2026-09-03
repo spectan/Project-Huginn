@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { CANARY_MARKERS_PER_MAP } from "@/lib/canaries/canary-service";
 import {
   createMarker,
   deleteMarker,
@@ -179,6 +180,13 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     x: number;
     y: number;
   }>();
+  const canaries = new Map<string, {
+    id: string;
+    mapId: string;
+    payload: unknown;
+    slot: number;
+    userId: string;
+  }>();
   let towerCount = 0;
   let noteCount = 0;
   let noteCategoryCount = 0;
@@ -188,6 +196,7 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
   let minedoorCount = 0;
   let locateSoulCount = 0;
   let pathCount = 0;
+  let canaryCount = 0;
   const auditEvents: unknown[] = [];
 
   return {
@@ -209,6 +218,21 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
       const camp = withModifierUsers({ ...data, id: `camp-${campCount}` });
       camps.set(camp.id, camp);
       return camp;
+    },
+    createCanaryMarkers: async ({ mapId, markers, userId }) => {
+      const created = markers.map((marker) => {
+        canaryCount += 1;
+        const record = {
+          id: `canary-${canaryCount}`,
+          mapId,
+          payload: marker.payload,
+          slot: marker.slot,
+          userId
+        };
+        canaries.set(record.id, record);
+        return record;
+      });
+      return created;
     },
     createDeed: async (data) => {
       deedCount += 1;
@@ -374,6 +398,11 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
       rifts: Array.from(rifts.values()).filter((rift) => rift.mapId === mapId),
       towers: Array.from(towers.values()).filter((tower) => tower.mapId === mapId)
     }),
+    listCanaryMarkers: async ({ mapId, userId }) => (
+      Array.from(canaries.values())
+        .filter((canary) => canary.mapId === mapId && canary.userId === userId)
+        .sort((a, b) => a.slot - b.slot)
+    ),
     now: () => new Date("2026-05-10T00:00:00.000Z"),
     recordAudit: async (input) => {
       auditEvents.push(input);
@@ -869,54 +898,105 @@ describe("marker service", () => {
 
     const result = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
 
-    expect(result).toEqual({
-      ok: true,
-      value: {
-        markers: [
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const canaryRecords = await deps.listCanaryMarkers({ mapId: "map-1", userId: reader.id });
+
+    expect(canaryRecords).toHaveLength(CANARY_MARKERS_PER_MAP);
+    expect(result.value).toEqual({
+      markers: [
+        {
+          damage: "0.25",
+          id: "tower-1",
+          lastModifiedBy: "Writer",
+          makerName: "Mako",
+          makerNumber: "945",
+          planned: false,
+          ql: "89.50",
+          towerType: "Freedom Isles",
+          type: "tower",
+          x: 25,
+          y: 30
+        },
+        ...canaryRecords.map((record) => record.payload)
+      ],
+      map: {
+        heightPx: 2048,
+        id: "map-1",
+        imageSrc: "/maps/wurm-map.png",
+        layers: [
           {
-            damage: "0.25",
-            id: "tower-1",
-            lastModifiedBy: "Writer",
-            makerName: "Mako",
-            makerNumber: "945",
-            planned: false,
-            ql: "89.50",
-            towerType: "Freedom Isles",
-            type: "tower",
-            x: 25,
-            y: 30
+            heightPx: 2048,
+            id: "layer-terrain",
+            imageSrc: "/maps/wurm-map.png",
+            isDefault: true,
+            name: "Terrain",
+            widthPx: 2048
+          },
+          {
+            heightPx: 2048,
+            id: "layer-topographical",
+            imageSrc: "/maps/celebration-topo.png",
+            isDefault: false,
+            name: "Topographical",
+            widthPx: 2048
           }
         ],
-        map: {
-          heightPx: 2048,
-          id: "map-1",
-          imageSrc: "/maps/wurm-map.png",
-          layers: [
-            {
-              heightPx: 2048,
-              id: "layer-terrain",
-              imageSrc: "/maps/wurm-map.png",
-              isDefault: true,
-              name: "Terrain",
-              widthPx: 2048
-            },
-            {
-              heightPx: 2048,
-              id: "layer-topographical",
-              imageSrc: "/maps/celebration-topo.png",
-              isDefault: false,
-              name: "Topographical",
-              widthPx: 2048
-            }
-          ],
-          name: "Celebration",
-          widthPx: 2048
-        }
+        name: "Celebration",
+        widthPx: 2048
       }
     });
     expect(deps.auditEvents).not.toContainEqual(expect.objectContaining({
       action: "MARKER_LIST_VIEW"
     }));
+  });
+
+  it("reuses the viewer's canary markers across list calls", async () => {
+    const first = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
+    const second = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+
+    if (!first.ok || !second.ok) {
+      return;
+    }
+
+    expect(first.value.markers).toHaveLength(CANARY_MARKERS_PER_MAP);
+    expect(second.value.markers).toEqual(first.value.markers);
+
+    const canaryRecords = await deps.listCanaryMarkers({ mapId: "map-1", userId: reader.id });
+    expect(canaryRecords).toHaveLength(CANARY_MARKERS_PER_MAP);
+  });
+
+  it("serves different canary markers to different viewers", async () => {
+    const readerResult = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
+    const writerResult = await listMarkers({ actor: writer, mapId: "map-1" }, deps);
+
+    expect(readerResult.ok).toBe(true);
+    expect(writerResult.ok).toBe(true);
+
+    if (!readerResult.ok || !writerResult.ok) {
+      return;
+    }
+
+    const readerMarkerIds = readerResult.value.markers.map((marker) => marker.id);
+    const writerMarkerIds = writerResult.value.markers.map((marker) => marker.id);
+
+    expect(writerMarkerIds.some((id) => readerMarkerIds.includes(id))).toBe(false);
+  });
+
+  it("does not create canary markers when read access is denied", async () => {
+    const result = await listMarkers({ actor: reader, mapId: "map-2" }, deps);
+
+    expect(result).toEqual({ ok: false, error: "Read access is required" });
+
+    const canaryRecords = await deps.listCanaryMarkers({ mapId: "map-2", userId: reader.id });
+    expect(canaryRecords).toHaveLength(0);
   });
 
   it("updates existing notes with validation", async () => {

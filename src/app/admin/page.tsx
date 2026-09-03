@@ -11,7 +11,7 @@ export default async function AdminDashboardPage() {
 
   return (
     <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin" subtitle="Admin" title="Administration" />
+      <AdminHeader currentRoute="/admin" title="Administration" />
       <section className="history-empty">
         <p>Welcome to the admin dashboard.</p>
         <p>

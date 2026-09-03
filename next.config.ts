@@ -6,8 +6,7 @@ const nextConfig: NextConfig = {
     "192.168.1.150"
   ],
   devIndicators: false,
-  output: "standalone",
-  typedRoutes: false
+  output: "standalone"
 };
 
 export default nextConfig;

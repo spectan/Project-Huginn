@@ -1,5 +1,4 @@
 export type AlertRule =
-  | "FULL_MARKER_FETCH_VOLUME_SPIKE"
   | "DELETE_SPIKE"
   | "NEW_ADMIN_IP"
   | "OFF_HOURS_ADMIN_ACTIVITY"
@@ -17,6 +16,7 @@ export type AlertWithActor = {
   description: string;
   id: string;
   mapId: string | null;
+  mapName: string | null;
   metadata: unknown;
   resolvedAt: Date | null;
   resolvedByUserId: string | null;

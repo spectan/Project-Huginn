@@ -11,15 +11,9 @@ import type {
 
 const ALERT_DEDUP_WINDOW_MS = 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_MS = 60 * 60 * 1000;
-const MARKER_FETCH_WINDOW_MS = 15 * 60 * 1000;
 const DELETE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_FAILURE_WINDOW_MS = 5 * 60 * 1000;
 const NEW_IP_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
-
-const MARKER_FETCH_ACTIONS = new Set([
-  "MARKER_LIST_VIEW",
-  "MARKER_DETAIL_VIEW"
-]);
 
 const OFF_HOURS_ADMIN_ACTIONS = new Set([
   "LOGIN",
@@ -66,6 +60,11 @@ export async function listAlerts(
         select: {
           username: true
         }
+      },
+      map: {
+        select: {
+          name: true
+        }
       }
     },
     orderBy: {
@@ -108,7 +107,6 @@ export async function detectAlerts(
   const createdAlerts: AlertWithActor[] = [];
 
   const ruleResults = await Promise.all([
-    detectMarkerFetchSpikes(events, since, until),
     detectDeleteSpikes(events),
     detectNewAdminIps(events),
     detectOffHoursAdminActivity(events),
@@ -203,6 +201,11 @@ async function updateAlertStatus(
         select: {
           username: true
         }
+      },
+      map: {
+        select: {
+          name: true
+        }
       }
     },
     where: {
@@ -213,63 +216,6 @@ async function updateAlertStatus(
   return ok({
     alert: serializeAlert(alert)
   });
-}
-
-async function detectMarkerFetchSpikes(
-  events: AuditEventWithActor[],
-  since: Date,
-  until: Date
-): Promise<AlertWithActor[]> {
-  const windowStart = new Date(until.getTime() - MARKER_FETCH_WINDOW_MS);
-  const currentEvents = events.filter(
-    (event) =>
-      event.actorUserId !== null &&
-      event.createdAt >= windowStart &&
-      event.createdAt <= until &&
-      MARKER_FETCH_ACTIONS.has(event.action)
-  );
-
-  const previousEvents = events.filter(
-    (event) =>
-      event.actorUserId !== null &&
-      event.createdAt >= since &&
-      event.createdAt < windowStart &&
-      MARKER_FETCH_ACTIONS.has(event.action)
-  );
-
-  const baselineByUser = computeBaseline(previousEvents, MARKER_FETCH_WINDOW_MS);
-  const countsByUser = groupByUser(currentEvents);
-  const results: AlertWithActor[] = [];
-
-  for (const [userId, count] of countsByUser.entries()) {
-    const baseline = baselineByUser.get(userId);
-    const severity = determineFetchSpikeSeverity(count, baseline);
-
-    if (severity === null) {
-      continue;
-    }
-
-    const user = currentEvents.find((event) => event.actorUserId === userId)?.actor ?? null;
-    const alert = await createAlert({
-      actorUserId: userId,
-      description: `${count} marker list/detail views in the last 15 minutes${baseline !== undefined ? ` (baseline: ${Math.round(baseline)} per 15 min)` : ""}`,
-      mapId: null,
-      metadata: {
-        baseline: baseline ?? null,
-        count,
-        windowMinutes: 15
-      },
-      rule: "FULL_MARKER_FETCH_VOLUME_SPIKE",
-      severity,
-      title: `High marker fetch volume for ${user?.username ?? "unknown user"}`
-    });
-
-    if (alert !== null) {
-      results.push(alert);
-    }
-  }
-
-  return results;
 }
 
 async function detectDeleteSpikes(
@@ -529,6 +475,11 @@ async function createAlert(input: {
         select: {
           username: true
         }
+      },
+      map: {
+        select: {
+          name: true
+        }
       }
     }
   });
@@ -540,57 +491,6 @@ async function createAlert(input: {
   }
 
   return serialized;
-}
-
-function computeBaseline(
-  events: AuditEventWithActor[],
-  windowMs: number
-): Map<string, number> {
-  const bucketsByUser = new Map<string, Map<number, number>>();
-
-  for (const event of events) {
-    if (event.actorUserId === null) {
-      continue;
-    }
-
-    const bucket = Math.floor(event.createdAt.getTime() / windowMs);
-    const userBuckets = bucketsByUser.get(event.actorUserId) ?? new Map<number, number>();
-
-    userBuckets.set(bucket, (userBuckets.get(bucket) ?? 0) + 1);
-    bucketsByUser.set(event.actorUserId, userBuckets);
-  }
-
-  const result = new Map<string, number>();
-
-  for (const [userId, userBuckets] of bucketsByUser.entries()) {
-    if (userBuckets.size < 2) {
-      continue;
-    }
-
-    const total = Array.from(userBuckets.values()).reduce((sum, count) => sum + count, 0);
-    result.set(userId, total / userBuckets.size);
-  }
-
-  return result;
-}
-
-function determineFetchSpikeSeverity(
-  count: number,
-  baseline: number | undefined
-): AlertSeverity | null {
-  if (count >= 500) {
-    return "HIGH";
-  }
-
-  if (count >= 200) {
-    return "MEDIUM";
-  }
-
-  if (baseline !== undefined && count > baseline * 2 && count >= 50) {
-    return "MEDIUM";
-  }
-
-  return null;
 }
 
 function groupByUser(events: AuditEventWithActor[]): Map<string, number> {
@@ -629,12 +529,18 @@ function serializeAlert(
           username: true;
         };
       };
+      map: {
+        select: {
+          name: true;
+        };
+      };
     };
   }>
 ): AlertWithActor {
   return {
     ...alert,
     actorUsername: alert.actor?.username ?? null,
+    mapName: alert.map?.name ?? null,
     rule: alert.rule as AlertRule
   };
 }

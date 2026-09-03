@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateCoordinate, validateRectangle } from "./coordinates";
+import { validateCoordinate } from "./coordinates";
 
 const bounds = {
   widthPx: 1000,
@@ -33,35 +33,6 @@ describe("validateCoordinate", () => {
     expect(validateCoordinate({ x: 1.5, y: 2 }, bounds)).toEqual({
       ok: false,
       error: "Coordinate values must be integers"
-    });
-  });
-});
-
-describe("validateRectangle", () => {
-  it("accepts rectangles anchored at top-left when they fit inside bounds", () => {
-    expect(
-      validateRectangle({ x: 10, y: 20, width: 100, height: 80 }, bounds)
-    ).toEqual({
-      ok: true,
-      value: { x: 10, y: 20, width: 100, height: 80 }
-    });
-  });
-
-  it("rejects rectangles that exceed map bounds", () => {
-    expect(
-      validateRectangle({ x: 950, y: 20, width: 100, height: 80 }, bounds)
-    ).toEqual({
-      ok: false,
-      error: "Rectangle must fit inside map bounds"
-    });
-  });
-
-  it("rejects zero-sized rectangles", () => {
-    expect(
-      validateRectangle({ x: 10, y: 20, width: 0, height: 80 }, bounds)
-    ).toEqual({
-      ok: false,
-      error: "Rectangle width and height must be positive integers"
     });
   });
 });

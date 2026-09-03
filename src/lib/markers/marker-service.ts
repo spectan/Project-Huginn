@@ -1,3 +1,4 @@
+import { getOrCreateCanaries, type CanaryDependencies } from "@/lib/canaries/canary-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
   TOWER_PLACEMENT_DISTANCE_TILES,
@@ -147,8 +148,7 @@ type MarkerAuditAction =
   | "FAILED_AUTHORIZATION"
   | "MARKER_CREATED"
   | "MARKER_UPDATED"
-  | "MARKER_DELETED"
-  | "MARKERS_EXPORTED";
+  | "MARKER_DELETED";
 
 type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "MAP";
 
@@ -161,7 +161,7 @@ type MarkerAuditInput = {
   targetType: MarkerAuditTarget;
 };
 
-export type MarkerServiceDependencies = {
+export type MarkerServiceDependencies = CanaryDependencies & {
   createCamp(input: CampMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<CampRecord>;
   createDeed(input: DeedMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<DeedRecord>;
   createLocateSoul(input: LocateSoulMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<LocateSoulRecord>;
@@ -330,6 +330,11 @@ export async function listMarkers(
   }
 
   const markers = await dependencies.listActiveMarkers(map.id);
+  const canaries = await getOrCreateCanaries(
+    { mapId: map.id, userId: input.actor.id },
+    { heightPx: map.heightPx, widthPx: map.widthPx },
+    dependencies
+  );
 
   return ok({
     map: serializeMap(map),
@@ -341,7 +346,8 @@ export async function listMarkers(
       ...markers.camps.map(serializeCamp),
       ...markers.minedoors.map(serializeMinedoor),
       ...markers.locateSouls.map(serializeLocateSoul),
-      ...markers.paths.map(serializePath)
+      ...markers.paths.map(serializePath),
+      ...canaries
     ]
   });
 }

@@ -12,7 +12,7 @@ export default async function AlertsPage() {
 
   return (
     <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/alerts" subtitle="Admin" title="Alerts" />
+      <AdminHeader currentRoute="/admin/alerts" title="Alerts" />
       <AlertsDashboardView />
     </main>
   );

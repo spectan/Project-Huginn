@@ -178,7 +178,7 @@ function getAccountPermissionRows(
     mapPermissions: readonly MapPermission[];
   },
   servers: readonly AccountPermissionServer[]
-): Array<{ allowed: boolean; isGlobal: boolean; label: string; value: string }> {
+): Array<{ allowed: boolean; label: string; value: string }> {
   if (servers.length > 0) {
     const perServer = servers
       .map((server) => ({ label: server.name, value: getServerPermissionLabel(access, server.id) }))
@@ -187,15 +187,15 @@ function getAccountPermissionRows(
     const firstRow = perServer[0];
 
     if (firstRow !== undefined && perServer.every((row) => row.value === firstRow.value)) {
-      return [{ allowed: true, isGlobal: true, label: "Global", value: firstRow.value! }];
+      return [{ allowed: true, label: "Global", value: firstRow.value! }];
     }
 
-    return perServer.map((row) => ({ allowed: true, isGlobal: false, label: row.label, value: row.value! }));
+    return perServer.map((row) => ({ allowed: true, label: row.label, value: row.value! }));
   }
 
   const fallbackValue = getFallbackPermissionLabel(access);
 
-  return fallbackValue === null ? [] : [{ allowed: true, isGlobal: true, label: "Global", value: fallbackValue }];
+  return fallbackValue === null ? [] : [{ allowed: true, label: "Global", value: fallbackValue }];
 }
 
 function getServerPermissionLabel(access: {

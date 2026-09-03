@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  cleanupExpiredDeletedMarkers,
   listRestorableDeletedMarkers,
   restoreDeletedMarker,
   type DeletedMarkerDependencies
@@ -34,16 +33,6 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
     findDeletedPath: async () => null,
     findDeletedRift: async () => null,
     findDeletedTower: async () => null,
-    listExpiredDeletedMarkers: async () => ({
-      camps: [],
-      deeds: [],
-      locateSouls: [],
-      minedoors: [],
-      notes: [],
-      paths: [],
-      rifts: [],
-      towers: []
-    }),
     listRestorableDeletedMarkers: async () => ({
       camps: [],
       deeds: [],
@@ -68,14 +57,6 @@ function createDependencies(auditEvents: unknown[] = []): DeletedMarkerDependenc
       ]
     }),
     now: () => now,
-    permanentlyDeleteCamps: async () => 0,
-    permanentlyDeleteDeeds: async () => 0,
-    permanentlyDeleteLocateSouls: async () => 0,
-    permanentlyDeleteMinedoors: async () => 0,
-    permanentlyDeleteNotes: async () => 0,
-    permanentlyDeletePaths: async () => 0,
-    permanentlyDeleteRifts: async () => 0,
-    permanentlyDeleteTowers: async () => 0,
     recordAudit: async (event) => {
       auditEvents.push(event);
     },
@@ -207,93 +188,5 @@ describe("deleted marker service", () => {
       ok: false,
       error: "Restore window has expired"
     });
-  });
-
-  it("permanently deletes expired markers and audits cleanup without coordinates", async () => {
-    const auditEvents: unknown[] = [];
-    const deletedIds: string[] = [];
-    const dependencies: DeletedMarkerDependencies = {
-      ...createDependencies(auditEvents),
-      listExpiredDeletedMarkers: async ({ limit }) => {
-        expect(limit).toBe(100);
-        return {
-          camps: [],
-          deeds: [],
-          locateSouls: [],
-          minedoors: [],
-          notes: [
-            {
-              deleteExpiresAt: expiredAt,
-              id: "note-1",
-              mapId: "map-1"
-            }
-          ],
-          paths: [],
-          rifts: [],
-          towers: [
-            {
-              deleteExpiresAt: expiredAt,
-              id: "tower-1",
-              mapId: "map-1"
-            }
-          ]
-        };
-      },
-      permanentlyDeleteNotes: async (ids) => {
-        deletedIds.push(...ids);
-        return ids.length;
-      },
-      permanentlyDeleteTowers: async (ids) => {
-        deletedIds.push(...ids);
-        return ids.length;
-      },
-      recordAudit: async (event) => {
-        auditEvents.push(event);
-      }
-    };
-
-    const result = await cleanupExpiredDeletedMarkers(dependencies);
-
-    expect(result).toEqual({
-      deletedCounts: {
-        annotation: 0,
-        bridge: 0,
-        camp: 0,
-        canal: 0,
-        deed: 0,
-        highway: 0,
-        locateSoul: 0,
-        minedoor: 0,
-        note: 1,
-        rift: 0,
-        tower: 1,
-        tunnel: 0
-      }
-    });
-    expect(deletedIds).toEqual(["tower-1", "note-1"]);
-    expect(auditEvents).toEqual([
-      {
-        action: "MARKER_CLEANED_UP",
-        actorUserId: null,
-        mapId: "map-1",
-        metadata: {
-          cleanedAt: "2026-05-10T12:00:00.000Z",
-          markerType: "tower"
-        },
-        targetId: "tower-1",
-        targetType: "TOWER"
-      },
-      {
-        action: "MARKER_CLEANED_UP",
-        actorUserId: null,
-        mapId: "map-1",
-        metadata: {
-          cleanedAt: "2026-05-10T12:00:00.000Z",
-          markerType: "note"
-        },
-        targetId: "note-1",
-        targetType: "NOTE"
-      }
-    ]);
   });
 });

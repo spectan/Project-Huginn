@@ -7,17 +7,3 @@ export function getDeleteExpiresAt(deletedAt: Date): Date {
     deletedAt.getTime() + DELETED_MARKER_RETENTION_HOURS * HOURS_TO_MILLISECONDS
   );
 }
-
-export function canRestoreDeletedMarker(
-  now: Date,
-  deleteExpiresAt: Date
-): boolean {
-  return now.getTime() < deleteExpiresAt.getTime();
-}
-
-export function isDeletedMarkerCleanupEligible(
-  now: Date,
-  deleteExpiresAt: Date
-): boolean {
-  return now.getTime() >= deleteExpiresAt.getTime();
-}

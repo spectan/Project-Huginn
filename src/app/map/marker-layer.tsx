@@ -714,7 +714,7 @@ function getNoteMarkerStyle(x: number, y: number, size: number, color: string, v
   };
 }
 
-export function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }> {
+function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }> {
   return marker.type === "bridge" || marker.type === "canal" || marker.type === "highway" || marker.type === "tunnel";
 }
 

@@ -1,16 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import type { WorkspaceMarker } from "@/lib/markers/marker-types";
-import type { CanaryRecord } from "./canary-service";
-
-export type CanaryDependencies = {
-  listCanaryMarkers(input: { mapId: string; userId: string }): Promise<CanaryRecord[]>;
-  createCanaryMarkers(input: {
-    mapId: string;
-    markers: Array<{ payload: WorkspaceMarker; slot: number }>;
-    userId: string;
-  }): Promise<CanaryRecord[]>;
-};
+import type { CanaryDependencies, CanaryRecord } from "./canary-service";
 
 export function createCanaryDependencies(): CanaryDependencies {
   return {

@@ -38,7 +38,6 @@ export async function POST(request: Request) {
     found: boolean;
     username: string | null;
     userId: string | null;
-    watermarkNumber: number | null;
     confidence: number;
     syncConfidence: number;
     softConfidence: number;
@@ -51,7 +50,6 @@ export async function POST(request: Request) {
     found: false,
     username: null,
     userId: null,
-    watermarkNumber: null,
     confidence: 0,
     syncConfidence: 0,
     softConfidence: 0,
@@ -88,7 +86,6 @@ export async function POST(request: Request) {
         found: result.found,
         username: user.username,
         userId: result.userId,
-        watermarkNumber: result.watermarkNumber,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
         softConfidence: result.softConfidence,
@@ -126,7 +123,6 @@ export async function POST(request: Request) {
         found: true,
         username: result.userId ? usersById.get(result.userId) ?? null : null,
         userId: result.userId,
-        watermarkNumber: result.watermarkNumber,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
         softConfidence: result.softConfidence,
@@ -141,7 +137,6 @@ export async function POST(request: Request) {
         found: false,
         username: null,
         userId: null,
-        watermarkNumber: null,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
         softConfidence: result.softConfidence,

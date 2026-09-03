@@ -29,19 +29,13 @@ export type AuditHistoryAction =
   | "USER_APPROVED"
   | "USER_DELETED"
   | "USER_PASSWORD_CHANGED"
-  | "USER_REJECTED"
   | "PERMISSION_CHANGED"
-  | "MAP_VIEW"
-  | "MAP_CREATED"
   | "MAP_UPDATED"
-  | "MARKER_LIST_VIEW"
-  | "MARKER_DETAIL_VIEW"
   | "MARKER_CREATED"
   | "MARKER_UPDATED"
   | "MARKER_DELETED"
   | "MARKER_RESTORED"
-  | "MARKER_CLEANED_UP"
-  | "MARKERS_EXPORTED";
+  | "MARKER_CLEANED_UP";
 
 export type AuditHistoryTargetType =
   | "USER"

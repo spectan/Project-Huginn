@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { createCanaryDependencies } from "@/lib/canaries/database";
 import { prisma } from "@/lib/db/prisma";
 import {
   DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
@@ -28,6 +29,7 @@ const markerUserRelations = {
 
 export function createMarkerDependencies(): MarkerServiceDependencies {
   return {
+    ...createCanaryDependencies(),
     createCamp: async (input) => prisma.camp.create({ data: input, include: markerUserRelations }),
     createDeed: async (input) => prisma.deed.create({ data: input, include: markerUserRelations }),
     createLocateSoul: async (input) => prisma.locateSoul.create({ data: input, include: markerUserRelations }),

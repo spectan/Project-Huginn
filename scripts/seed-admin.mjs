@@ -161,6 +161,12 @@ const servers = [
   }
 ];
 
+const maxWatermark = await prisma.user.findFirst({
+  orderBy: { watermarkNumber: "desc" },
+  select: { watermarkNumber: true }
+});
+const nextWatermarkNumber = (maxWatermark?.watermarkNumber ?? 0) + 1;
+
 await prisma.user.upsert({
   create: {
     accessLevel: "WRITE",
@@ -168,7 +174,8 @@ await prisma.user.upsert({
     approvedAt: new Date(),
     isAdmin: true,
     passwordHash,
-    username
+    username,
+    watermarkNumber: nextWatermarkNumber
   },
   update: {
     accessLevel: "WRITE",
@@ -180,6 +187,12 @@ await prisma.user.upsert({
   where: {
     username
   }
+});
+
+// Backfill a watermark number for the admin if it predates watermarking.
+await prisma.user.updateMany({
+  data: { watermarkNumber: nextWatermarkNumber },
+  where: { username, watermarkNumber: null }
 });
 
 for (const server of servers) {

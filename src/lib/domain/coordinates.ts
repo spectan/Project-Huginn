@@ -10,11 +10,6 @@ export type Coordinate = {
   y: number;
 };
 
-export type Rectangle = Coordinate & {
-  width: number;
-  height: number;
-};
-
 export function validateCoordinate(
   coordinate: Coordinate,
   bounds: MapBounds
@@ -37,42 +32,6 @@ export function validateCoordinate(
   }
 
   return ok({ x: coordinate.x, y: coordinate.y });
-}
-
-export function validateRectangle(
-  rectangle: Rectangle,
-  bounds: MapBounds
-): Result<Rectangle> {
-  const coordinate = validateCoordinate(
-    { x: rectangle.x, y: rectangle.y },
-    bounds
-  );
-
-  if (!coordinate.ok) {
-    return coordinate;
-  }
-
-  if (!isSafeInteger(rectangle.width) || !isSafeInteger(rectangle.height)) {
-    return err("Rectangle width and height must be positive integers");
-  }
-
-  if (rectangle.width <= 0 || rectangle.height <= 0) {
-    return err("Rectangle width and height must be positive integers");
-  }
-
-  if (
-    rectangle.x + rectangle.width > bounds.widthPx ||
-    rectangle.y + rectangle.height > bounds.heightPx
-  ) {
-    return err("Rectangle must fit inside map bounds");
-  }
-
-  return ok({
-    x: rectangle.x,
-    y: rectangle.y,
-    width: rectangle.width,
-    height: rectangle.height
-  });
 }
 
 function hasValidBounds(bounds: MapBounds): boolean {

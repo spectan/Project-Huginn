@@ -6,8 +6,10 @@ const dockerignore = readFileSync(".dockerignore", "utf8");
 const envExample = readFileSync(".env.example", "utf8");
 
 describe("environment configuration", () => {
-  it("requires AUTH_SECRET in Compose for production auth", () => {
-    expect(compose).toContain("AUTH_SECRET");
+  it("uses the shared huginn-app image for the app and sync services", () => {
+    expect(compose).toContain("image: huginn-app:latest");
+    expect(compose).not.toContain("mapsamuelzone");
+    expect(compose).not.toContain("AUTH_SECRET");
   });
 
   it("does not provide runnable placeholder secrets in the example env file", () => {
