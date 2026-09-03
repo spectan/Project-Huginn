@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  triggerAlertDetection: vi.fn()
+}));
+
+vi.mock("@/lib/alerts/alert-service", () => ({
+  triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
 import {
   listRestorableDeletedMarkers,
   restoreDeletedMarker,
@@ -188,5 +197,54 @@ describe("deleted marker service", () => {
       ok: false,
       error: "Restore window has expired"
     });
+  });
+});
+
+describe("deleted marker service alert detection triggers", () => {
+  beforeEach(() => {
+    mocks.triggerAlertDetection.mockReset();
+  });
+
+  it("triggers alert detection after a failed authorization", async () => {
+    const result = await listRestorableDeletedMarkers({
+      actor: writerActor
+    }, createDependencies());
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not trigger alert detection for a successful restore", async () => {
+    const dependencies: DeletedMarkerDependencies = {
+      ...createDependencies(),
+      findDeletedTower: async () => ({
+        deletedAt: new Date("2026-05-10T10:00:00.000Z"),
+        deleteExpiresAt: expiresLater,
+        id: "tower-1",
+        mapId: "map-1"
+      }),
+      restoreTower: async (id) => ({ id, mapId: "map-1" })
+    };
+
+    const result = await restoreDeletedMarker({
+      actor: adminActor,
+      markerId: "tower-1",
+      markerType: "tower"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).not.toHaveBeenCalled();
+  });
+
+  it("does not let a synchronous trigger failure break the request", async () => {
+    mocks.triggerAlertDetection.mockImplementation(() => {
+      throw new Error("alert pipeline exploded");
+    });
+
+    const result = await listRestorableDeletedMarkers({
+      actor: writerActor
+    }, createDependencies());
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
   });
 });

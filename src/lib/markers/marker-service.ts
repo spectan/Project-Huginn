@@ -1,3 +1,4 @@
+import { triggerAlertDetection } from "@/lib/alerts/alert-service";
 import { getOrCreateCanaries, type CanaryDependencies } from "@/lib/canaries/canary-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
@@ -864,6 +865,7 @@ export async function disbandDeedMarker(
     targetId: conversion.deletedDeed.id,
     targetType: "DEED"
   });
+  triggerAlertsSafely();
 
   return ok({
     category: {
@@ -1049,6 +1051,7 @@ export async function deleteMarker(
     targetId: deleted.id,
     targetType: getAuditTargetType(input.markerType)
   });
+  triggerAlertsSafely();
 
   return ok({
     deletedAt,
@@ -1379,6 +1382,7 @@ async function auditAuthorizationFailure(
     targetId: mapId,
     targetType: "MAP"
   });
+  triggerAlertsSafely();
 }
 
 async function auditMarkerWrite(
@@ -1453,6 +1457,14 @@ async function recordAudit(
   const metadata = removeUndefined(input.metadata);
   assertNoCoordinateMetadata(metadata);
   await dependencies.recordAudit({ ...input, metadata });
+}
+
+function triggerAlertsSafely(): void {
+  try {
+    triggerAlertDetection();
+  } catch {
+    // Alert detection is fire-and-forget; failures must not block the request.
+  }
 }
 
 function removeUndefined(metadata: Record<string, unknown>): Record<string, unknown> {

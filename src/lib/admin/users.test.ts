@@ -1,4 +1,13 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  triggerAlertDetection: vi.fn()
+}));
+
+vi.mock("@/lib/alerts/alert-service", () => ({
+  triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
 import {
   listAdminUsers,
   removeAdminUser,
@@ -451,5 +460,72 @@ describe("admin user management", () => {
       ok: false,
       error: "Admins cannot remove their own account"
     });
+  });
+});
+
+describe("admin user management alert detection triggers", () => {
+  let dependencies: AdminUserDependencies;
+
+  beforeEach(() => {
+    mocks.triggerAlertDetection.mockReset();
+    dependencies = createDependencies();
+  });
+
+  it("triggers alert detection after removing an account", async () => {
+    const result = await removeAdminUser({
+      actor: adminActor,
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a failed authorization", async () => {
+    const result = await removeAdminUser({
+      actor: operatorActor,
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a permission change", async () => {
+    const result = await updateAdminUser({
+      actor: adminActor,
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "WRITE", isOperator: false, mapId: "map-release" }
+      ],
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after an admin password change", async () => {
+    const result = await updateAdminUserPassword({
+      actor: adminActor,
+      password: "new secure password",
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a synchronous trigger failure break the mutation", async () => {
+    mocks.triggerAlertDetection.mockImplementation(() => {
+      throw new Error("alert pipeline exploded");
+    });
+
+    const result = await removeAdminUser({
+      actor: adminActor,
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
   });
 });

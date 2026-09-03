@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createMarkerDependencies } from "@/lib/markers/database";
 import { disbandDeedMarker } from "@/lib/markers/marker-service";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -9,7 +10,7 @@ type RouteContext = {
   }>;
 };
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
@@ -19,7 +20,7 @@ export async function POST(_request: Request, context: RouteContext) {
   const { markerId } = await context.params;
   const result = await disbandDeedMarker(
     { actor: viewer, markerId },
-    createMarkerDependencies()
+    createMarkerDependencies(getClientIp(request))
   );
 
   if (!result.ok) {

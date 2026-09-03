@@ -2418,6 +2418,8 @@ body {
  * Page primitives (use inside admin pages):
  *   .admin-page-title         Page heading at the top of content. `<h1 className="admin-page-title">Accounts</h1>`
  *   .admin-section-title      Section heading inside an .admin-panel. `<h2 className="admin-section-title">Alerts</h2>`
+ *   .admin-section-header     Flex row pairing an .admin-section-title with right-aligned trailing actions.
+ *                             `<div className="admin-section-header"><h2 …>…</h2><a className="admin-btn …">…</a></div>`
  *   .admin-panel              Bordered section container (also wraps tables). `<section className="admin-panel">…</section>`
  *   .admin-toolbar            Flex row of filters/actions. `<div className="admin-toolbar">…</div>`
  *   .admin-table              Dense data table (12–13px, 1px row borders, hover). `<table className="admin-table">`
@@ -2573,6 +2575,18 @@ body {
   font-size: 14px;
   font-weight: 700;
   line-height: 1.2;
+}
+
+.admin-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.admin-section-header .admin-section-title {
+  margin: 0;
 }
 
 .admin-panel {

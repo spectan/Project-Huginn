@@ -27,7 +27,7 @@ const markerUserRelations = {
   updatedBy: { select: { username: true } }
 };
 
-export function createMarkerDependencies(): MarkerServiceDependencies {
+export function createMarkerDependencies(clientIp?: string): MarkerServiceDependencies {
   return {
     ...createCanaryDependencies(),
     createCamp: async (input) => prisma.camp.create({ data: input, include: markerUserRelations }),
@@ -175,12 +175,15 @@ export function createMarkerDependencies(): MarkerServiceDependencies {
     },
     now: () => new Date(),
     recordAudit: async (input) => {
+      const metadata = clientIp !== undefined && clientIp.length > 0
+        ? { ...input.metadata, clientIp }
+        : input.metadata;
       await prisma.auditEvent.create({
         data: {
           action: input.action,
           actorUserId: input.actorUserId,
           mapId: input.mapId,
-          metadata: input.metadata as Prisma.InputJsonValue,
+          metadata: metadata as Prisma.InputJsonValue,
           targetId: input.targetId,
           targetType: input.targetType
         }

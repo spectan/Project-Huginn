@@ -3,6 +3,7 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createDeletedMarkerDependencies } from "@/lib/deleted-markers/database";
 import { restoreDeletedMarker } from "@/lib/deleted-markers/deleted-marker-service";
 import type { MarkerType } from "@/lib/markers/marker-types";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -11,7 +12,7 @@ type RouteContext = {
   }>;
 };
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
@@ -29,7 +30,7 @@ export async function POST(_request: Request, context: RouteContext) {
     actor: viewer,
     markerId,
     markerType: parsedMarkerType
-  }, createDeletedMarkerDependencies());
+  }, createDeletedMarkerDependencies(getClientIp(request)));
 
   if (!result.ok) {
     return NextResponse.json(

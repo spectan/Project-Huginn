@@ -141,7 +141,7 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
       )}
 
       <div className="admin-toolbar">
-        <label htmlFor="digits">Digits</label>
+        <label htmlFor="digits">UserID</label>
         <input
           id="digits"
           className="admin-input"
@@ -149,7 +149,7 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
           inputMode="numeric"
           value={digits}
           onChange={(e) => setDigits(e.target.value)}
-          placeholder="Digits read off the enhanced image"
+          placeholder="Enter the UserID you see"
         />
         {trimmedDigits.length > 0 ? (
           <span>{matchedUser === null ? "No match" : (matchedUser.username ?? matchedUser.id)}</span>

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { listAdminUsers } from "@/lib/admin/users";
+import { getClientIp } from "@/lib/network/client-ip";
 
-export async function GET() {
+export async function GET(request: Request) {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
@@ -12,7 +13,7 @@ export async function GET() {
 
   const result = await listAdminUsers(
     { actor: viewer },
-    createAdminUserDependencies()
+    createAdminUserDependencies(getClientIp(request))
   );
 
   if (!result.ok) {

@@ -1,5 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CANARY_MARKERS_PER_MAP } from "@/lib/canaries/canary-service";
+
+const mocks = vi.hoisted(() => ({
+  triggerAlertDetection: vi.fn()
+}));
+
+vi.mock("@/lib/alerts/alert-service", () => ({
+  triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
 import {
   createMarker,
   deleteMarker,
@@ -1241,5 +1250,148 @@ describe("marker service", () => {
 
     expect(listed.value.markers.some((marker) => marker.id === created.value.id)).toBe(false);
     expect(listed.value.markers).toContainEqual(result.value.marker);
+  });
+});
+
+describe("marker service alert detection triggers", () => {
+  let deps: MarkerServiceDependencies & { auditEvents: unknown[] };
+
+  beforeEach(() => {
+    mocks.triggerAlertDetection.mockReset();
+    deps = createDependencies();
+  });
+
+  it("triggers alert detection after a marker deletion", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+    mocks.triggerAlertDetection.mockClear();
+
+    const result = await deleteMarker({
+      actor: writer,
+      markerId: "tower-1",
+      markerType: "tower"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a failed marker write authorization", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+    mocks.triggerAlertDetection.mockClear();
+
+    const result = await deleteMarker({
+      actor: reader,
+      markerId: "tower-1",
+      markerType: "tower"
+    }, deps);
+
+    expect(result).toEqual({ ok: false, error: "Write access is required" });
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after disbanding a deed", async () => {
+    const created = await createMarker({
+      actor: writer,
+      input: {
+        east: 6,
+        foundingDate: "2026-05-09",
+        founder: "Mayor Mako",
+        name: "Oak Harbour",
+        north: 4,
+        perimeter: 8,
+        south: 7,
+        type: "deed",
+        west: 5,
+        x: 500,
+        y: 600
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(created.ok).toBe(true);
+
+    if (!created.ok) {
+      return;
+    }
+
+    mocks.triggerAlertDetection.mockClear();
+
+    const result = await disbandDeedMarker({
+      actor: writer,
+      markerId: created.value.id
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not trigger alert detection for marker creates or updates", async () => {
+    const result = await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).not.toHaveBeenCalled();
+  });
+
+  it("does not let a synchronous trigger failure break the mutation", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+    mocks.triggerAlertDetection.mockImplementation(() => {
+      throw new Error("alert pipeline exploded");
+    });
+
+    const result = await deleteMarker({
+      actor: writer,
+      markerId: "tower-1",
+      markerType: "tower"
+    }, deps);
+
+    expect(result.ok).toBe(true);
   });
 });

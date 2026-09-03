@@ -3,6 +3,7 @@ import { updateAdminUser, removeAdminUser } from "@/lib/admin/users";
 import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import type { AccessLevel, MapPermission } from "@/lib/domain/permissions";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -24,7 +25,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     isAdmin: getIsAdmin(body),
     mapPermissions: getMapPermissions(body),
     userId
-  }, createAdminUserDependencies());
+  }, createAdminUserDependencies(getClientIp(request)));
 
   if (!result.ok) {
     return NextResponse.json(
@@ -36,7 +37,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   return NextResponse.json({ user: result.value });
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
@@ -47,7 +48,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   const result = await removeAdminUser({
     actor: viewer,
     userId
-  }, createAdminUserDependencies());
+  }, createAdminUserDependencies(getClientIp(request)));
 
   if (!result.ok) {
     return NextResponse.json(

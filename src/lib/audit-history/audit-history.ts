@@ -1,3 +1,4 @@
+import { triggerAlertDetection } from "@/lib/alerts/alert-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { canViewAuditLog, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -35,7 +36,8 @@ export type AuditHistoryAction =
   | "MARKER_UPDATED"
   | "MARKER_DELETED"
   | "MARKER_RESTORED"
-  | "MARKER_CLEANED_UP";
+  | "MARKER_CLEANED_UP"
+  | "MAP_DATA_ACCESSED";
 
 export type AuditHistoryTargetType =
   | "USER"
@@ -206,6 +208,15 @@ async function recordFailedAuthorization(
     targetId: null,
     targetType: "SYSTEM"
   });
+  triggerAlertsSafely();
+}
+
+function triggerAlertsSafely(): void {
+  try {
+    triggerAlertDetection();
+  } catch {
+    // Alert detection is fire-and-forget; failures must not block the request.
+  }
 }
 
 function sanitizeMetadata(metadata: unknown): Record<string, unknown> {

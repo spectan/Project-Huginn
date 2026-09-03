@@ -1,3 +1,4 @@
+import { triggerAlertDetection } from "@/lib/alerts/alert-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { canAdminister, type AccessLevel, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -90,6 +91,7 @@ export async function registerUser(
     targetId: user.id,
     targetType: "USER"
   });
+  triggerAlertsSafely();
 
   return ok({
     sessionExpiresAt: session.expiresAt,
@@ -118,6 +120,7 @@ export async function loginUser(
       targetId: null,
       targetType: "SESSION"
     });
+    triggerAlertsSafely();
     return err("Invalid username or password");
   }
 
@@ -130,6 +133,7 @@ export async function loginUser(
     targetId: session.id,
     targetType: "SESSION"
   });
+  triggerAlertsSafely();
 
   return ok({
     sessionExpiresAt: session.expiresAt,
@@ -154,6 +158,7 @@ export async function approveUser(
       targetId: input.userId,
       targetType: "USER"
     });
+    triggerAlertsSafely();
     return err("Admin access is required");
   }
 
@@ -181,6 +186,7 @@ export async function approveUser(
     targetId: user.id,
     targetType: "USER"
   });
+  triggerAlertsSafely();
 
   return ok(toViewer(user));
 }
@@ -229,6 +235,7 @@ export async function changeOwnPassword(
     targetId: updatedUser.id,
     targetType: "USER"
   });
+  triggerAlertsSafely();
 
   return ok({ ok: true });
 }
@@ -288,4 +295,12 @@ async function recordAudit(
 ): Promise<void> {
   assertNoCoordinateMetadata(input.metadata);
   await dependencies.recordAudit(input);
+}
+
+function triggerAlertsSafely(): void {
+  try {
+    triggerAlertDetection();
+  } catch {
+    // Alert detection is fire-and-forget; failures must not block the request.
+  }
 }

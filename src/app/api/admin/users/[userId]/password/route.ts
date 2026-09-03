@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { updateAdminUserPassword } from "@/lib/admin/users";
 import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -22,7 +23,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     actor: viewer,
     password: getPassword(body),
     userId
-  }, createAdminUserDependencies());
+  }, createAdminUserDependencies(getClientIp(request)));
 
   if (!result.ok) {
     return NextResponse.json(

@@ -7,7 +7,7 @@ type DeletedRecordDates = {
   deleteExpiresAt: Date | null;
 };
 
-export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
+export function createDeletedMarkerDependencies(clientIp?: string): DeletedMarkerDependencies {
   return {
     findDeletedCamp: async (id) => {
       const camp = await prisma.camp.findFirst({
@@ -259,12 +259,15 @@ export function createDeletedMarkerDependencies(): DeletedMarkerDependencies {
     },
     now: () => new Date(),
     recordAudit: async (input) => {
+      const metadata = clientIp !== undefined && clientIp.length > 0
+        ? { ...input.metadata, clientIp }
+        : input.metadata;
       await prisma.auditEvent.create({
         data: {
           action: input.action,
           actorUserId: input.actorUserId,
           mapId: input.mapId,
-          metadata: input.metadata as Prisma.InputJsonValue,
+          metadata: metadata as Prisma.InputJsonValue,
           targetId: input.targetId,
           targetType: input.targetType
         }

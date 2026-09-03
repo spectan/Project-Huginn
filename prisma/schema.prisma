@@ -35,6 +35,7 @@ enum AuditAction {
   MARKER_DELETED
   MARKER_RESTORED
   MARKER_CLEANED_UP
+  MAP_DATA_ACCESSED
 }
 
 enum AuditTargetType {

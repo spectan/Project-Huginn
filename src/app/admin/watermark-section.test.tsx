@@ -24,7 +24,7 @@ describe("WatermarkSection", () => {
   it("shows the matching username as digits are typed, or 'No match'", () => {
     render(React.createElement(WatermarkSection, { users }));
 
-    const digitsInput = screen.getByLabelText("Digits");
+    const digitsInput = screen.getByLabelText("UserID");
 
     fireEvent.change(digitsInput, { target: { value: "123" } });
     expect(screen.getByText("Stargrace")).toBeTruthy();

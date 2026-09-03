@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createMarkerDependencies } from "@/lib/markers/database";
 import { createMarker } from "@/lib/markers/marker-service";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -20,7 +21,7 @@ export async function POST(request: Request, context: RouteContext) {
   const { mapId } = await context.params;
   const result = await createMarker(
     { actor: viewer, input: body, mapId },
-    createMarkerDependencies()
+    createMarkerDependencies(getClientIp(request))
   );
 
   if (!result.ok) {

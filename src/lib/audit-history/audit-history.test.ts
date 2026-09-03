@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  triggerAlertDetection: vi.fn()
+}));
+
+vi.mock("@/lib/alerts/alert-service", () => ({
+  triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
 import { listAuditHistory, type AuditHistoryDependencies } from "./audit-history";
 
 const adminActor = {
@@ -162,5 +171,49 @@ describe("listAuditHistory", () => {
         targetType: "SYSTEM"
       }
     ]);
+  });
+});
+
+describe("audit history alert detection triggers", () => {
+  beforeEach(() => {
+    mocks.triggerAlertDetection.mockReset();
+  });
+
+  it("triggers alert detection after a failed authorization", async () => {
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async () => [],
+      recordAudit: async () => undefined
+    };
+
+    const result = await listAuditHistory({ actor: writerActor, limit: 25 }, dependencies);
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not trigger alert detection for an authorized history view", async () => {
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async () => [],
+      recordAudit: async () => undefined
+    };
+
+    const result = await listAuditHistory({ actor: adminActor, limit: 25 }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).not.toHaveBeenCalled();
+  });
+
+  it("does not let a synchronous trigger failure break the request", async () => {
+    mocks.triggerAlertDetection.mockImplementation(() => {
+      throw new Error("alert pipeline exploded");
+    });
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async () => [],
+      recordAudit: async () => undefined
+    };
+
+    const result = await listAuditHistory({ actor: writerActor, limit: 25 }, dependencies);
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
   });
 });

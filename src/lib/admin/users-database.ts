@@ -24,7 +24,7 @@ const USER_SELECT = {
   username: true
 } satisfies Prisma.UserSelect;
 
-export function createAdminUserDependencies(): AdminUserDependencies {
+export function createAdminUserDependencies(clientIp?: string): AdminUserDependencies {
   return {
     hashPassword: async (password) => argon2.hash(password),
     listMaps: async () => prisma.map.findMany({
@@ -44,11 +44,14 @@ export function createAdminUserDependencies(): AdminUserDependencies {
       take: 100
     }),
     recordAudit: async (input) => {
+      const metadata = clientIp !== undefined && clientIp.length > 0
+        ? { ...input.metadata, clientIp }
+        : input.metadata;
       await prisma.auditEvent.create({
         data: {
           action: input.action,
           actorUserId: input.actorUserId,
-          metadata: input.metadata as Prisma.InputJsonValue,
+          metadata: metadata as Prisma.InputJsonValue,
           targetId: input.targetId,
           targetType: input.targetType
         }

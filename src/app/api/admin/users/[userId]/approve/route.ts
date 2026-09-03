@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { approveUser } from "@/lib/auth/auth-service";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createAuthDependencies } from "@/lib/auth/database";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -23,7 +24,7 @@ export async function POST(request: Request, context: RouteContext) {
     accessLevel,
     actor: viewer,
     userId
-  }, createAuthDependencies());
+  }, createAuthDependencies(getClientIp(request)));
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });

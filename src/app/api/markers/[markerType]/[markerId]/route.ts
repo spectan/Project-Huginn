@@ -3,6 +3,7 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createMarkerDependencies } from "@/lib/markers/database";
 import { deleteMarker, updateMarker } from "@/lib/markers/marker-service";
 import type { MarkerType } from "@/lib/markers/marker-types";
+import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
   params: Promise<{
@@ -27,7 +28,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   const body = await readJson(request);
   const result = await updateMarker(
     { actor: viewer, input: body, markerId, markerType },
-    createMarkerDependencies()
+    createMarkerDependencies(getClientIp(request))
   );
 
   if (!result.ok) {
@@ -37,7 +38,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   return NextResponse.json({ marker: result.value });
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
@@ -52,7 +53,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
 
   const result = await deleteMarker(
     { actor: viewer, markerId, markerType },
-    createMarkerDependencies()
+    createMarkerDependencies(getClientIp(request))
   );
 
   if (!result.ok) {

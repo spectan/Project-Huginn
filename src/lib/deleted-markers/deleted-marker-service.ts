@@ -1,3 +1,4 @@
+import { triggerAlertDetection } from "@/lib/alerts/alert-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { formatTowerCreator } from "@/lib/domain/markers";
 import {
@@ -357,6 +358,7 @@ async function auditAuthorizationFailure(
     targetId: null,
     targetType: "SYSTEM"
   });
+  triggerAlertsSafely();
 }
 
 async function recordAudit(
@@ -365,6 +367,14 @@ async function recordAudit(
 ): Promise<void> {
   assertNoCoordinateMetadata(input.metadata);
   await dependencies.recordAudit(input);
+}
+
+function triggerAlertsSafely(): void {
+  try {
+    triggerAlertDetection();
+  } catch {
+    // Alert detection is fire-and-forget; failures must not block the request.
+  }
 }
 
 function getAuditTargetType(markerType: MarkerType): DeletedMarkerAuditTarget {

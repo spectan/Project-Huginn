@@ -42,16 +42,16 @@ vi.mock("@/lib/db/prisma", () => ({
 import AdminDashboardPage from "./page";
 
 describe("AdminDashboardPage", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.viewer = { isAdmin: true };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        json: async () => ({ alerts: [] }),
-        ok: true
-      }))
-    );
+    fetchMock = vi.fn(async () => ({
+      json: async () => ({ alerts: [] }),
+      ok: true
+    }));
+    vi.stubGlobal("fetch", fetchMock);
   });
 
   it("renders stat tiles with the admin overview counts", async () => {
@@ -71,29 +71,38 @@ describe("AdminDashboardPage", () => {
     expect(screen.queryByText("Markers expiring within 24h")).toBeNull();
   });
 
-  it("renders no quick links — navigation lives in the sidebar", async () => {
+  it("renders no quick links beyond the alerts View all link — navigation lives in the sidebar", async () => {
     render(await AdminDashboardPage());
 
     await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
 
-    expect(screen.queryByRole("link")).toBeNull();
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("/admin/alerts");
   });
 
-  it("renders the alerts section", async () => {
+  it("renders the read-only alerts section", async () => {
     render(await AdminDashboardPage());
 
     expect(screen.getByRole("heading", { name: "Alerts" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Run detection now" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "View all →" }).getAttribute("href")).toBe("/admin/alerts");
+    expect(screen.queryByRole("button", { name: "Run detection now" })).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
     expect(await screen.findByText("No alerts.")).toBeTruthy();
+
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), "http://localhost");
+    expect(url.pathname).toBe("/api/admin/alerts");
+    expect(url.searchParams.get("status")).toBe("OPEN");
+    expect(url.searchParams.get("limit")).toBe("10");
   });
 
-  it("renders the watermark section with a compact digits lookup", async () => {
+  it("renders the watermark section with a compact UserID lookup", async () => {
     render(await AdminDashboardPage());
 
     expect(screen.getByRole("heading", { name: "Watermark" })).toBeTruthy();
     expect(screen.getByText(/Paste or drop a screenshot/)).toBeTruthy();
 
-    const digitsInput = screen.getByLabelText("Digits");
+    const digitsInput = screen.getByLabelText("UserID");
     fireEvent.change(digitsInput, { target: { value: "0007" } });
     expect(screen.getByText("Mako")).toBeTruthy();
 

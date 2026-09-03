@@ -1,3 +1,4 @@
+import { triggerAlertDetection } from "@/lib/alerts/alert-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
   canAdminister,
@@ -171,6 +172,7 @@ export async function updateAdminUser(
     targetId: user.id,
     targetType: "USER"
   });
+  triggerAlertsSafely();
 
   return ok(serializeAdminUser(
     user,
@@ -214,6 +216,7 @@ export async function updateAdminUserPassword(
     targetId: user.id,
     targetType: "USER"
   });
+  triggerAlertsSafely();
 
   return ok(serializeAdminUser(user));
 }
@@ -252,6 +255,7 @@ export async function removeAdminUser(
     targetId: user.id,
     targetType: "USER"
   });
+  triggerAlertsSafely();
 
   return ok(serializeAdminUser(user));
 }
@@ -362,6 +366,7 @@ async function recordFailedAuthorization(
     targetId,
     targetType: targetId === null ? "SYSTEM" : "USER"
   });
+  triggerAlertsSafely();
 }
 
 async function recordAudit(
@@ -370,4 +375,12 @@ async function recordAudit(
 ): Promise<void> {
   assertNoCoordinateMetadata(input.metadata);
   await dependencies.recordAudit(input);
+}
+
+function triggerAlertsSafely(): void {
+  try {
+    triggerAlertDetection();
+  } catch {
+    // Alert detection is fire-and-forget; failures must not block the request.
+  }
 }

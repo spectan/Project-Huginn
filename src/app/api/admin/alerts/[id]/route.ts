@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { deleteAlert } from "@/lib/alerts/alert-service";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canViewAuditLog } from "@/lib/domain/permissions";
-import { acknowledgeAlert } from "@/lib/alerts/alert-service";
 
 type RouteContext = {
   params: Promise<{
@@ -9,7 +9,7 @@ type RouteContext = {
   }>;
 };
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function DELETE(_request: Request, context: RouteContext) {
   const viewer = await getCurrentViewer();
 
   if (viewer === null || !canViewAuditLog(viewer)) {
@@ -20,11 +20,11 @@ export async function POST(_request: Request, context: RouteContext) {
   }
 
   const { id } = await context.params;
-  const result = await acknowledgeAlert(id, viewer.id);
+  const result = await deleteAlert(id);
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    return NextResponse.json({ error: result.error }, { status: 404 });
   }
 
-  return NextResponse.json({ alert: result.value.alert });
+  return NextResponse.json({ ok: true });
 }

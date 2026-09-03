@@ -1,4 +1,13 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  triggerAlertDetection: vi.fn()
+}));
+
+vi.mock("@/lib/alerts/alert-service", () => ({
+  triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
 import {
   approveUser,
   changeOwnPassword,
@@ -321,5 +330,123 @@ describe("auth service", () => {
       error: "New passwords do not match"
     });
     expect(deps.__test.passwordUpdates).toEqual([]);
+  });
+});
+
+describe("auth service alert detection triggers", () => {
+  let deps: TestAuthServiceDependencies;
+
+  beforeEach(() => {
+    mocks.triggerAlertDetection.mockReset();
+    deps = createDependencies();
+  });
+
+  it("triggers alert detection after a successful registration", async () => {
+    const result = await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a successful login", async () => {
+    await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+    mocks.triggerAlertDetection.mockClear();
+
+    const result = await loginUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a failed login", async () => {
+    const result = await loginUser({
+      password: "correct horse battery staple",
+      username: "ghost"
+    }, deps);
+
+    expect(result.ok).toBe(false);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a failed admin authorization", async () => {
+    const result = await approveUser({
+      accessLevel: "READ",
+      actor: nonAdminActor,
+      userId: "user-1"
+    }, deps);
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after approving a user", async () => {
+    await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+    mocks.triggerAlertDetection.mockClear();
+
+    const result = await approveUser({
+      accessLevel: "READ",
+      actor: adminActor,
+      userId: "user-1"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers alert detection after a password change", async () => {
+    const registered = await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+
+    expect(registered.ok).toBe(true);
+
+    if (!registered.ok) {
+      return;
+    }
+
+    mocks.triggerAlertDetection.mockClear();
+
+    const result = await changeOwnPassword({
+      actor: { id: registered.value.viewer.id },
+      currentSessionTokenHash: "current-session-hash",
+      input: {
+        confirmPassword: "new secure password",
+        currentPassword: "correct horse battery staple",
+        newPassword: "new secure password"
+      }
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a synchronous trigger failure break the mutation", async () => {
+    await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+    mocks.triggerAlertDetection.mockImplementation(() => {
+      throw new Error("alert pipeline exploded");
+    });
+
+    const result = await loginUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+
+    expect(result.ok).toBe(true);
   });
 });

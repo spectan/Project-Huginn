@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { AuditHistoryDependencies } from "./audit-history";
 
-export function createAuditHistoryDependencies(): AuditHistoryDependencies {
+export function createAuditHistoryDependencies(clientIp?: string): AuditHistoryDependencies {
   return {
     listEvents: async ({ before, limit }) => {
       return prisma.auditEvent.findMany({
@@ -47,12 +47,15 @@ export function createAuditHistoryDependencies(): AuditHistoryDependencies {
       });
     },
     recordAudit: async (input) => {
+      const metadata = clientIp !== undefined && clientIp.length > 0
+        ? { ...input.metadata, clientIp }
+        : input.metadata;
       await prisma.auditEvent.create({
         data: {
           action: input.action,
           actorUserId: input.actorUserId,
           mapId: input.mapId,
-          metadata: input.metadata as Prisma.InputJsonValue,
+          metadata: metadata as Prisma.InputJsonValue,
           targetId: input.targetId,
           targetType: input.targetType
         }

@@ -13,13 +13,20 @@ const ALERT_DEDUP_WINDOW_MS = 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_MS = 60 * 60 * 1000;
 const DELETE_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_FAILURE_WINDOW_MS = 5 * 60 * 1000;
+const MAP_DATA_ACCESS_WINDOW_MS = 10 * 60 * 1000;
 const NEW_IP_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const REGISTRATION_WINDOW_MS = 60 * 60 * 1000;
+const TRIGGER_LOOKBACK_MS = 15 * 60 * 1000;
 
 const OFF_HOURS_ADMIN_ACTIONS = new Set([
   "LOGIN",
   "MARKER_CREATED",
   "MARKER_UPDATED",
-  "MARKER_DELETED"
+  "MARKER_DELETED",
+  "USER_APPROVED",
+  "USER_DELETED",
+  "USER_PASSWORD_CHANGED",
+  "PERMISSION_CHANGED"
 ]);
 
 type ListAlertsOptions = {
@@ -107,10 +114,12 @@ export async function detectAlerts(
   const createdAlerts: AlertWithActor[] = [];
 
   const ruleResults = await Promise.all([
-    detectDeleteSpikes(events),
-    detectNewAdminIps(events),
+    detectDeleteSpikes(events, getWindowStart(since, until, DELETE_WINDOW_MS)),
+    detectMapDataAccessSpikes(events, getWindowStart(since, until, MAP_DATA_ACCESS_WINDOW_MS)),
+    detectNewIpLogins(events),
     detectOffHoursAdminActivity(events),
-    detectRepeatedAuthFailures(events)
+    detectRegistrationSpikes(events, getWindowStart(since, until, REGISTRATION_WINDOW_MS)),
+    detectRepeatedAuthFailures(events, getWindowStart(since, until, AUTH_FAILURE_WINDOW_MS))
   ]);
 
   for (const alerts of ruleResults) {
@@ -123,18 +132,28 @@ export async function detectAlerts(
   });
 }
 
-export async function acknowledgeAlert(
-  alertId: string,
-  userId: string
-): Promise<Result<{ alert: AlertWithActor }>> {
-  return updateAlertStatus(alertId, userId, "ACKNOWLEDGED");
+export function triggerAlertDetection(): void {
+  detectAlerts({ since: new Date(Date.now() - TRIGGER_LOOKBACK_MS) }).catch(() => undefined);
 }
 
-export async function resolveAlert(
-  alertId: string,
-  userId: string
-): Promise<Result<{ alert: AlertWithActor }>> {
-  return updateAlertStatus(alertId, userId, "RESOLVED");
+export async function deleteAlert(alertId: string): Promise<Result<null>> {
+  const existing = await prisma.alert.findUnique({
+    where: {
+      id: alertId
+    }
+  });
+
+  if (existing === null) {
+    return err("Alert was not found");
+  }
+
+  await prisma.alert.delete({
+    where: {
+      id: alertId
+    }
+  });
+
+  return ok(null);
 }
 
 export async function sendWebhook(alert: AlertWithActor): Promise<void> {
@@ -167,61 +186,10 @@ export async function sendWebhook(alert: AlertWithActor): Promise<void> {
   });
 }
 
-async function updateAlertStatus(
-  alertId: string,
-  userId: string,
-  status: AlertStatus
-): Promise<Result<{ alert: AlertWithActor }>> {
-  const existing = await prisma.alert.findUnique({
-    where: {
-      id: alertId
-    }
-  });
-
-  if (existing === null) {
-    return err("Alert was not found");
-  }
-
-  const data: Prisma.AlertUncheckedUpdateInput = {
-    status
-  };
-
-  if (status === "ACKNOWLEDGED") {
-    data.acknowledgedByUserId = userId;
-    data.acknowledgedAt = new Date();
-  } else if (status === "RESOLVED") {
-    data.resolvedByUserId = userId;
-    data.resolvedAt = new Date();
-  }
-
-  const alert = await prisma.alert.update({
-    data,
-    include: {
-      actor: {
-        select: {
-          username: true
-        }
-      },
-      map: {
-        select: {
-          name: true
-        }
-      }
-    },
-    where: {
-      id: alertId
-    }
-  });
-
-  return ok({
-    alert: serializeAlert(alert)
-  });
-}
-
 async function detectDeleteSpikes(
-  events: AuditEventWithActor[]
+  events: AuditEventWithActor[],
+  windowStart: Date
 ): Promise<AlertWithActor[]> {
-  const windowStart = new Date(Date.now() - DELETE_WINDOW_MS);
   const deleteEvents = events.filter(
     (event) =>
       event.actorUserId !== null &&
@@ -268,15 +236,64 @@ async function detectDeleteSpikes(
   return results;
 }
 
-async function detectNewAdminIps(
+async function detectMapDataAccessSpikes(
+  events: AuditEventWithActor[],
+  windowStart: Date
+): Promise<AlertWithActor[]> {
+  const accessEvents = events.filter(
+    (event) =>
+      event.actorUserId !== null &&
+      event.createdAt >= windowStart &&
+      event.action === "MAP_DATA_ACCESSED"
+  );
+
+  const countsByUser = groupByUser(accessEvents);
+  const results: AlertWithActor[] = [];
+
+  for (const [userId, count] of countsByUser.entries()) {
+    let severity: AlertSeverity | null = null;
+
+    if (count >= 15) {
+      severity = "HIGH";
+    } else if (count >= 5) {
+      severity = "MEDIUM";
+    }
+
+    if (severity === null) {
+      continue;
+    }
+
+    const event = accessEvents.find((e) => e.actorUserId === userId);
+    const user = event?.actor ?? null;
+    const alert = await createAlert({
+      actorUserId: userId,
+      description: `${count} map data access events in the last 10 minutes`,
+      mapId: event?.mapId ?? null,
+      metadata: {
+        count,
+        windowMinutes: 10
+      },
+      rule: "MAP_DATA_ACCESS_SPIKE",
+      severity,
+      title: `Bulk map data access for ${user?.username ?? "unknown user"}`
+    });
+
+    if (alert !== null) {
+      results.push(alert);
+    }
+  }
+
+  return results;
+}
+
+async function detectNewIpLogins(
   events: AuditEventWithActor[]
 ): Promise<AlertWithActor[]> {
   const loginEvents = events.filter(
-    (event) => event.action === "LOGIN" && event.actor !== null && event.actor.isAdmin
+    (event) => event.action === "LOGIN" && event.actor !== null
   );
 
   const results: AlertWithActor[] = [];
-  const lookbackStart = new Date(Date.now() - NEW_IP_LOOKBACK_MS);
 
   for (const event of loginEvents) {
     const actor = event.actor;
@@ -291,37 +308,40 @@ async function detectNewAdminIps(
       continue;
     }
 
-    const priorLogin = await prisma.auditEvent.findFirst({
-      where: {
-        action: "LOGIN",
-        actorUserId: event.actorUserId,
-        createdAt: {
-          gte: lookbackStart,
-          lt: event.createdAt
-        },
-        metadata: {
-          path: ["clientIp"],
-          equals: clientIp
-        }
-      }
-    });
+    const hasPriorLogin = await findPriorLoginFromIp(
+      event.actorUserId,
+      clientIp,
+      event.createdAt
+    );
 
-    if (priorLogin !== null) {
+    if (hasPriorLogin) {
       continue;
     }
 
-    const alert = await createAlert({
-      actorUserId: event.actorUserId,
-      description: `Admin ${actor.username} logged in from a new IP address (${clientIp})`,
-      mapId: event.mapId ?? null,
-      metadata: {
-        clientIp,
-        username: actor.username
-      },
-      rule: "NEW_ADMIN_IP",
-      severity: "HIGH",
-      title: `New admin login IP for ${actor.username}`
-    });
+    const alert = actor.isAdmin
+      ? await createAlert({
+          actorUserId: event.actorUserId,
+          description: `Admin ${actor.username} logged in from a new IP address (${clientIp})`,
+          mapId: event.mapId ?? null,
+          metadata: {
+            clientIp,
+            username: actor.username
+          },
+          rule: "NEW_ADMIN_IP",
+          severity: "HIGH",
+          title: `New admin login IP for ${actor.username}`
+        })
+      : await createAlert({
+          actorUserId: event.actorUserId,
+          description: `${actor.username} logged in from a new IP address (${clientIp})`,
+          mapId: event.mapId ?? null,
+          metadata: {
+            clientIp
+          },
+          rule: "NEW_IP_LOGIN",
+          severity: "LOW",
+          title: `New IP login for ${actor.username}`
+        });
 
     if (alert !== null) {
       results.push(alert);
@@ -329,6 +349,30 @@ async function detectNewAdminIps(
   }
 
   return results;
+}
+
+async function findPriorLoginFromIp(
+  actorUserId: string,
+  clientIp: string,
+  before: Date
+): Promise<boolean> {
+  const lookbackStart = new Date(Date.now() - NEW_IP_LOOKBACK_MS);
+  const priorLogin = await prisma.auditEvent.findFirst({
+    where: {
+      action: "LOGIN",
+      actorUserId,
+      createdAt: {
+        gte: lookbackStart,
+        lt: before
+      },
+      metadata: {
+        path: ["clientIp"],
+        equals: clientIp
+      }
+    }
+  });
+
+  return priorLogin !== null;
 }
 
 async function detectOffHoursAdminActivity(
@@ -374,10 +418,58 @@ async function detectOffHoursAdminActivity(
   return results;
 }
 
-async function detectRepeatedAuthFailures(
-  events: AuditEventWithActor[]
+async function detectRegistrationSpikes(
+  events: AuditEventWithActor[],
+  windowStart: Date
 ): Promise<AlertWithActor[]> {
-  const windowStart = new Date(Date.now() - AUTH_FAILURE_WINDOW_MS);
+  const registrationEvents = events.filter(
+    (event) => event.action === "REGISTRATION" && event.createdAt >= windowStart
+  );
+
+  const countsByIp = new Map<string, number>();
+
+  for (const event of registrationEvents) {
+    const ip = extractClientIp(event.metadata);
+
+    if (ip === null) {
+      continue;
+    }
+
+    countsByIp.set(ip, (countsByIp.get(ip) ?? 0) + 1);
+  }
+
+  const results: AlertWithActor[] = [];
+
+  for (const [ip, count] of countsByIp.entries()) {
+    if (count < 3) {
+      continue;
+    }
+
+    const alert = await createAlert({
+      actorUserId: null,
+      description: `${count} registrations from ${ip} in the last 60 minutes`,
+      mapId: null,
+      metadata: {
+        count,
+        windowMinutes: 60
+      },
+      rule: "REGISTRATION_SPIKE",
+      severity: "MEDIUM",
+      title: `Multiple registrations from ${ip}`
+    });
+
+    if (alert !== null) {
+      results.push(alert);
+    }
+  }
+
+  return results;
+}
+
+async function detectRepeatedAuthFailures(
+  events: AuditEventWithActor[],
+  windowStart: Date
+): Promise<AlertWithActor[]> {
   const failureEvents = events.filter(
     (event) =>
       (event.action === "FAILED_LOGIN" || event.action === "FAILED_AUTHORIZATION") &&
@@ -491,6 +583,10 @@ async function createAlert(input: {
   }
 
   return serialized;
+}
+
+function getWindowStart(since: Date, until: Date, windowMs: number): Date {
+  return new Date(Math.max(since.getTime(), until.getTime() - windowMs));
 }
 
 function groupByUser(events: AuditEventWithActor[]): Map<string, number> {
