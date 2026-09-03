@@ -9,7 +9,7 @@ import { join } from "path";
 export const WATERMARK_SECRET = process.env.WATERMARK_SECRET ?? "";
 
 /** Watermark format version. Bumped when the embedding scheme changes. */
-export const WATERMARK_VERSION = 5;
+export const WATERMARK_VERSION = 6;
 
 /**
  * Spatial block size for the color-dither watermark. Larger blocks are more
@@ -23,7 +23,7 @@ export const BLOCK_SIZE = 16;
  * negative chips darken. The change is applied to R, G, and B equally so
  * hue is preserved.
  */
-export const DITHER_DELTA = 1;
+export const DITHER_DELTA = 3;
 
 /**
  * Candidate relative scales searched by the extractor. A screenshot taken

@@ -382,6 +382,6 @@ describe("watermark robustness on celebration terrain", () => {
     const psnr = 10 * Math.log10((255 * 255) / mse);
     console.log("MSE:", mse, "PSNR:", psnr);
 
-    expect(psnr).toBeGreaterThan(45);
+    expect(psnr).toBeGreaterThan(38);
   });
 });
