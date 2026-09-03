@@ -25,6 +25,7 @@ type RevealResult = {
   scale: number;
   offsetX: number;
   offsetY: number;
+  previewImage?: string | null;
 };
 
 export function WatermarkRevealView({
@@ -233,6 +234,18 @@ export function WatermarkRevealView({
             <p>
               <strong>Offset:</strong> ({result.offsetX}, {result.offsetY})
             </p>
+            {result.previewImage ? (
+              <div style={{ marginTop: 16 }}>
+                <p>
+                  <strong>Saturation-boosted preview</strong> (chroma watermark becomes visible under boost):
+                </p>
+                <img
+                  src={result.previewImage}
+                  alt="Saturation-boosted watermark preview"
+                  style={{ maxWidth: "100%", border: "1px solid #444", borderRadius: 4, imageRendering: "pixelated" }}
+                />
+              </div>
+            ) : null}
           </div>
         )}
       </section>

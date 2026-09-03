@@ -9,7 +9,7 @@ import { join } from "path";
 export const WATERMARK_SECRET = process.env.WATERMARK_SECRET ?? "";
 
 /** Watermark format version. Bumped when the embedding scheme changes. */
-export const WATERMARK_VERSION = 6;
+export const WATERMARK_VERSION = 7;
 
 /**
  * Spatial block size for the color-dither watermark. Larger blocks are more
@@ -19,18 +19,23 @@ export const WATERMARK_VERSION = 6;
 export const BLOCK_SIZE = 16;
 
 /**
- * Luma delta applied to every pixel in a block. Positive chips brighten,
- * negative chips darken. The change is applied to R, G, and B equally so
- * hue is preserved.
+ * Chroma delta applied to the Cb and Cr channels of every pixel in a block
+ * (BT.601). Positive chips push chroma away from neutral, negative chips
+ * pull toward neutral. Luma is untouched, so the watermark lives entirely
+ * in the color channels: imperceptible at normal viewing, clearly visible
+ * under a saturation boost.
  */
-export const DITHER_DELTA = 3;
+export const CHROMA_DELTA = 2;
+
+/** Backwards-compatible alias (was luma DITHER_DELTA in v5/v6). */
+export const DITHER_DELTA = CHROMA_DELTA;
 
 /**
  * Candidate relative scales searched by the extractor. A screenshot taken
  * zoomed out is a downscaled copy of the watermarked layer; upscaling it back
  * toward the original resolution restores the block grid.
  */
-export const EXTRACT_SCALE_FACTORS: number[] = [1, 2, 4, 8];
+export const EXTRACT_SCALE_FACTORS: number[] = [1, 1.5, 2, 3, 4, 6, 8];
 
 /** Maximum pixel dimension allowed during alignment search. */
 export const MAX_ALIGNMENT_DIMENSION = 2048;
@@ -66,7 +71,7 @@ export function buildCacheKey(
 ): string {
   return createHash("sha256")
     .update(
-      `${fileHash}:${userId}:${layerId}:${WATERMARK_VERSION}:${BLOCK_SIZE}:${DITHER_DELTA}`
+      `${fileHash}:${userId}:${layerId}:${WATERMARK_VERSION}:${BLOCK_SIZE}:${CHROMA_DELTA}`
     )
     .digest("hex");
 }

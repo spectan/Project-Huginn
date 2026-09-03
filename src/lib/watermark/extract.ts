@@ -33,23 +33,49 @@ export interface ExtractResult {
   scale: number;
 }
 
-interface ImageBlocks {
+interface ImageChroma {
   width: number;
   height: number;
   blocksW: number;
   blocksH: number;
-  luma: Float64Array;
-  integral: Float64Array;
+  cb: Float64Array;
+  cr: Float64Array;
+  integralCb: Float64Array;
+  integralCr: Float64Array;
 }
 
-function getLuma(r: number, g: number, b: number): number {
-  return 0.299 * r + 0.587 * g + 0.114 * b;
+function rgbToChroma(
+  r: number,
+  g: number,
+  b: number
+): { cb: number; cr: number } {
+  return {
+    cb: 128 - 0.168736 * r - 0.331264 * g + 0.5 * b,
+    cr: 128 + 0.5 * r - 0.418688 * g - 0.081312 * b,
+  };
 }
 
-async function loadImageLuma(
+function buildIntegral(
+  values: Float64Array,
+  width: number,
+  height: number
+): Float64Array {
+  const integral = new Float64Array((width + 1) * (height + 1));
+  const stride = width + 1;
+  for (let y = 1; y <= height; y++) {
+    let rowSum = 0;
+    for (let x = 1; x <= width; x++) {
+      rowSum += values[(y - 1) * width + (x - 1)]!;
+      integral[y * stride + x] = integral[(y - 1) * stride + x]! + rowSum;
+    }
+  }
+  return integral;
+}
+
+async function loadImageChroma(
   imageBuffer: Buffer,
   scale = 1
-): Promise<ImageBlocks> {
+): Promise<ImageChroma> {
   let pipeline = sharp(imageBuffer).ensureAlpha();
 
   if (scale !== 1) {
@@ -82,28 +108,22 @@ async function loadImageLuma(
   const height = info.height;
   const channels = info.channels ?? 4;
   const pixelCount = width * height;
-  const luma = new Float64Array(pixelCount);
+  const cb = new Float64Array(pixelCount);
+  const cr = new Float64Array(pixelCount);
 
   for (let i = 0; i < pixelCount; i++) {
     const idx = i * channels;
-    luma[i] = getLuma(data[idx]!, data[idx + 1]!, data[idx + 2]!);
+    const c = rgbToChroma(data[idx]!, data[idx + 1]!, data[idx + 2]!);
+    cb[i] = c.cb;
+    cr[i] = c.cr;
   }
 
-  // Integral image where integral[(y+1)*(width+1)+(x+1)] is the sum of the
-  // rectangle from (0,0) inclusive to (x,y) inclusive.
-  const integral = new Float64Array((width + 1) * (height + 1));
-  const stride = width + 1;
-  for (let y = 1; y <= height; y++) {
-    let rowSum = 0;
-    for (let x = 1; x <= width; x++) {
-      rowSum += luma[(y - 1) * width + (x - 1)]!;
-      integral[y * stride + x] = integral[(y - 1) * stride + x]! + rowSum;
-    }
-  }
+  const integralCb = buildIntegral(cb, width, height);
+  const integralCr = buildIntegral(cr, width, height);
 
   const blocksW = Math.floor(width / BLOCK_SIZE);
   const blocksH = Math.floor(height / BLOCK_SIZE);
-  return { width, height, blocksW, blocksH, luma, integral };
+  return { width, height, blocksW, blocksH, cb, cr, integralCb, integralCr };
 }
 
 function blockAverage(
@@ -116,7 +136,7 @@ function blockAverage(
   if (x < 0 || y < 0) return null;
   const x2 = x + size;
   const y2 = y + size;
-  if (x2 > width || y2 > (integral.length / (width + 1) - 1)) return null;
+  if (x2 > width || y2 > integral.length / (width + 1) - 1) return null;
   const stride = width + 1;
   const sum =
     integral[y2 * stride + x2]! -
@@ -140,7 +160,7 @@ function pearsonScore(
     return { score: 0, sampleCount: 0 };
   }
 
-  // Center observed deltas so global brightness/contrast shifts are ignored.
+  // Center observed deltas so global color shifts are ignored.
   let mean = 0;
   for (let i = 0; i < count; i++) {
     mean += observed[i]!;
@@ -176,23 +196,24 @@ interface AlignmentResult {
 }
 
 /**
- * Compute observed luma deltas for every block of the (rescaled) screenshot
- * aligned to a window in the original starting at coarse block position
- * (startBx, startBy) and sub-block pixel offset (offsetX, offsetY).
+ * Compute observed Cb and Cr deltas for every block of the (rescaled)
+ * screenshot aligned to a window in the original starting at coarse block
+ * position (startBx, startBy) and sub-block pixel offset (offsetX, offsetY).
  *
  * Screenshot block (sx, sy) is compared against original block
  * (startBx + sx, startBy + sy), shifted by (offsetX, offsetY). The chips
  * array is indexed by absolute original block coordinates.
  */
 function computeWindowDeltas(
-  original: ImageBlocks,
-  screenshot: ImageBlocks,
+  original: ImageChroma,
+  screenshot: ImageChroma,
   startBx: number,
   startBy: number,
   offsetX: number,
   offsetY: number,
   chips: Int8Array,
-  outObserved: Float64Array,
+  outObservedCb: Float64Array,
+  outObservedCr: Float64Array,
   outChips: Int8Array
 ): number {
   const oW = original.width;
@@ -219,25 +240,21 @@ function computeWindowDeltas(
       if (ox < 0 || ox + BLOCK_SIZE > original.width) continue;
       if (sxQ < 0 || sxQ + BLOCK_SIZE > sW) continue;
 
-      const origAvg = blockAverage(
-        original.integral,
-        oW,
-        ox,
-        oy,
-        BLOCK_SIZE
-      );
-      const shotAvg = blockAverage(
-        screenshot.integral,
-        sW,
-        sxQ,
-        syQ,
-        BLOCK_SIZE
-      );
-      if (origAvg === null || shotAvg === null) {
+      const origCb = blockAverage(original.integralCb, oW, ox, oy, BLOCK_SIZE);
+      const origCr = blockAverage(original.integralCr, oW, ox, oy, BLOCK_SIZE);
+      const shotCb = blockAverage(screenshot.integralCb, sW, sxQ, syQ, BLOCK_SIZE);
+      const shotCr = blockAverage(screenshot.integralCr, sW, sxQ, syQ, BLOCK_SIZE);
+      if (
+        origCb === null ||
+        origCr === null ||
+        shotCb === null ||
+        shotCr === null
+      ) {
         continue;
       }
 
-      outObserved[count] = shotAvg - origAvg;
+      outObservedCb[count] = shotCb - origCb;
+      outObservedCr[count] = shotCr - origCr;
       outChips[count] = chips[by * oBlocksW + bx]!;
       count++;
     }
@@ -246,9 +263,38 @@ function computeWindowDeltas(
   return count;
 }
 
-async function loadOriginalBuffer(
-  context: ExtractContext
-): Promise<Buffer> {
+/** Combined Cb+Cr Pearson score at an alignment. */
+function scoreWindow(
+  original: ImageChroma,
+  screenshot: ImageChroma,
+  startBx: number,
+  startBy: number,
+  offsetX: number,
+  offsetY: number,
+  chips: Int8Array,
+  observedCb: Float64Array,
+  observedCr: Float64Array,
+  expected: Int8Array
+): number {
+  const count = computeWindowDeltas(
+    original,
+    screenshot,
+    startBx,
+    startBy,
+    offsetX,
+    offsetY,
+    chips,
+    observedCb,
+    observedCr,
+    expected
+  );
+  if (count === 0) return 0;
+  const cbScore = pearsonScore(observedCb, expected, count).score;
+  const crScore = pearsonScore(observedCr, expected, count).score;
+  return (cbScore + crScore) / 2;
+}
+
+async function loadOriginalBuffer(context: ExtractContext): Promise<Buffer> {
   if (context.originalImageBuffer) {
     return context.originalImageBuffer;
   }
@@ -308,7 +354,7 @@ export async function extractWatermark(
   const layerId = context.layerId ?? `${context.mapId}:default`;
   const originalBuffer = await loadOriginalBuffer(context);
 
-  const original = await loadImageLuma(originalBuffer, 1);
+  const original = await loadImageChroma(originalBuffer, 1);
   const referenceChips = createChipPattern(
     { mapId: context.mapId, layerId, userId: context.userId },
     original.blocksW,
@@ -321,7 +367,7 @@ export async function extractWatermark(
     referenceChips
   );
 
-  const screenshot = await loadImageLuma(imageBuffer, alignment.scale);
+  const screenshot = await loadImageChroma(imageBuffer, alignment.scale);
   const score = scoreAtAlignment(original, screenshot, alignment, referenceChips);
 
   const found = score >= CONFIDENCE_THRESHOLD;
@@ -335,18 +381,18 @@ export async function extractWatermark(
 
 interface ScaleCandidate {
   scale: number;
-  screenshot: ImageBlocks;
+  screenshot: ImageChroma;
 }
 
 async function findBestAlignmentForScales(
   imageBuffer: Buffer,
-  original: ImageBlocks,
+  original: ImageChroma,
   chips: Int8Array
 ): Promise<AlignmentResult> {
   const scaledImages: ScaleCandidate[] = [];
 
   for (const scale of EXTRACT_SCALE_FACTORS) {
-    const screenshot = await loadImageLuma(imageBuffer, scale);
+    const screenshot = await loadImageChroma(imageBuffer, scale);
     if (screenshot.blocksW === 0 || screenshot.blocksH === 0) {
       continue;
     }
@@ -363,7 +409,8 @@ async function findBestAlignmentForScales(
   };
 
   const maxBlocks = original.blocksW * original.blocksH;
-  const observed = new Float64Array(maxBlocks);
+  const observedCb = new Float64Array(maxBlocks);
+  const observedCr = new Float64Array(maxBlocks);
   const expected = new Int8Array(maxBlocks);
 
   for (const { scale, screenshot } of scaledImages) {
@@ -371,7 +418,8 @@ async function findBestAlignmentForScales(
       original,
       screenshot,
       chips,
-      observed,
+      observedCb,
+      observedCr,
       expected,
       scale
     );
@@ -390,10 +438,11 @@ async function findBestAlignmentForScales(
 const COARSE_POSITIONS_TO_REFINE = 5;
 
 function findBestAlignmentForScale(
-  original: ImageBlocks,
-  screenshot: ImageBlocks,
+  original: ImageChroma,
+  screenshot: ImageChroma,
   chips: Int8Array,
-  observed: Float64Array,
+  observedCb: Float64Array,
+  observedCr: Float64Array,
   expected: Int8Array,
   scale: number
 ): AlignmentResult {
@@ -417,7 +466,7 @@ function findBestAlignmentForScale(
   }> = [];
   for (let startBy = 0; startBy < maxStartBy; startBy++) {
     for (let startBx = 0; startBx < maxStartBx; startBx++) {
-      const count = computeWindowDeltas(
+      const score = scoreWindow(
         original,
         screenshot,
         startBx,
@@ -425,12 +474,13 @@ function findBestAlignmentForScale(
         0,
         0,
         chips,
-        observed,
+        observedCb,
+        observedCr,
         expected
       );
-      if (count === 0) continue;
-
-      const { score } = pearsonScore(observed, expected, count);
+      if (score === 0 && screenshot.blocksW * screenshot.blocksH > 0) {
+        // No overlapping blocks; skip.
+      }
 
       if (
         topCoarse.length < COARSE_POSITIONS_TO_REFINE ||
@@ -449,7 +499,7 @@ function findBestAlignmentForScale(
   for (const coarse of topCoarse) {
     for (let oy = 0; oy < BLOCK_SIZE; oy++) {
       for (let ox = 0; ox < BLOCK_SIZE; ox++) {
-        const count = computeWindowDeltas(
+        const score = scoreWindow(
           original,
           screenshot,
           coarse.startBx,
@@ -457,12 +507,10 @@ function findBestAlignmentForScale(
           ox,
           oy,
           chips,
-          observed,
+          observedCb,
+          observedCr,
           expected
         );
-        if (count === 0) continue;
-
-        const { score } = pearsonScore(observed, expected, count);
         if (score > best.score) {
           best = {
             scale,
@@ -485,15 +533,16 @@ function findBestAlignmentForScale(
 }
 
 function scoreAtAlignment(
-  original: ImageBlocks,
-  screenshot: ImageBlocks,
+  original: ImageChroma,
+  screenshot: ImageChroma,
   alignment: AlignmentResult,
   chips: Int8Array
 ): number {
   const maxBlocks = original.blocksW * original.blocksH;
-  const observed = new Float64Array(maxBlocks);
+  const observedCb = new Float64Array(maxBlocks);
+  const observedCr = new Float64Array(maxBlocks);
   const expected = new Int8Array(maxBlocks);
-  const count = computeWindowDeltas(
+  return scoreWindow(
     original,
     screenshot,
     alignment.startBx,
@@ -501,14 +550,54 @@ function scoreAtAlignment(
     alignment.offsetX,
     alignment.offsetY,
     chips,
-    observed,
+    observedCb,
+    observedCr,
     expected
   );
-  if (count === 0) {
-    return 0;
+}
+
+/**
+ * Produce a saturation-boosted rendering of an image so the chroma
+ * watermark pattern becomes visible to the eye. Used by the admin reveal
+ * page as a visual confirmation alongside the automated correlation score.
+ */
+export async function boostChromaImage(
+  imageBuffer: Buffer,
+  factor = 8
+): Promise<Buffer> {
+  const { data, info } = await sharp(imageBuffer)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const width = info.width;
+  const height = info.height;
+  const channels = info.channels ?? 4;
+
+  const out = Buffer.from(data);
+  for (let i = 0; i < width * height; i++) {
+    const idx = i * channels;
+    const r = data[idx]!;
+    const g = data[idx + 1]!;
+    const b = data[idx + 2]!;
+    const y = 0.299 * r + 0.587 * g + 0.114 * b;
+    const cb = 128 - 0.168736 * r - 0.331264 * g + 0.5 * b;
+    const cr = 128 + 0.5 * r - 0.418688 * g - 0.081312 * b;
+    const cb2 = 128 + (cb - 128) * factor;
+    const cr2 = 128 + (cr - 128) * factor;
+    const rr = Math.max(0, Math.min(255, Math.round(y + 1.402 * (cr2 - 128))));
+    const gg = Math.max(
+      0,
+      Math.min(255, Math.round(y - 0.344136 * (cb2 - 128) - 0.714136 * (cr2 - 128)))
+    );
+    const bb = Math.max(0, Math.min(255, Math.round(y + 1.772 * (cb2 - 128))));
+    out[idx] = rr;
+    out[idx + 1] = gg;
+    out[idx + 2] = bb;
   }
-  const { score } = pearsonScore(observed, expected, count);
-  return score;
+
+  return sharp(out, { raw: { width, height, channels } })
+    .png({ compressionLevel: 6 })
+    .toBuffer();
 }
 
 export async function tryExtractWatermark(
@@ -552,7 +641,7 @@ export async function tryExtractWatermark(
     });
   }
 
-  const original = await loadImageLuma(originalBuffer, 1);
+  const original = await loadImageChroma(originalBuffer, 1);
 
   // Use the first candidate's chip pattern for alignment.
   const referenceChips = createChipPattern(
@@ -571,7 +660,7 @@ export async function tryExtractWatermark(
     referenceChips
   );
 
-  const screenshot = await loadImageLuma(imageBuffer, alignment.scale);
+  const screenshot = await loadImageChroma(imageBuffer, alignment.scale);
 
   const candidateResults: ExtractResult[] = [];
   for (const candidate of context.candidates) {
@@ -582,9 +671,7 @@ export async function tryExtractWatermark(
     );
     const score = scoreAtAlignment(original, screenshot, alignment, chips);
 
-    candidateResults.push(
-      makeExtractResult(false, candidate, score, alignment)
-    );
+    candidateResults.push(makeExtractResult(false, candidate, score, alignment));
   }
 
   candidateResults.sort((a, b) => b.softConfidence - a.softConfidence);

@@ -352,7 +352,7 @@ describe("watermark robustness on celebration terrain", () => {
     120000
   );
 
-  it("is visually identical (PSNR > 45)", async () => {
+  it("is visually imperceptible (PSNR > 38)", async () => {
     if (!existsSync(samplePath)) {
       return;
     }

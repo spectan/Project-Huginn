@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { prisma } from "@/lib/db/prisma";
-import { extractWatermark, tryExtractWatermark } from "@/lib/watermark/extract";
+import {
+  boostChromaImage,
+  extractWatermark,
+  tryExtractWatermark,
+} from "@/lib/watermark/extract";
 
 export async function POST(request: Request) {
   const viewer = await getCurrentViewer();
@@ -42,6 +46,7 @@ export async function POST(request: Request) {
     scale: number;
     offsetX: number;
     offsetY: number;
+    previewImage: string | null;
   } = {
     found: false,
     username: null,
@@ -54,7 +59,17 @@ export async function POST(request: Request) {
     scale: 1,
     offsetX: 0,
     offsetY: 0,
+    previewImage: null,
   };
+
+  // Always produce a saturation-boosted rendering so the admin can visually
+  // confirm the chroma pattern alongside the automated correlation score.
+  try {
+    const boosted = await boostChromaImage(imageBuffer, 8);
+    best.previewImage = `data:image/png;base64,${boosted.toString("base64")}`;
+  } catch {
+    // Preview is best-effort; detection still works without it.
+  }
 
   if (typeof userId === "string" && userId.length > 0) {
     const user = await prisma.user.findUnique({
@@ -81,6 +96,7 @@ export async function POST(request: Request) {
         scale: result.scale,
         offsetX: result.offsetX,
         offsetY: result.offsetY,
+        previewImage: best.previewImage,
       };
     }
   } else {
@@ -118,6 +134,7 @@ export async function POST(request: Request) {
         scale: result.scale,
         offsetX: result.offsetX,
         offsetY: result.offsetY,
+        previewImage: best.previewImage,
       };
     } else {
       best = {
@@ -132,6 +149,7 @@ export async function POST(request: Request) {
         scale: result.scale,
         offsetX: result.offsetX,
         offsetY: result.offsetY,
+        previewImage: best.previewImage,
       };
     }
   }
