@@ -49,9 +49,21 @@ pnpm-debug.log*
 # editor and OS files
 .vscode/
 .idea/
-.claude/
 .DS_Store
 Thumbs.db
+
+# AI assistant and workspace files
+.claude/
+CLAUDE.md
+AGENTS.md
+.kimi/
+KIMI.md
+.cursor/
+.cursorrules
+.aider*
+GEMINI.md
+.windsurf/
+*.code-workspace
 
 # deployment tool state
 .vercel/
