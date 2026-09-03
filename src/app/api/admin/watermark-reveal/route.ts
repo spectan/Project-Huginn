@@ -105,19 +105,35 @@ export async function POST(request: Request) {
       candidates,
     });
 
-    best = {
-      found: result.found,
-      username: result.userId ? usersById.get(result.userId) ?? null : null,
-      userId: result.userId,
-      watermarkNumber: result.watermarkNumber,
-      confidence: result.confidence,
-      syncConfidence: result.syncConfidence,
-      softConfidence: result.softConfidence,
-      syncSoftConfidence: result.syncSoftConfidence,
-      scale: result.scale,
-      offsetX: result.offsetX,
-      offsetY: result.offsetY,
-    };
+    if (result.found) {
+      best = {
+        found: true,
+        username: result.userId ? usersById.get(result.userId) ?? null : null,
+        userId: result.userId,
+        watermarkNumber: result.watermarkNumber,
+        confidence: result.confidence,
+        syncConfidence: result.syncConfidence,
+        softConfidence: result.softConfidence,
+        syncSoftConfidence: result.syncSoftConfidence,
+        scale: result.scale,
+        offsetX: result.offsetX,
+        offsetY: result.offsetY,
+      };
+    } else {
+      best = {
+        found: false,
+        username: null,
+        userId: null,
+        watermarkNumber: null,
+        confidence: result.confidence,
+        syncConfidence: result.syncConfidence,
+        softConfidence: result.softConfidence,
+        syncSoftConfidence: result.syncSoftConfidence,
+        scale: result.scale,
+        offsetX: result.offsetX,
+        offsetY: result.offsetY,
+      };
+    }
   }
 
   return NextResponse.json(best);
