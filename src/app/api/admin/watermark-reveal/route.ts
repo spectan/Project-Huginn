@@ -36,6 +36,8 @@ export async function POST(request: Request) {
     userId: string | null;
     confidence: number;
     syncConfidence: number;
+    softConfidence: number;
+    syncSoftConfidence: number;
     scale: number;
     offsetX: number;
     offsetY: number;
@@ -45,6 +47,8 @@ export async function POST(request: Request) {
     userId: null,
     confidence: 0,
     syncConfidence: 0,
+    softConfidence: 0,
+    syncSoftConfidence: 0,
     scale: 1,
     offsetX: 0,
     offsetY: 0,
@@ -68,6 +72,8 @@ export async function POST(request: Request) {
         userId: result.userId,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
+        softConfidence: result.softConfidence,
+        syncSoftConfidence: result.syncSoftConfidence,
         scale: result.scale,
         offsetX: result.offsetX,
         offsetY: result.offsetY,
@@ -98,6 +104,8 @@ export async function POST(request: Request) {
       userId: result.userId,
       confidence: result.confidence,
       syncConfidence: result.syncConfidence,
+      softConfidence: result.softConfidence,
+      syncSoftConfidence: result.syncSoftConfidence,
       scale: result.scale,
       offsetX: result.offsetX,
       offsetY: result.offsetY,

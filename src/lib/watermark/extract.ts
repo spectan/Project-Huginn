@@ -4,13 +4,14 @@ import {
   BLOCK_SIZE,
   COEFFS_PER_BLOCK,
   CONFIDENCE_MARGIN,
-  CONFIDENCE_THRESHOLD,
   EXTRACT_SCALE_FACTORS,
   MAX_ALIGNMENT_DIMENSION,
   MIDFREQ_INDICES,
+  SOFT_CONFIDENCE_THRESHOLD,
   SYNC_CONFIDENCE_THRESHOLD,
   SYNC_LENGTH,
   SYNC_PATTERN,
+  SYNC_SOFT_CONFIDENCE_THRESHOLD,
   TOTAL_BITS,
   assertSecret,
 } from "./config";
@@ -27,6 +28,8 @@ export interface ExtractResult {
   userId: string | null;
   confidence: number;
   syncConfidence: number;
+  softConfidence: number;
+  syncSoftConfidence: number;
   offsetX: number;
   offsetY: number;
   scale: number;
@@ -110,12 +113,20 @@ function fillBlock(
 function computeSampleStep(blockCount: number): number {
   // For images that are 1024 px or smaller we can afford to evaluate every
   // block; this makes the coarse offset estimate exact and keeps the much
-  // smaller refinement neighborhood reliable.
+  // smaller refinement neighbourhood reliable.
   if (blockCount <= 16384) {
     return 1;
   }
   const step = Math.max(1, Math.floor(blockCount / ALIGNMENT_SAMPLE_BLOCKS));
   return step % 2 === 0 ? step + 1 : step;
+}
+
+interface ExtractionScores {
+  syncConfidence: number;
+  syncSoftConfidence: number;
+  confidence: number;
+  softConfidence: number;
+  bits: (0 | 1)[];
 }
 
 /**
@@ -131,11 +142,7 @@ function extractAtOffset(
   offsetX: number,
   offsetY: number,
   sampleStep = 1
-): {
-  syncConfidence: number;
-  confidence: number;
-  bits: (0 | 1)[];
-} {
+): ExtractionScores {
   const { width, height, blocksW, blocksH, luma } = image;
   const blockCount = blocksW * blocksH;
   const correlations = new Float64Array(TOTAL_BITS);
@@ -158,25 +165,38 @@ function extractAtOffset(
     }
   }
 
+  const avgs = new Float64Array(TOTAL_BITS);
   const bits: (0 | 1)[] = [];
   for (let i = 0; i < TOTAL_BITS; i++) {
-    const avg = counts[i]! > 0 ? correlations[i]! / counts[i]! : 0;
-    bits.push(avg > 0 ? 1 : 0);
+    avgs[i] = counts[i]! > 0 ? correlations[i]! / counts[i]! : 0;
+    bits.push(avgs[i]! > 0 ? 1 : 0);
   }
 
   let syncMatches = 0;
+  let syncWeighted = 0;
+  let syncAbs = 0;
   for (let i = 0; i < SYNC_LENGTH; i++) {
-    if (bits[i] === SYNC_PATTERN[i]) syncMatches++;
+    if (bits[i]! === SYNC_PATTERN[i]!) syncMatches++;
+    const sign = SYNC_PATTERN[i]! === 1 ? 1 : -1;
+    syncWeighted += sign * avgs[i]!;
+    syncAbs += Math.abs(avgs[i]!);
   }
   const syncConfidence = syncMatches / SYNC_LENGTH;
+  const syncSoftConfidence = syncAbs > 0 ? syncWeighted / syncAbs : 0;
 
   let payloadMatches = 0;
+  let weighted = syncWeighted;
+  let absSum = syncAbs;
   for (let i = SYNC_LENGTH; i < TOTAL_BITS; i++) {
-    if (bits[i] === bitStream[i]) payloadMatches++;
+    if (bits[i]! === bitStream[i]!) payloadMatches++;
+    const sign = bitStream[i]! === 1 ? 1 : -1;
+    weighted += sign * avgs[i]!;
+    absSum += Math.abs(avgs[i]!);
   }
   const confidence = (syncMatches + payloadMatches) / TOTAL_BITS;
+  const softConfidence = absSum > 0 ? weighted / absSum : 0;
 
-  return { syncConfidence, confidence, bits };
+  return { syncConfidence, syncSoftConfidence, confidence, softConfidence, bits };
 }
 
 /**
@@ -187,10 +207,10 @@ function findBestOffset(
   image: ImageBlocks,
   referenceBitStream: (0 | 1)[],
   sampleStep = 1
-): { offsetX: number; offsetY: number; confidence: number } {
+): { offsetX: number; offsetY: number; syncConfidence: number } {
   let bestOffsetX = 0;
   let bestOffsetY = 0;
-  let bestConfidence = -1;
+  let bestSyncConfidence = -1;
 
   for (let oy = 0; oy < BLOCK_SIZE; oy++) {
     for (let ox = 0; ox < BLOCK_SIZE; ox++) {
@@ -201,15 +221,15 @@ function findBestOffset(
         oy,
         sampleStep
       );
-      if (syncConfidence > bestConfidence) {
-        bestConfidence = syncConfidence;
+      if (syncConfidence > bestSyncConfidence) {
+        bestSyncConfidence = syncConfidence;
         bestOffsetX = ox;
         bestOffsetY = oy;
       }
     }
   }
 
-  return { offsetX: bestOffsetX, offsetY: bestOffsetY, confidence: bestConfidence };
+  return { offsetX: bestOffsetX, offsetY: bestOffsetY, syncConfidence: bestSyncConfidence };
 }
 
 interface AlignmentResult {
@@ -217,6 +237,7 @@ interface AlignmentResult {
   offsetX: number;
   offsetY: number;
   syncConfidence: number;
+  syncSoftConfidence: number;
 }
 
 /**
@@ -240,34 +261,56 @@ async function findBestAlignment(
 
   // Tiny images: just search the native resolution.
   if (totalBlocks > 0 && totalBlocks <= 1024) {
-    const { offsetX, offsetY, confidence } = findBestOffset(
+    const { offsetX, offsetY, syncConfidence } = findBestOffset(
       fullScaleImage,
       referenceBitStream,
       1
     );
-    return { scale: 1, offsetX, offsetY, syncConfidence: confidence };
+    const { syncSoftConfidence } = extractAtOffset(
+      fullScaleImage,
+      referenceBitStream,
+      offsetX,
+      offsetY,
+      1
+    );
+    return { scale: 1, offsetX, offsetY, syncConfidence, syncSoftConfidence };
   }
 
   // Full-resolution layers are already at the original block size; upscaling
   // them would only waste time and invite false-positive scale matches.
   if (totalBlocks >= 65536) {
     const sampleStep = computeSampleStep(totalBlocks);
-    const { offsetX, offsetY, confidence: syncConfidence } = findBestOffset(
+    const { offsetX, offsetY } = findBestOffset(
       fullScaleImage,
       referenceBitStream,
       sampleStep
     );
 
-    if (syncConfidence >= 0.95) {
-      return { scale: 1, offsetX, offsetY, syncConfidence };
+    const { syncConfidence, syncSoftConfidence } = extractAtOffset(
+      fullScaleImage,
+      referenceBitStream,
+      offsetX,
+      offsetY,
+      sampleStep
+    );
+
+    if (syncConfidence >= SYNC_CONFIDENCE_THRESHOLD) {
+      return { scale: 1, offsetX, offsetY, syncConfidence, syncSoftConfidence };
     }
 
-    const { offsetX: fx, offsetY: fy, confidence: fullSync } = findBestOffset(
+    const { offsetX: fx, offsetY: fy } = findBestOffset(
       fullScaleImage,
       referenceBitStream,
       1
     );
-    return { scale: 1, offsetX: fx, offsetY: fy, syncConfidence: fullSync };
+    const { syncConfidence: fullHard, syncSoftConfidence: fullSyncSoft } = extractAtOffset(
+      fullScaleImage,
+      referenceBitStream,
+      fx,
+      fy,
+      1
+    );
+    return { scale: 1, offsetX: fx, offsetY: fy, syncConfidence: fullHard, syncSoftConfidence: fullSyncSoft };
   }
 
   // Small-to-medium screenshots: search every candidate scale at full block
@@ -280,6 +323,7 @@ async function findBestAlignment(
     offsetX: number;
     offsetY: number;
     syncConfidence: number;
+    syncSoftConfidence: number;
     payloadConfidence: number;
   }> = [];
 
@@ -295,13 +339,17 @@ async function findBestAlignment(
     }
     seenDimensions.add(dimKey);
 
-    const { offsetX, offsetY, confidence } = findBestOffset(
+    const { offsetX, offsetY } = findBestOffset(
       image,
       referenceBitStream,
       1
     );
 
-    const { confidence: payloadConfidence } = extractAtOffset(
+    const {
+      syncConfidence,
+      syncSoftConfidence,
+      confidence: payloadConfidence,
+    } = extractAtOffset(
       image,
       referenceBitStream,
       offsetX,
@@ -313,23 +361,24 @@ async function findBestAlignment(
       scale,
       offsetX,
       offsetY,
-      syncConfidence: confidence,
+      syncConfidence,
+      syncSoftConfidence,
       payloadConfidence,
     });
 
-    if (confidence >= 0.99) {
+    if (syncConfidence >= 0.99) {
       break;
     }
   }
 
   if (candidates.length === 0) {
-    return { scale: 1, offsetX: 0, offsetY: 0, syncConfidence: -1 };
+    return { scale: 1, offsetX: 0, offsetY: 0, syncConfidence: -1, syncSoftConfidence: -1 };
   }
 
-  // Prefer the scale/offset that gives the highest payload confidence, but only
-  // among candidates with a usable sync signal. This stops an up-scaled, noisy
-  // scale from beating the true scale just because its sync pattern happens to
-  // align a little better.
+  // Prefer the scale/offset that gives the highest payload hard confidence,
+  // but only among candidates with a usable hard sync signal. This stops an
+  // up-scaled, noisy scale from beating the true scale just because its sync
+  // pattern happens to align a little better.
   const viable = candidates.filter(
     (c) => c.syncConfidence >= SYNC_CONFIDENCE_THRESHOLD
   );
@@ -342,6 +391,7 @@ async function findBestAlignment(
     offsetX: best.offsetX,
     offsetY: best.offsetY,
     syncConfidence: best.syncConfidence,
+    syncSoftConfidence: best.syncSoftConfidence,
   };
 }
 
@@ -352,23 +402,29 @@ export async function extractWatermark(
   assertSecret();
 
   const bitStream = getEmbeddedBitStream(context.mapId, context.userId);
-  const { scale, offsetX, offsetY, syncConfidence } = await findBestAlignment(
-    imageBuffer,
-    bitStream
-  );
+  const { scale, offsetX, offsetY, syncConfidence, syncSoftConfidence } =
+    await findBestAlignment(imageBuffer, bitStream);
 
   const image = await loadImageLuma(imageBuffer, scale);
-  const { confidence } = extractAtOffset(image, bitStream, offsetX, offsetY);
+  const { confidence, softConfidence } = extractAtOffset(
+    image,
+    bitStream,
+    offsetX,
+    offsetY
+  );
 
   if (
-    syncConfidence < SYNC_CONFIDENCE_THRESHOLD ||
-    confidence < CONFIDENCE_THRESHOLD
+    syncSoftConfidence < SYNC_SOFT_CONFIDENCE_THRESHOLD ||
+    softConfidence < SOFT_CONFIDENCE_THRESHOLD ||
+    syncConfidence < SYNC_CONFIDENCE_THRESHOLD
   ) {
     return {
       found: false,
       userId: null,
       confidence,
       syncConfidence,
+      softConfidence,
+      syncSoftConfidence,
       offsetX,
       offsetY,
       scale,
@@ -380,6 +436,8 @@ export async function extractWatermark(
     userId: context.userId,
     confidence,
     syncConfidence,
+    softConfidence,
+    syncSoftConfidence,
     offsetX,
     offsetY,
     scale,
@@ -397,6 +455,8 @@ export async function tryExtractWatermark(
       userId: null,
       confidence: 0,
       syncConfidence: 0,
+      softConfidence: 0,
+      syncSoftConfidence: 0,
       offsetX: 0,
       offsetY: 0,
       scale: 1,
@@ -410,43 +470,59 @@ export async function tryExtractWatermark(
     context.mapId,
     context.userIds[0]!
   );
-  const { scale, offsetX, offsetY } = await findBestAlignment(
-    imageBuffer,
-    referenceBitStream
-  );
+  const { scale, offsetX, offsetY, syncConfidence, syncSoftConfidence } =
+    await findBestAlignment(imageBuffer, referenceBitStream);
+
+  // If even the hard sync is too weak, the alignment is probably garbage and
+  // there is no watermark here.
+  if (syncConfidence < SYNC_CONFIDENCE_THRESHOLD) {
+    return {
+      found: false,
+      userId: null,
+      confidence: 0,
+      syncConfidence,
+      softConfidence: 0,
+      syncSoftConfidence,
+      offsetX,
+      offsetY,
+      scale,
+    };
+  }
 
   const image = await loadImageLuma(imageBuffer, scale);
 
   const candidates: ExtractResult[] = [];
   for (const userId of context.userIds) {
     const bitStream = getEmbeddedBitStream(context.mapId, userId);
-    const { syncConfidence: userSync, confidence } = extractAtOffset(
-      image,
-      bitStream,
-      offsetX,
-      offsetY
-    );
+    const {
+      syncConfidence: userSync,
+      syncSoftConfidence: userSyncSoft,
+      confidence,
+      softConfidence,
+    } = extractAtOffset(image, bitStream, offsetX, offsetY);
 
     candidates.push({
       found: false,
       userId,
       confidence,
       syncConfidence: userSync,
+      softConfidence,
+      syncSoftConfidence: userSyncSoft,
       offsetX,
       offsetY,
       scale,
     });
   }
 
-  candidates.sort((a, b) => b.confidence - a.confidence);
+  candidates.sort((a, b) => b.softConfidence - a.softConfidence);
   const best = candidates[0]!;
   const secondBest = candidates[1];
 
-  const margin = secondBest ? best.confidence - secondBest.confidence : 1;
+  const margin = secondBest ? best.softConfidence - secondBest.softConfidence : 1;
 
   if (
-    best.syncConfidence >= SYNC_CONFIDENCE_THRESHOLD &&
-    best.confidence >= CONFIDENCE_THRESHOLD &&
+    best.syncSoftConfidence >= SYNC_SOFT_CONFIDENCE_THRESHOLD &&
+    best.softConfidence >= SOFT_CONFIDENCE_THRESHOLD &&
     margin >= CONFIDENCE_MARGIN
   ) {
     return { ...best, found: true };
@@ -457,6 +533,8 @@ export async function tryExtractWatermark(
     userId: best.userId,
     confidence: best.confidence,
     syncConfidence: best.syncConfidence,
+    softConfidence: best.softConfidence,
+    syncSoftConfidence: best.syncSoftConfidence,
     offsetX,
     offsetY,
     scale,

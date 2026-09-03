@@ -19,6 +19,8 @@ type RevealResult = {
   userId: string | null;
   confidence: number;
   syncConfidence: number;
+  softConfidence: number;
+  syncSoftConfidence: number;
   scale: number;
   offsetX: number;
   offsetY: number;
@@ -68,6 +70,8 @@ export function WatermarkRevealView({
           userId: null,
           confidence: 0,
           syncConfidence: 0,
+          softConfidence: 0,
+          syncSoftConfidence: 0,
           scale: 1,
           offsetX: 0,
           offsetY: 0,
@@ -212,6 +216,14 @@ export function WatermarkRevealView({
             <p>
               <strong>Sync confidence:</strong>{" "}
               {Math.round(result.syncConfidence * 100)}%
+            </p>
+            <p>
+              <strong>Soft confidence:</strong>{" "}
+              {result.softConfidence.toFixed(3)}
+            </p>
+            <p>
+              <strong>Sync soft confidence:</strong>{" "}
+              {result.syncSoftConfidence.toFixed(3)}
             </p>
             <p>
               <strong>Scale:</strong> {result.scale}

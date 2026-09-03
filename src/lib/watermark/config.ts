@@ -61,11 +61,26 @@ export const EXTRACT_SCALE_FACTORS: number[] = [1, 2, 4, 8];
 /** Maximum pixel dimension allowed during alignment search. */
 export const MAX_ALIGNMENT_DIMENSION = 2048;
 
-/** Minimum sync confidence required before a watermark is considered found. */
-export const SYNC_CONFIDENCE_THRESHOLD = 0.75;
+/** Minimum hard sync confidence required before a watermark is considered found. */
+export const SYNC_CONFIDENCE_THRESHOLD = 0.6;
 
-/** Minimum overall bit-match confidence required for a positive detection. */
-export const CONFIDENCE_THRESHOLD = 0.55;
+/**
+ * Minimum *soft* (matched-filter) sync score required for a positive detection.
+ * Soft scores are signed, magnitude-weighted correlations, so random noise
+ * clusters near 0 while a real signal is clearly positive.
+ */
+export const SYNC_SOFT_CONFIDENCE_THRESHOLD = 0.1;
+
+/**
+ * Minimum *soft* overall score required for a positive detection.
+ */
+export const SOFT_CONFIDENCE_THRESHOLD = 0.1;
+
+/**
+ * The best candidate must beat the second-best candidate by at least this
+ * soft-score margin to avoid false positives when multiple users look similar.
+ */
+export const CONFIDENCE_MARGIN = 0.05;
 
 /**
  * Target number of blocks evaluated during the coarse alignment search.
@@ -73,14 +88,6 @@ export const CONFIDENCE_THRESHOLD = 0.55;
  * uses every block.
  */
 export const ALIGNMENT_SAMPLE_BLOCKS = 4096;
-
-/**
- * The best candidate must beat the second-best candidate by at least this
- * margin to avoid false positives when multiple users look similar.
- * Set to 0 to accept any candidate that meets the confidence/sync thresholds;
- * the UI now shows the best match explicitly, so borderline cases are visible.
- */
-export const CONFIDENCE_MARGIN = 0;
 
 /** Where watermarked image caches are stored. */
 export function getWatermarkCacheDir(): string {
