@@ -11,6 +11,7 @@ import {
 } from "@/lib/markers/database";
 import { listMarkers } from "@/lib/markers/marker-service";
 import type { WorkspaceMap, WorkspaceMapLayer } from "@/lib/markers/marker-types";
+import { WATERMARK_VERSION } from "@/lib/watermark/config";
 import MapWorkspace from "./map-workspace";
 
 type MapPageProps = {
@@ -89,14 +90,16 @@ async function getWorkspaceData(
 }
 
 function applyWatermarkUrls(map: WorkspaceMap): WorkspaceMap {
-  const baseUrl = `/api/maps/${map.id}/image`;
+  // Version-stamp the URLs so bumping WATERMARK_VERSION invalidates
+  // browser-cached copies of the map image from a previous scheme.
+  const baseUrl = `/api/maps/${map.id}/image?v=${WATERMARK_VERSION}`;
 
   return {
     ...map,
     imageSrc: baseUrl,
     layers: map.layers.map((layer: WorkspaceMapLayer) => ({
       ...layer,
-      imageSrc: `${baseUrl}?layer=${encodeURIComponent(layer.id)}`,
+      imageSrc: `${baseUrl}&layer=${encodeURIComponent(layer.id)}`,
     })),
   };
 }
