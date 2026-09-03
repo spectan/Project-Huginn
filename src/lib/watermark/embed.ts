@@ -4,16 +4,12 @@ import { dirname, join } from "path";
 import sharp from "sharp";
 import {
   BLOCK_SIZE,
-  COEFFS_PER_BLOCK,
-  MIDFREQ_INDICES,
-  SS_ALPHA,
-  TOTAL_BITS,
+  DITHER_DELTA,
   assertSecret,
   buildCacheKey,
   getWatermarkCacheDir,
 } from "./config";
-import { forwardDCT2D, inverseDCT2D } from "./dct";
-import { getEmbeddedBitStream } from "./codec";
+import { getBlockChip } from "./codec";
 
 function hashInput(input: string | Buffer): Promise<string> {
   const hash = createHash("sha256");
@@ -46,11 +42,11 @@ export interface EmbedOptions {
 }
 
 /**
- * Embed a spread-spectrum watermark into a map layer PNG.
+ * Embed a per-user spatial color-dither watermark into a map layer PNG.
  *
- * The payload is a fixed sync pattern plus a 16-bit hash of (mapId, userId).
- * Each bit is spread across many 8×8 DCT blocks with interleaved assignment
- * so that cropping only removes a fraction of each bit's samples.
+ * Each 16×16 block is brightened or darkened by a tiny luma shift derived
+ * deterministically from the secret, map, layer, user, and block coordinates.
+ * The shift is applied equally to R, G, and B so hue is preserved.
  */
 export async function embedWatermark(
   imageInput: string | Buffer,
@@ -74,85 +70,63 @@ export async function embedWatermark(
     }
   }
 
+  // Read original metadata first to preserve the source channel count, then
+  // load with alpha for processing.
+  const meta = await sharp(imageInput).metadata();
+  const rawChannels = meta.channels ?? 3;
+
   const { data, info } = await sharp(imageInput)
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  const { width, height } = info;
-  const channels = info.channels ?? 4;
+  const width = info.width;
+  const height = info.height;
   const pixelCount = width * height;
 
-  const originalLuma = new Float64Array(pixelCount);
-  for (let i = 0; i < pixelCount; i++) {
-    originalLuma[i] =
-      0.299 * data[i * channels]! +
-      0.587 * data[i * channels + 1]! +
-      0.114 * data[i * channels + 2]!;
-  }
+  // Work in the 4-channel RGBA buffer, then copy the desired channels out.
+  const rgba = Buffer.from(data);
 
-  const paddedW = Math.ceil(width / BLOCK_SIZE) * BLOCK_SIZE;
-  const paddedH = Math.ceil(height / BLOCK_SIZE) * BLOCK_SIZE;
-  const blocksW = paddedW / BLOCK_SIZE;
-  const blocksH = paddedH / BLOCK_SIZE;
-  const totalBlocks = blocksW * blocksH;
+  const blocksW = Math.ceil(width / BLOCK_SIZE);
+  const blocksH = Math.ceil(height / BLOCK_SIZE);
 
-  const bitStream = getEmbeddedBitStream(context.watermarkNumber);
+  for (let by = 0; by < blocksH; by++) {
+    for (let bx = 0; bx < blocksW; bx++) {
+      const chip = getBlockChip(context, bx, by);
+      const delta = chip * DITHER_DELTA;
 
-  const modifiedLuma = new Float64Array(pixelCount);
-  originalLuma.forEach((v, i) => (modifiedLuma[i] = v));
+      const yStart = by * BLOCK_SIZE;
+      const yEnd = Math.min(yStart + BLOCK_SIZE, height);
+      const xStart = bx * BLOCK_SIZE;
+      const xEnd = Math.min(xStart + BLOCK_SIZE, width);
 
-  const blockBuffer = new Float64Array(64);
-
-  for (let b = 0; b < totalBlocks; b++) {
-    const bx = b % blocksW;
-    const by = Math.floor(b / blocksW);
-
-    for (let y = 0; y < BLOCK_SIZE; y++) {
-      const srcY = by * BLOCK_SIZE + y;
-      for (let x = 0; x < BLOCK_SIZE; x++) {
-        const srcX = bx * BLOCK_SIZE + x;
-        const idx = srcY * width + srcX;
-        blockBuffer[y * BLOCK_SIZE + x] =
-          srcX < width && srcY < height ? originalLuma[idx]! : 128;
-      }
-    }
-
-    const dct = forwardDCT2D(blockBuffer);
-    const bitIndex = b % TOTAL_BITS;
-    const bit = bitStream[bitIndex]!;
-    const sign = bit === 1 ? 1 : -1;
-
-    for (let k = 0; k < COEFFS_PER_BLOCK; k++) {
-      const coeffSlot = (b * COEFFS_PER_BLOCK + k) % MIDFREQ_INDICES.length;
-      const coeffIndex = MIDFREQ_INDICES[coeffSlot]!;
-      dct[coeffIndex] = dct[coeffIndex]! + sign * SS_ALPHA;
-    }
-
-    const modifiedBlock = inverseDCT2D(dct);
-
-    for (let y = 0; y < BLOCK_SIZE; y++) {
-      const dstY = by * BLOCK_SIZE + y;
-      if (dstY >= height) continue;
-      for (let x = 0; x < BLOCK_SIZE; x++) {
-        const dstX = bx * BLOCK_SIZE + x;
-        if (dstX >= width) continue;
-        const idx = dstY * width + dstX;
-        modifiedLuma[idx] = modifiedBlock[y * BLOCK_SIZE + x]!;
+      for (let y = yStart; y < yEnd; y++) {
+        const row = y * width;
+        for (let x = xStart; x < xEnd; x++) {
+          const idx = (row + x) * 4;
+          rgba[idx] = clampByte(rgba[idx]! + delta);
+          rgba[idx + 1] = clampByte(rgba[idx + 1]! + delta);
+          rgba[idx + 2] = clampByte(rgba[idx + 2]! + delta);
+        }
       }
     }
   }
 
-  const output = Buffer.alloc(pixelCount * 3);
+  // Preserve the source channel count so RGB images stay RGB.
+  const output = Buffer.alloc(pixelCount * rawChannels);
   for (let i = 0; i < pixelCount; i++) {
-    const delta = modifiedLuma[i]! - originalLuma[i]!;
-    output[i * 3] = clampByte(data[i * channels]! + delta);
-    output[i * 3 + 1] = clampByte(data[i * channels + 1]! + delta);
-    output[i * 3 + 2] = clampByte(data[i * channels + 2]! + delta);
+    const src = i * 4;
+    const dst = i * rawChannels;
+    output[dst] = rgba[src]!;
+    output[dst + 1] = rgba[src + 1]!;
+    output[dst + 2] = rgba[src + 2]!;
+    if (rawChannels === 4) {
+      output[dst + 3] = rgba[src + 3]!;
+    }
   }
 
   const png = await sharp(output, {
-    raw: { width, height, channels: 3 },
+    raw: { width, height, channels: rawChannels },
   })
     .png({ compressionLevel: 6 })
     .toBuffer();

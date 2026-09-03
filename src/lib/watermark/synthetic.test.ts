@@ -37,6 +37,8 @@ describe("watermark embed/extract on synthetic image", () => {
 
     const result = await tryExtractWatermark(watermarked, {
       mapId: context.mapId,
+      layerId: context.layerId,
+      originalImageBuffer: image,
       candidates: [
         { userId: context.userId, watermarkNumber: context.watermarkNumber },
         { userId: "user-other", watermarkNumber: 2 },

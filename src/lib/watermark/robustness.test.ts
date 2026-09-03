@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeAll } from "vitest";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import sharp from "sharp";
 import { embedWatermark, type EmbedContext } from "./embed";
@@ -10,7 +10,7 @@ import {
 } from "./config";
 
 beforeAll(() => {
-  process.env.WATERMARK_SECRET = "test-w…prod";
+  process.env.WATERMARK_SECRET = "test-watermark-secret-do-not-use-in-prod";
 });
 
 const CONFIDENCE_THRESHOLD = 0.6;
@@ -34,6 +34,8 @@ describe("watermark robustness on celebration terrain", () => {
         return;
       }
 
+      const originalBuffer = readFileSync(samplePath);
+
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
@@ -47,6 +49,8 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(watermarked, {
         mapId: context.mapId,
+        layerId: context.layerId,
+        originalImageBuffer: originalBuffer,
         candidates,
       });
       console.log("raw PNG:", result);
@@ -68,6 +72,8 @@ describe("watermark robustness on celebration terrain", () => {
         return;
       }
 
+      const originalBuffer = readFileSync(samplePath);
+
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
@@ -83,6 +89,8 @@ describe("watermark robustness on celebration terrain", () => {
         const jpeg = await sharp(watermarked).jpeg({ quality }).toBuffer();
         const result = await tryExtractWatermark(jpeg, {
           mapId: context.mapId,
+          layerId: context.layerId,
+          originalImageBuffer: originalBuffer,
           candidates: [candidateFor("user-abc")],
         });
         console.log(`JPEG ${quality}:`, result);
@@ -103,6 +111,8 @@ describe("watermark robustness on celebration terrain", () => {
       if (!existsSync(samplePath)) {
         return;
       }
+
+      const originalBuffer = readFileSync(samplePath);
 
       const context: EmbedContext = {
         mapId: "map-celebration",
@@ -132,6 +142,8 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(cropped, {
         mapId: context.mapId,
+        layerId: context.layerId,
+        originalImageBuffer: originalBuffer,
         candidates,
       });
       console.log("50% crop:", result);
@@ -152,6 +164,8 @@ describe("watermark robustness on celebration terrain", () => {
       if (!existsSync(samplePath)) {
         return;
       }
+
+      const originalBuffer = readFileSync(samplePath);
 
       const context: EmbedContext = {
         mapId: "map-celebration",
@@ -181,6 +195,8 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(cropped, {
         mapId: context.mapId,
+        layerId: context.layerId,
+        originalImageBuffer: originalBuffer,
         candidates,
       });
       console.log("25% crop:", result);
@@ -201,6 +217,8 @@ describe("watermark robustness on celebration terrain", () => {
       if (!existsSync(samplePath)) {
         return;
       }
+
+      const originalBuffer = readFileSync(samplePath);
 
       const context: EmbedContext = {
         mapId: "map-celebration",
@@ -232,6 +250,8 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(cropped, {
         mapId: context.mapId,
+        layerId: context.layerId,
+        originalImageBuffer: originalBuffer,
         candidates,
       });
       console.log("non-aligned crop:", result);
@@ -253,6 +273,8 @@ describe("watermark robustness on celebration terrain", () => {
         return;
       }
 
+      const originalBuffer = readFileSync(samplePath);
+
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
@@ -271,6 +293,8 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(scaled, {
         mapId: context.mapId,
+        layerId: context.layerId,
+        originalImageBuffer: originalBuffer,
         candidates,
       });
       console.log("50% downscale:", result);
@@ -292,6 +316,8 @@ describe("watermark robustness on celebration terrain", () => {
         return;
       }
 
+      const originalBuffer = readFileSync(samplePath);
+
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
@@ -310,6 +336,8 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(scaled, {
         mapId: context.mapId,
+        layerId: context.layerId,
+        originalImageBuffer: originalBuffer,
         candidates,
       });
       console.log("25% downscale:", result);

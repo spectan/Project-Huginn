@@ -1,27 +1,23 @@
 import sharp from "sharp";
+import { join } from "path";
 import {
-  ALIGNMENT_SAMPLE_BLOCKS,
   BLOCK_SIZE,
-  COEFFS_PER_BLOCK,
   CONFIDENCE_MARGIN,
+  CONFIDENCE_THRESHOLD,
   EXTRACT_SCALE_FACTORS,
   MAX_ALIGNMENT_DIMENSION,
-  MIDFREQ_INDICES,
-  SOFT_CONFIDENCE_THRESHOLD,
-  SYNC_CONFIDENCE_THRESHOLD,
-  SYNC_LENGTH,
-  SYNC_PATTERN,
-  SYNC_SOFT_CONFIDENCE_THRESHOLD,
-  TOTAL_BITS,
   assertSecret,
 } from "./config";
-import { forwardDCT2D } from "./dct";
-import { getEmbeddedBitStream } from "./codec";
+import { createChipPattern } from "./codec";
+import { prisma } from "@/lib/db/prisma";
 
 export interface ExtractContext {
   mapId: string;
   userId: string;
   watermarkNumber: number;
+  layerId?: string;
+  /** Optional override for testing; if omitted the original is looked up via Prisma. */
+  originalImageBuffer?: Buffer;
 }
 
 export interface ExtractResult {
@@ -43,6 +39,11 @@ interface ImageBlocks {
   blocksW: number;
   blocksH: number;
   luma: Float64Array;
+  integral: Float64Array;
+}
+
+function getLuma(r: number, g: number, b: number): number {
+  return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
 async function loadImageLuma(
@@ -58,7 +59,10 @@ async function loadImageLuma(
     let newWidth = Math.max(1, Math.round(width * scale));
     let newHeight = Math.max(1, Math.round(height * scale));
 
-    if (newWidth > MAX_ALIGNMENT_DIMENSION || newHeight > MAX_ALIGNMENT_DIMENSION) {
+    if (
+      newWidth > MAX_ALIGNMENT_DIMENSION ||
+      newHeight > MAX_ALIGNMENT_DIMENSION
+    ) {
       const ratio = Math.min(
         MAX_ALIGNMENT_DIMENSION / newWidth,
         MAX_ALIGNMENT_DIMENSION / newHeight
@@ -70,323 +74,228 @@ async function loadImageLuma(
     pipeline = pipeline.resize(newWidth, newHeight);
   }
 
-  const { data, info } = await pipeline.raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = await pipeline
+    .raw()
+    .toBuffer({ resolveWithObject: true });
 
   const width = info.width;
   const height = info.height;
   const channels = info.channels ?? 4;
   const pixelCount = width * height;
   const luma = new Float64Array(pixelCount);
+
   for (let i = 0; i < pixelCount; i++) {
-    luma[i] =
-      0.299 * data[i * channels]! +
-      0.587 * data[i * channels + 1]! +
-      0.114 * data[i * channels + 2]!;
+    const idx = i * channels;
+    luma[i] = getLuma(data[idx]!, data[idx + 1]!, data[idx + 2]!);
+  }
+
+  // Integral image where integral[(y+1)*(width+1)+(x+1)] is the sum of the
+  // rectangle from (0,0) inclusive to (x,y) inclusive.
+  const integral = new Float64Array((width + 1) * (height + 1));
+  const stride = width + 1;
+  for (let y = 1; y <= height; y++) {
+    let rowSum = 0;
+    for (let x = 1; x <= width; x++) {
+      rowSum += luma[(y - 1) * width + (x - 1)]!;
+      integral[y * stride + x] = integral[(y - 1) * stride + x]! + rowSum;
+    }
   }
 
   const blocksW = Math.floor(width / BLOCK_SIZE);
   const blocksH = Math.floor(height / BLOCK_SIZE);
-  return { width, height, blocksW, blocksH, luma };
+  return { width, height, blocksW, blocksH, luma, integral };
 }
 
-function fillBlock(
-  block: Float64Array,
-  luma: Float64Array,
+function blockAverage(
+  integral: Float64Array,
   width: number,
-  height: number,
-  bx: number,
-  by: number,
-  offsetX = 0,
-  offsetY = 0
-): void {
-  for (let y = 0; y < BLOCK_SIZE; y++) {
-    const srcY = by * BLOCK_SIZE + y + offsetY;
-    for (let x = 0; x < BLOCK_SIZE; x++) {
-      const srcX = bx * BLOCK_SIZE + x + offsetX;
-      if (srcY < 0 || srcY >= height || srcX < 0 || srcX >= width) {
-        block[y * BLOCK_SIZE + x] = 128;
-      } else {
-        block[y * BLOCK_SIZE + x] = luma[srcY * width + srcX]!;
-      }
-    }
-  }
+  x: number,
+  y: number,
+  size: number
+): number | null {
+  if (x < 0 || y < 0) return null;
+  const x2 = x + size;
+  const y2 = y + size;
+  if (x2 > width || y2 > (integral.length / (width + 1) - 1)) return null;
+  const stride = width + 1;
+  const sum =
+    integral[y2 * stride + x2]! -
+    integral[y * stride + x2]! -
+    integral[y2 * stride + x]! +
+    integral[y * stride + x]!;
+  return sum / (size * size);
 }
 
-function computeSampleStep(blockCount: number): number {
-  // For images that are 1024 px or smaller we can afford to evaluate every
-  // block; this makes the coarse offset estimate exact and keeps the much
-  // smaller refinement neighbourhood reliable.
-  if (blockCount <= 16384) {
-    return 1;
-  }
-  const step = Math.max(1, Math.floor(blockCount / ALIGNMENT_SAMPLE_BLOCKS));
-  return step % 2 === 0 ? step + 1 : step;
+interface ScoreResult {
+  score: number;
+  sampleCount: number;
 }
 
-interface ExtractionScores {
-  syncConfidence: number;
-  syncSoftConfidence: number;
-  confidence: number;
-  softConfidence: number;
-  bits: (0 | 1)[];
-}
-
-/**
- * Extract the watermark from a single candidate at a specific pixel offset.
- *
- * The offset is used when the screenshot is not block-aligned with the
- * original image. `sampleStep` controls how many blocks are evaluated:
- * use a value > 1 for fast alignment search, and 1 for the final full extraction.
- */
-function extractAtOffset(
-  image: ImageBlocks,
-  bitStream: (0 | 1)[],
-  offsetX: number,
-  offsetY: number,
-  sampleStep = 1
-): ExtractionScores {
-  const { width, height, blocksW, blocksH, luma } = image;
-  const blockCount = blocksW * blocksH;
-  const correlations = new Float64Array(TOTAL_BITS);
-  const counts = new Int32Array(TOTAL_BITS);
-
-  const blockBuffer = new Float64Array(64);
-
-  for (let b = 0; b < blockCount; b += sampleStep) {
-    const bx = b % blocksW;
-    const by = Math.floor(b / blocksW);
-    fillBlock(blockBuffer, luma, width, height, bx, by, offsetX, offsetY);
-    const dct = forwardDCT2D(blockBuffer);
-    const bitIndex = b % TOTAL_BITS;
-
-    for (let k = 0; k < COEFFS_PER_BLOCK; k++) {
-      const coeffSlot = (b * COEFFS_PER_BLOCK + k) % MIDFREQ_INDICES.length;
-      const coeffIndex = MIDFREQ_INDICES[coeffSlot]!;
-      correlations[bitIndex]! += dct[coeffIndex]!;
-      counts[bitIndex]!++;
-    }
+function pearsonScore(
+  observed: Float64Array,
+  chips: Int8Array,
+  count: number
+): ScoreResult {
+  if (count === 0) {
+    return { score: 0, sampleCount: 0 };
   }
 
-  const avgs = new Float64Array(TOTAL_BITS);
-  const bits: (0 | 1)[] = [];
-  for (let i = 0; i < TOTAL_BITS; i++) {
-    avgs[i] = counts[i]! > 0 ? correlations[i]! / counts[i]! : 0;
-    bits.push(avgs[i]! > 0 ? 1 : 0);
+  // Center observed deltas so global brightness/contrast shifts are ignored.
+  let mean = 0;
+  for (let i = 0; i < count; i++) {
+    mean += observed[i]!;
+  }
+  mean /= count;
+
+  let num = 0;
+  let denomObserved = 0;
+  let denomChips = 0;
+  for (let i = 0; i < count; i++) {
+    const centered = observed[i]! - mean;
+    const chip = chips[i]!;
+    num += centered * chip;
+    denomObserved += centered * centered;
+    denomChips += chip * chip;
   }
 
-  let syncMatches = 0;
-  let syncWeighted = 0;
-  let syncAbs = 0;
-  for (let i = 0; i < SYNC_LENGTH; i++) {
-    if (bits[i]! === SYNC_PATTERN[i]!) syncMatches++;
-    const sign = SYNC_PATTERN[i]! === 1 ? 1 : -1;
-    syncWeighted += sign * avgs[i]!;
-    syncAbs += Math.abs(avgs[i]!);
-  }
-  const syncConfidence = syncMatches / SYNC_LENGTH;
-  const syncSoftConfidence = syncAbs > 0 ? syncWeighted / syncAbs : 0;
-
-  let payloadMatches = 0;
-  let weighted = syncWeighted;
-  let absSum = syncAbs;
-  for (let i = SYNC_LENGTH; i < TOTAL_BITS; i++) {
-    if (bits[i]! === bitStream[i]!) payloadMatches++;
-    const sign = bitStream[i]! === 1 ? 1 : -1;
-    weighted += sign * avgs[i]!;
-    absSum += Math.abs(avgs[i]!);
-  }
-  const confidence = (syncMatches + payloadMatches) / TOTAL_BITS;
-  const softConfidence = absSum > 0 ? weighted / absSum : 0;
-
-  return { syncConfidence, syncSoftConfidence, confidence, softConfidence, bits };
-}
-
-/**
- * Find the best pixel offset for the given scale by looking for the strongest
- * known sync pattern across all 64 sub-block alignments.
- */
-function findBestOffset(
-  image: ImageBlocks,
-  referenceBitStream: (0 | 1)[],
-  sampleStep = 1
-): { offsetX: number; offsetY: number; syncConfidence: number } {
-  let bestOffsetX = 0;
-  let bestOffsetY = 0;
-  let bestSyncConfidence = -1;
-
-  for (let oy = 0; oy < BLOCK_SIZE; oy++) {
-    for (let ox = 0; ox < BLOCK_SIZE; ox++) {
-      const { syncConfidence } = extractAtOffset(
-        image,
-        referenceBitStream,
-        ox,
-        oy,
-        sampleStep
-      );
-      if (syncConfidence > bestSyncConfidence) {
-        bestSyncConfidence = syncConfidence;
-        bestOffsetX = ox;
-        bestOffsetY = oy;
-      }
-    }
+  const denom = Math.sqrt(denomObserved * denomChips);
+  if (denom === 0) {
+    return { score: 0, sampleCount: count };
   }
 
-  return { offsetX: bestOffsetX, offsetY: bestOffsetY, syncConfidence: bestSyncConfidence };
+  return { score: num / denom, sampleCount: count };
 }
 
 interface AlignmentResult {
   scale: number;
+  startBx: number;
+  startBy: number;
   offsetX: number;
   offsetY: number;
-  syncConfidence: number;
-  syncSoftConfidence: number;
+  score: number;
 }
 
 /**
- * Search both scale and pixel offset to find the alignment that gives the
- * strongest known sync pattern. Zoomed-out screenshots are downscaled copies
- * of the watermarked layer, so we resize the input by each candidate scale
- * before searching offsets.
+ * Compute observed luma deltas for every block of the (rescaled) screenshot
+ * aligned to a window in the original starting at coarse block position
+ * (startBx, startBy) and sub-block pixel offset (offsetX, offsetY).
  *
- * For small source images (the screenshot itself is small, not the original
- * layer), the 8×8 offset search is fast enough at full block density that we
- * can skip the coarse/refine split and simply pick the scale/offset with the
- * strongest sync. This avoids the refinement neighbourhood missing the true
- * peak when the sampled coarse estimate is off by more than a couple of pixels.
+ * Screenshot block (sx, sy) is compared against original block
+ * (startBx + sx, startBy + sy), shifted by (offsetX, offsetY). The chips
+ * array is indexed by absolute original block coordinates.
  */
-async function findBestAlignment(
-  imageBuffer: Buffer,
-  referenceBitStream: (0 | 1)[]
-): Promise<AlignmentResult> {
-  const fullScaleImage = await loadImageLuma(imageBuffer, 1);
-  const totalBlocks = fullScaleImage.blocksW * fullScaleImage.blocksH;
+function computeWindowDeltas(
+  original: ImageBlocks,
+  screenshot: ImageBlocks,
+  startBx: number,
+  startBy: number,
+  offsetX: number,
+  offsetY: number,
+  chips: Int8Array,
+  outObserved: Float64Array,
+  outChips: Int8Array
+): number {
+  const oW = original.width;
+  const oBlocksW = original.blocksW;
+  const sW = screenshot.width;
+  const sH = screenshot.height;
 
-  // Tiny images: just search the native resolution.
-  if (totalBlocks > 0 && totalBlocks <= 1024) {
-    const { offsetX, offsetY, syncConfidence } = findBestOffset(
-      fullScaleImage,
-      referenceBitStream,
-      1
-    );
-    const { syncSoftConfidence } = extractAtOffset(
-      fullScaleImage,
-      referenceBitStream,
-      offsetX,
-      offsetY,
-      1
-    );
-    return { scale: 1, offsetX, offsetY, syncConfidence, syncSoftConfidence };
+  let count = 0;
+  for (let sy = 0; sy < screenshot.blocksH; sy++) {
+    const by = startBy + sy;
+    if (by < 0 || by >= original.blocksH) continue;
+
+    const oy = by * BLOCK_SIZE + offsetY;
+    const syQ = sy * BLOCK_SIZE;
+    if (oy < 0 || oy + BLOCK_SIZE > original.height) continue;
+    if (syQ < 0 || syQ + BLOCK_SIZE > sH) continue;
+
+    for (let sx = 0; sx < screenshot.blocksW; sx++) {
+      const bx = startBx + sx;
+      if (bx < 0 || bx >= original.blocksW) continue;
+
+      const ox = bx * BLOCK_SIZE + offsetX;
+      const sxQ = sx * BLOCK_SIZE;
+      if (ox < 0 || ox + BLOCK_SIZE > original.width) continue;
+      if (sxQ < 0 || sxQ + BLOCK_SIZE > sW) continue;
+
+      const origAvg = blockAverage(
+        original.integral,
+        oW,
+        ox,
+        oy,
+        BLOCK_SIZE
+      );
+      const shotAvg = blockAverage(
+        screenshot.integral,
+        sW,
+        sxQ,
+        syQ,
+        BLOCK_SIZE
+      );
+      if (origAvg === null || shotAvg === null) {
+        continue;
+      }
+
+      outObserved[count] = shotAvg - origAvg;
+      outChips[count] = chips[by * oBlocksW + bx]!;
+      count++;
+    }
   }
 
-  // Full-resolution layers are already at the original block size; upscaling
-  // them would only waste time and invite false-positive scale matches.
-  if (totalBlocks >= 65536) {
-    const sampleStep = computeSampleStep(totalBlocks);
-    const { offsetX, offsetY } = findBestOffset(
-      fullScaleImage,
-      referenceBitStream,
-      sampleStep
-    );
+  return count;
+}
 
-    const { syncConfidence, syncSoftConfidence } = extractAtOffset(
-      fullScaleImage,
-      referenceBitStream,
-      offsetX,
-      offsetY,
-      sampleStep
-    );
-
-    if (syncConfidence >= SYNC_CONFIDENCE_THRESHOLD) {
-      return { scale: 1, offsetX, offsetY, syncConfidence, syncSoftConfidence };
-    }
-
-    const { offsetX: fx, offsetY: fy } = findBestOffset(
-      fullScaleImage,
-      referenceBitStream,
-      1
-    );
-    const { syncConfidence: fullHard, syncSoftConfidence: fullSyncSoft } = extractAtOffset(
-      fullScaleImage,
-      referenceBitStream,
-      fx,
-      fy,
-      1
-    );
-    return { scale: 1, offsetX: fx, offsetY: fy, syncConfidence: fullHard, syncSoftConfidence: fullSyncSoft };
+async function loadOriginalBuffer(
+  context: ExtractContext
+): Promise<Buffer> {
+  if (context.originalImageBuffer) {
+    return context.originalImageBuffer;
   }
 
-  // Small-to-medium screenshots: search every candidate scale at full block
-  // density. The image is small enough that the 64×8×8 DCTs per scale are cheap.
-  // Scale selection uses the hard sync confidence (which is user-agnostic)
-  // instead of an arbitrary reference user's payload, so the choice does not
-  // depend on which user happened to be first in the list.
-  const seenDimensions = new Set<string>();
-  const candidates: Array<{
-    scale: number;
-    offsetX: number;
-    offsetY: number;
-    syncConfidence: number;
-    syncSoftConfidence: number;
-  }> = [];
+  const layerId = context.layerId ?? `${context.mapId}:default`;
 
-  for (const scale of EXTRACT_SCALE_FACTORS) {
-    const image = await loadImageLuma(imageBuffer, scale);
-    if (image.blocksW === 0 || image.blocksH === 0) {
-      continue;
-    }
-
-    const dimKey = `${image.width}x${image.height}`;
-    if (seenDimensions.has(dimKey)) {
-      continue;
-    }
-    seenDimensions.add(dimKey);
-
-    const { offsetX, offsetY } = findBestOffset(
-      image,
-      referenceBitStream,
-      1
-    );
-
-    const { syncConfidence, syncSoftConfidence } = extractAtOffset(
-      image,
-      referenceBitStream,
-      offsetX,
-      offsetY,
-      1
-    );
-
-    candidates.push({
-      scale,
-      offsetX,
-      offsetY,
-      syncConfidence,
-      syncSoftConfidence,
+  let imagePath: string | null = null;
+  if (layerId === `${context.mapId}:default`) {
+    const map = await prisma.map.findUnique({
+      where: { id: context.mapId },
+      select: { imagePath: true },
     });
-
-    if (syncConfidence >= 0.99) {
-      break;
-    }
+    imagePath = map?.imagePath ?? null;
+  } else {
+    const layer = await prisma.mapLayer.findFirst({
+      where: { id: layerId, mapId: context.mapId },
+      select: { imagePath: true },
+    });
+    imagePath = layer?.imagePath ?? null;
   }
 
-  if (candidates.length === 0) {
-    return { scale: 1, offsetX: 0, offsetY: 0, syncConfidence: -1, syncSoftConfidence: -1 };
+  if (imagePath === null || imagePath.length === 0) {
+    throw new Error(`Could not find original image for ${layerId}`);
   }
 
-  // Pick the scale/offset with the strongest hard sync signal. The sync
-  // pattern is identical for every user, so this is neutral across candidates.
-  const viable = candidates.filter(
-    (c) => c.syncConfidence >= SYNC_CONFIDENCE_THRESHOLD
-  );
-  const pool = viable.length > 0 ? viable : candidates;
-  pool.sort((a, b) => b.syncConfidence - a.syncConfidence);
-  const best = pool[0]!;
+  const absolutePath = join(process.cwd(), "public", imagePath);
+  const { readFile } = await import("fs/promises");
+  return readFile(absolutePath);
+}
 
+function makeExtractResult(
+  found: boolean,
+  candidate: { userId: string; watermarkNumber: number } | null,
+  score: number,
+  alignment: AlignmentResult
+): ExtractResult {
   return {
-    scale: best.scale,
-    offsetX: best.offsetX,
-    offsetY: best.offsetY,
-    syncConfidence: best.syncConfidence,
-    syncSoftConfidence: best.syncSoftConfidence,
+    found,
+    userId: candidate?.userId ?? null,
+    watermarkNumber: candidate?.watermarkNumber ?? null,
+    confidence: score,
+    syncConfidence: score,
+    softConfidence: score,
+    syncSoftConfidence: score,
+    offsetX: alignment.offsetX,
+    offsetY: alignment.offsetY,
+    scale: alignment.scale,
   };
 }
 
@@ -396,56 +305,223 @@ export async function extractWatermark(
 ): Promise<ExtractResult> {
   assertSecret();
 
-  const bitStream = getEmbeddedBitStream(context.watermarkNumber);
-  const { scale, offsetX, offsetY, syncConfidence, syncSoftConfidence } =
-    await findBestAlignment(imageBuffer, bitStream);
+  const layerId = context.layerId ?? `${context.mapId}:default`;
+  const originalBuffer = await loadOriginalBuffer(context);
 
-  const image = await loadImageLuma(imageBuffer, scale);
-  const { confidence, softConfidence } = extractAtOffset(
-    image,
-    bitStream,
-    offsetX,
-    offsetY
+  const original = await loadImageLuma(originalBuffer, 1);
+  const referenceChips = createChipPattern(
+    { mapId: context.mapId, layerId, userId: context.userId },
+    original.blocksW,
+    original.blocksH
   );
 
-  if (
-    syncSoftConfidence < SYNC_SOFT_CONFIDENCE_THRESHOLD ||
-    softConfidence < SOFT_CONFIDENCE_THRESHOLD ||
-    syncConfidence < SYNC_CONFIDENCE_THRESHOLD
-  ) {
-    return {
-      found: false,
-      userId: null,
-      watermarkNumber: null,
-      confidence,
-      syncConfidence,
-      softConfidence,
-      syncSoftConfidence,
-      offsetX,
-      offsetY,
-      scale,
-    };
+  const alignment = await findBestAlignmentForScales(
+    imageBuffer,
+    original,
+    referenceChips
+  );
+
+  const screenshot = await loadImageLuma(imageBuffer, alignment.scale);
+  const score = scoreAtAlignment(original, screenshot, alignment, referenceChips);
+
+  const found = score >= CONFIDENCE_THRESHOLD;
+  return makeExtractResult(
+    found,
+    { userId: context.userId, watermarkNumber: context.watermarkNumber },
+    score,
+    alignment
+  );
+}
+
+interface ScaleCandidate {
+  scale: number;
+  screenshot: ImageBlocks;
+}
+
+async function findBestAlignmentForScales(
+  imageBuffer: Buffer,
+  original: ImageBlocks,
+  chips: Int8Array
+): Promise<AlignmentResult> {
+  const scaledImages: ScaleCandidate[] = [];
+
+  for (const scale of EXTRACT_SCALE_FACTORS) {
+    const screenshot = await loadImageLuma(imageBuffer, scale);
+    if (screenshot.blocksW === 0 || screenshot.blocksH === 0) {
+      continue;
+    }
+    scaledImages.push({ scale, screenshot });
   }
 
-  return {
-    found: true,
-    userId: context.userId,
-    watermarkNumber: context.watermarkNumber,
-    confidence,
-    syncConfidence,
-    softConfidence,
-    syncSoftConfidence,
-    offsetX,
-    offsetY,
-    scale,
+  let best: AlignmentResult = {
+    scale: 1,
+    startBx: 0,
+    startBy: 0,
+    offsetX: 0,
+    offsetY: 0,
+    score: -Infinity,
   };
+
+  const maxBlocks = original.blocksW * original.blocksH;
+  const observed = new Float64Array(maxBlocks);
+  const expected = new Int8Array(maxBlocks);
+
+  for (const { scale, screenshot } of scaledImages) {
+    const bestForScale = findBestAlignmentForScale(
+      original,
+      screenshot,
+      chips,
+      observed,
+      expected,
+      scale
+    );
+    if (bestForScale.score > best.score) {
+      best = bestForScale;
+    }
+  }
+
+  if (!Number.isFinite(best.score)) {
+    best.score = 0;
+  }
+
+  return best;
+}
+
+const COARSE_POSITIONS_TO_REFINE = 5;
+
+function findBestAlignmentForScale(
+  original: ImageBlocks,
+  screenshot: ImageBlocks,
+  chips: Int8Array,
+  observed: Float64Array,
+  expected: Int8Array,
+  scale: number
+): AlignmentResult {
+  let best: AlignmentResult = {
+    scale,
+    startBx: 0,
+    startBy: 0,
+    offsetX: 0,
+    offsetY: 0,
+    score: -Infinity,
+  };
+
+  const maxStartBx = Math.max(0, original.blocksW - screenshot.blocksW + 1);
+  const maxStartBy = Math.max(0, original.blocksH - screenshot.blocksH + 1);
+
+  // Coarse search: sub-block offset (0,0), all valid coarse positions.
+  const topCoarse: Array<{
+    startBx: number;
+    startBy: number;
+    score: number;
+  }> = [];
+  for (let startBy = 0; startBy < maxStartBy; startBy++) {
+    for (let startBx = 0; startBx < maxStartBx; startBx++) {
+      const count = computeWindowDeltas(
+        original,
+        screenshot,
+        startBx,
+        startBy,
+        0,
+        0,
+        chips,
+        observed,
+        expected
+      );
+      if (count === 0) continue;
+
+      const { score } = pearsonScore(observed, expected, count);
+
+      if (
+        topCoarse.length < COARSE_POSITIONS_TO_REFINE ||
+        score > topCoarse[topCoarse.length - 1]!.score
+      ) {
+        topCoarse.push({ startBx, startBy, score });
+        topCoarse.sort((a, b) => b.score - a.score);
+        if (topCoarse.length > COARSE_POSITIONS_TO_REFINE) {
+          topCoarse.pop();
+        }
+      }
+    }
+  }
+
+  // Fine search: full sub-block offsets at the best coarse positions.
+  for (const coarse of topCoarse) {
+    for (let oy = 0; oy < BLOCK_SIZE; oy++) {
+      for (let ox = 0; ox < BLOCK_SIZE; ox++) {
+        const count = computeWindowDeltas(
+          original,
+          screenshot,
+          coarse.startBx,
+          coarse.startBy,
+          ox,
+          oy,
+          chips,
+          observed,
+          expected
+        );
+        if (count === 0) continue;
+
+        const { score } = pearsonScore(observed, expected, count);
+        if (score > best.score) {
+          best = {
+            scale,
+            startBx: coarse.startBx,
+            startBy: coarse.startBy,
+            offsetX: ox,
+            offsetY: oy,
+            score,
+          };
+        }
+      }
+    }
+  }
+
+  if (!Number.isFinite(best.score)) {
+    best.score = 0;
+  }
+
+  return best;
+}
+
+function scoreAtAlignment(
+  original: ImageBlocks,
+  screenshot: ImageBlocks,
+  alignment: AlignmentResult,
+  chips: Int8Array
+): number {
+  const maxBlocks = original.blocksW * original.blocksH;
+  const observed = new Float64Array(maxBlocks);
+  const expected = new Int8Array(maxBlocks);
+  const count = computeWindowDeltas(
+    original,
+    screenshot,
+    alignment.startBx,
+    alignment.startBy,
+    alignment.offsetX,
+    alignment.offsetY,
+    chips,
+    observed,
+    expected
+  );
+  if (count === 0) {
+    return 0;
+  }
+  const { score } = pearsonScore(observed, expected, count);
+  return score;
 }
 
 export async function tryExtractWatermark(
   imageBuffer: Buffer,
-  context: { mapId: string; candidates: Array<{ userId: string; watermarkNumber: number }> }
+  context: {
+    mapId: string;
+    layerId?: string;
+    originalImageBuffer?: Buffer;
+    candidates: Array<{ userId: string; watermarkNumber: number }>;
+  }
 ): Promise<ExtractResult> {
   assertSecret();
+
   if (context.candidates.length === 0) {
     return {
       found: false,
@@ -461,82 +537,69 @@ export async function tryExtractWatermark(
     };
   }
 
-  // Use the first candidate as a reference to find the best scale/offset
-  // via the known sync pattern. The sync pattern is identical for every user,
-  // so the alignment is user-agnostic.
-  const referenceBitStream = getEmbeddedBitStream(
-    context.candidates[0]!.watermarkNumber
-  );
-  const { scale, offsetX, offsetY, syncConfidence, syncSoftConfidence } =
-    await findBestAlignment(imageBuffer, referenceBitStream);
+  const layerId = context.layerId ?? `${context.mapId}:default`;
 
-  // If even the hard sync is too weak, the alignment is probably garbage and
-  // there is no watermark here.
-  if (syncConfidence < SYNC_CONFIDENCE_THRESHOLD) {
-    return {
-      found: false,
-      userId: null,
-      watermarkNumber: null,
-      confidence: 0,
-      syncConfidence,
-      softConfidence: 0,
-      syncSoftConfidence,
-      offsetX,
-      offsetY,
-      scale,
-    };
+  // Load the original image once, using the override or Prisma lookup.
+  let originalBuffer: Buffer;
+  if (context.originalImageBuffer) {
+    originalBuffer = context.originalImageBuffer;
+  } else {
+    originalBuffer = await loadOriginalBuffer({
+      mapId: context.mapId,
+      userId: context.candidates[0]!.userId,
+      watermarkNumber: context.candidates[0]!.watermarkNumber,
+      layerId,
+    });
   }
 
-  const image = await loadImageLuma(imageBuffer, scale);
+  const original = await loadImageLuma(originalBuffer, 1);
+
+  // Use the first candidate's chip pattern for alignment.
+  const referenceChips = createChipPattern(
+    {
+      mapId: context.mapId,
+      layerId,
+      userId: context.candidates[0]!.userId,
+    },
+    original.blocksW,
+    original.blocksH
+  );
+
+  const alignment = await findBestAlignmentForScales(
+    imageBuffer,
+    original,
+    referenceChips
+  );
+
+  const screenshot = await loadImageLuma(imageBuffer, alignment.scale);
 
   const candidateResults: ExtractResult[] = [];
   for (const candidate of context.candidates) {
-    const bitStream = getEmbeddedBitStream(candidate.watermarkNumber);
-    const {
-      syncConfidence: userSync,
-      syncSoftConfidence: userSyncSoft,
-      confidence,
-      softConfidence,
-    } = extractAtOffset(image, bitStream, offsetX, offsetY);
+    const chips = createChipPattern(
+      { mapId: context.mapId, layerId, userId: candidate.userId },
+      original.blocksW,
+      original.blocksH
+    );
+    const score = scoreAtAlignment(original, screenshot, alignment, chips);
 
-    candidateResults.push({
-      found: false,
-      userId: candidate.userId,
-      watermarkNumber: candidate.watermarkNumber,
-      confidence,
-      syncConfidence: userSync,
-      softConfidence,
-      syncSoftConfidence: userSyncSoft,
-      offsetX,
-      offsetY,
-      scale,
-    });
+    candidateResults.push(
+      makeExtractResult(false, candidate, score, alignment)
+    );
   }
 
   candidateResults.sort((a, b) => b.softConfidence - a.softConfidence);
   const best = candidateResults[0]!;
   const secondBest = candidateResults[1];
-
-  const margin = secondBest ? best.softConfidence - secondBest.softConfidence : 1;
+  const margin = secondBest
+    ? best.softConfidence - secondBest.softConfidence
+    : 1;
 
   if (
-    best.syncSoftConfidence >= SYNC_SOFT_CONFIDENCE_THRESHOLD &&
-    best.softConfidence >= SOFT_CONFIDENCE_THRESHOLD &&
+    best.softConfidence >= CONFIDENCE_THRESHOLD &&
     margin >= CONFIDENCE_MARGIN
   ) {
     return { ...best, found: true };
   }
 
-  return {
-    found: false,
-    userId: best.userId,
-    watermarkNumber: best.watermarkNumber,
-    confidence: best.confidence,
-    syncConfidence: best.syncConfidence,
-    softConfidence: best.softConfidence,
-    syncSoftConfidence: best.syncSoftConfidence,
-    offsetX,
-    offsetY,
-    scale,
-  };
+  return best;
 }
