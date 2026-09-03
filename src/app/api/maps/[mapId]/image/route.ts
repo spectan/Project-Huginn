@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { join } from "path";
+import { readFile } from "fs/promises";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
-import { embedWatermark } from "@/lib/watermark/embed";
 
 export async function GET(
   request: Request,
@@ -21,17 +21,6 @@ export async function GET(
 
   const { searchParams } = new URL(request.url);
   const layerId = searchParams.get("layer") ?? undefined;
-
-  const user = await prisma.user.findUnique({
-    where: { id: viewer.id },
-    select: { watermarkNumber: true },
-  });
-
-  if (user === null || user.watermarkNumber === null) {
-    return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
-  }
-
-  const watermarkNumber = user.watermarkNumber;
 
   let imagePath: string | null = null;
   let resolvedLayerId = "";
@@ -61,14 +50,9 @@ export async function GET(
   }
 
   const rawFilePath = join(process.cwd(), "public", imagePath);
+  const rawBuffer = await readFile(rawFilePath);
 
-  const watermarked = await embedWatermark(
-    rawFilePath,
-    { mapId, userId: viewer.id, layerId: resolvedLayerId, watermarkNumber },
-    { cache: true }
-  );
-
-  return new NextResponse(new Uint8Array(watermarked), {
+  return new NextResponse(new Uint8Array(rawBuffer), {
     headers: {
       "Content-Type": "image/png",
       "Cache-Control": "private, max-age=86400",
