@@ -8,10 +8,37 @@ import { join } from "path";
  */
 export const WATERMARK_SECRET = process.env.WATERMARK_SECRET ?? "";
 
+/**
+ * Derive a pseudorandom sync pattern from the watermark secret and version.
+ * A fixed alternating pattern (e.g. 010101...) matches the natural sign
+ * alternation of mid-frequency DCT coefficients, producing high false-
+ * positive sync scores on unwatermarked images. A secret-derived random
+ * pattern fixes that while still being reproducible for extraction.
+ */
+function deriveSyncPattern(
+  secret: string,
+  version: number,
+  length: number
+): (0 | 1)[] {
+  const pattern: (0 | 1)[] = [];
+  let hash = createHash("sha256")
+    .update(`${secret}:watermark-sync:${version}`)
+    .digest();
+
+  for (let i = 0; i < length; i++) {
+    if (i > 0 && i % hash.length === 0) {
+      hash = createHash("sha256").update(hash).update(String(i)).digest();
+    }
+    pattern.push((hash[i % hash.length]! & 1) as 0 | 1);
+  }
+
+  return pattern;
+}
+
 export const BLOCK_SIZE = 8;
 
 /** Watermark format version. Bumped when the embedding scheme changes. */
-export const WATERMARK_VERSION = 3;
+export const WATERMARK_VERSION = 4;
 
 /**
  * Number of payload bits. A shorter payload lets us spread each bit across
@@ -26,9 +53,11 @@ export const SYNC_LENGTH = 16;
 export const TOTAL_BITS = SYNC_LENGTH + PAYLOAD_BITS;
 
 /** Known sync pattern (0/1 bits). Used for detection and alignment. */
-export const SYNC_PATTERN: (0 | 1)[] = "0101010101010101"
-  .split("")
-  .map((c) => (c === "1" ? 1 : 0));
+export const SYNC_PATTERN: (0 | 1)[] = deriveSyncPattern(
+  WATERMARK_SECRET,
+  WATERMARK_VERSION,
+  SYNC_LENGTH
+);
 
 /**
  * Mid-frequency DCT coefficient positions (row-major indices in the 8×8
@@ -62,19 +91,19 @@ export const EXTRACT_SCALE_FACTORS: number[] = [1, 2, 4, 8];
 export const MAX_ALIGNMENT_DIMENSION = 2048;
 
 /** Minimum hard sync confidence required before a watermark is considered found. */
-export const SYNC_CONFIDENCE_THRESHOLD = 0.6;
+export const SYNC_CONFIDENCE_THRESHOLD = 0.8;
 
 /**
  * Minimum *soft* (matched-filter) sync score required for a positive detection.
  * Soft scores are signed, magnitude-weighted correlations, so random noise
  * clusters near 0 while a real signal is clearly positive.
  */
-export const SYNC_SOFT_CONFIDENCE_THRESHOLD = 0.1;
+export const SYNC_SOFT_CONFIDENCE_THRESHOLD = 0.6;
 
 /**
  * Minimum *soft* overall score required for a positive detection.
  */
-export const SOFT_CONFIDENCE_THRESHOLD = 0.1;
+export const SOFT_CONFIDENCE_THRESHOLD = 0.4;
 
 /**
  * The best candidate must beat the second-best candidate by at least this
