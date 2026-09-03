@@ -10,12 +10,14 @@ describe("environment configuration", () => {
     expect(compose).toContain("image: huginn-app:latest");
     expect(compose).not.toContain("mapsamuelzone");
     expect(compose).not.toContain("AUTH_SECRET");
+    expect(compose).not.toContain("WATERMARK_SECRET");
   });
 
   it("does not provide runnable placeholder secrets in the example env file", () => {
     expect(envExample).toContain('POSTGRES_PASSWORD=""');
     expect(envExample).toContain('INITIAL_ADMIN_PASSWORD=""');
     expect(envExample).not.toContain("replace-before-use");
+    expect(envExample).not.toContain("WATERMARK_SECRET");
   });
 
   it("keeps local planning docs out of Docker build contexts", () => {

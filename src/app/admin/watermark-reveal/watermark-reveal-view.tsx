@@ -3,59 +3,46 @@
 import { useEffect, useState } from "react";
 import { AdminHeader } from "../admin-header";
 
-type MapOption = {
-  id: string;
-  name: string;
-};
-
 type UserOption = {
   id: string;
   username: string | null;
+  watermarkNumber: number | null;
 };
 
 type RevealResult = {
-  found: boolean;
-  username: string | null;
-  userId: string | null;
-  confidence: number;
-  syncConfidence: number;
-  softConfidence: number;
-  syncSoftConfidence: number;
-  scale: number;
-  offsetX: number;
-  offsetY: number;
-  previewImage?: string | null;
+  saturationPreview: string | null;
+  chromaPreview: string | null;
 };
 
-export function WatermarkRevealView({
-  maps,
-  users,
-}: {
-  maps: MapOption[];
-  users: UserOption[];
-}) {
+export function WatermarkRevealView({ users }: { users: UserOption[] }) {
   const [file, setFile] = useState<File | null>(null);
   const [fileInputKey, setFileInputKey] = useState(0);
-  const [mapId, setMapId] = useState<string>(maps[0]?.id ?? "");
-  const [userId, setUserId] = useState<string>("");
   const [result, setResult] = useState<RevealResult | null>(null);
+  const [digits, setDigits] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const watermarkedUsers = users
+    .filter((user) => user.watermarkNumber !== null)
+    .map((user) => ({
+      ...user,
+      paddedNumber: String(user.watermarkNumber).padStart(4, "0"),
+    }));
+  const paddedDigits = digits.trim().padStart(4, "0");
+  const matchedNumber = digits.trim().length > 0 ? paddedDigits : null;
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (file === null || mapId.length === 0) {
+    if (file === null) {
       return;
     }
 
     setLoading(true);
     setResult(null);
+    setError(null);
 
     const formData = new FormData();
     formData.append("image", file);
-    formData.append("mapId", mapId);
-    if (userId.length > 0) {
-      formData.append("userId", userId);
-    }
 
     try {
       const response = await fetch("/api/admin/watermark-reveal", {
@@ -64,23 +51,10 @@ export function WatermarkRevealView({
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        setResult({
-          found: false,
-          username: null,
-          userId: null,
-          confidence: 0,
-          syncConfidence: 0,
-          softConfidence: 0,
-          syncSoftConfidence: 0,
-          scale: 1,
-          offsetX: 0,
-          offsetY: 0,
-        });
-        alert(error.error ?? "Failed to reveal watermark");
+        const body = await response.json();
+        setError(body.error ?? "Failed to enhance image");
       } else {
-        const data = await response.json();
-        setResult(data);
+        setResult(await response.json());
       }
     } finally {
       setLoading(false);
@@ -100,9 +74,9 @@ export function WatermarkRevealView({
 
     for (const item of Array.from(clipboardData.items)) {
       if (item.type.startsWith("image/")) {
-        const file = item.getAsFile();
-        if (file !== null) {
-          setFile(file);
+        const pastedFile = item.getAsFile();
+        if (pastedFile !== null) {
+          setFile(pastedFile);
           event.preventDefault();
           return;
         }
@@ -123,42 +97,6 @@ export function WatermarkRevealView({
 
       <section className="history-empty">
         <form onSubmit={handleSubmit} style={{ maxWidth: 600 }}>
-          <div style={{ marginBottom: 16 }}>
-            <label htmlFor="mapId">Map</label>
-            <select
-              id="mapId"
-              value={mapId}
-              onChange={(e) => {
-                setMapId(e.target.value);
-                setUserId("");
-              }}
-              style={{ width: "100%", marginTop: 4 }}
-            >
-              {maps.map((map) => (
-                <option key={map.id} value={map.id}>
-                  {map.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ marginBottom: 16 }}>
-            <label htmlFor="userId">User (optional)</label>
-            <select
-              id="userId"
-              value={userId}
-              onChange={(e) => setUserId(e.target.value)}
-              style={{ width: "100%", marginTop: 4 }}
-            >
-              <option value="">All users with map access</option>
-              {users.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.username ?? user.id}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div style={{ marginBottom: 16 }}>
             <label htmlFor="image">Screenshot or frame</label>
             <div
@@ -193,60 +131,89 @@ export function WatermarkRevealView({
           </div>
 
           <button type="submit" disabled={loading || file === null}>
-            {loading ? "Revealing..." : "Reveal"}
+            {loading ? "Enhancing..." : "Enhance"}
           </button>
         </form>
 
+        {error !== null && <p style={{ marginTop: 16 }}>{error}</p>}
+
         {result !== null && (
           <div style={{ marginTop: 24 }}>
-            {result.found ? (
-              <p>
-                <strong>User:</strong> {result.username} ({result.userId})
-              </p>
-            ) : result.userId ? (
-              <p>
-                <strong>Uncertain match:</strong> {result.username} ({result.userId}) — confidence below certainty threshold
-              </p>
-            ) : (
-              <p>No watermark found</p>
-            )}
             <p>
-              <strong>Confidence:</strong>{" "}
-              {Math.round(result.confidence * 100)}%
+              Read the overlaid digits off either rendering, then type them into
+              the Digits field below to match a user.
             </p>
-            <p>
-              <strong>Sync confidence:</strong>{" "}
-              {Math.round(result.syncConfidence * 100)}%
-            </p>
-            <p>
-              <strong>Soft confidence:</strong>{" "}
-              {result.softConfidence.toFixed(3)}
-            </p>
-            <p>
-              <strong>Sync soft confidence:</strong>{" "}
-              {result.syncSoftConfidence.toFixed(3)}
-            </p>
-            <p>
-              <strong>Scale:</strong> {result.scale}
-            </p>
-            <p>
-              <strong>Offset:</strong> ({result.offsetX}, {result.offsetY})
-            </p>
-            {result.previewImage ? (
-              <div style={{ marginTop: 16 }}>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+              <div style={{ flex: "1 1 320px" }}>
                 <p>
-                  <strong>Saturation-boosted preview</strong> (chroma watermark becomes visible under boost):
+                  <strong>Saturation boost</strong>
                 </p>
-                {/* eslint-disable-next-line @next/next/no-img-element -- data-URL preview with unknown dimensions */}
-                <img
-                  src={result.previewImage}
-                  alt="Saturation-boosted watermark preview"
-                  style={{ maxWidth: "100%", border: "1px solid #444", borderRadius: 4, imageRendering: "pixelated" }}
-                />
+                {result.saturationPreview !== null ? (
+                  /* eslint-disable-next-line @next/next/no-img-element -- data-URL preview with unknown dimensions */
+                  <img
+                    src={result.saturationPreview}
+                    alt="Saturation-boosted watermark preview"
+                    style={{ maxWidth: "100%", border: "1px solid #444", borderRadius: 4, imageRendering: "pixelated" }}
+                  />
+                ) : (
+                  <p>Enhancement failed for this image</p>
+                )}
               </div>
-            ) : null}
+              <div style={{ flex: "1 1 320px" }}>
+                <p>
+                  <strong>Chroma isolation</strong>
+                </p>
+                {result.chromaPreview !== null ? (
+                  /* eslint-disable-next-line @next/next/no-img-element -- data-URL preview with unknown dimensions */
+                  <img
+                    src={result.chromaPreview}
+                    alt="Chroma-isolated watermark preview"
+                    style={{ maxWidth: "100%", border: "1px solid #444", borderRadius: 4, imageRendering: "pixelated" }}
+                  />
+                ) : (
+                  <p>Enhancement failed for this image</p>
+                )}
+              </div>
+            </div>
           </div>
         )}
+
+        <div style={{ marginTop: 24, maxWidth: 600 }}>
+          <label htmlFor="digits">Digits</label>
+          <input
+            id="digits"
+            type="text"
+            inputMode="numeric"
+            value={digits}
+            onChange={(e) => setDigits(e.target.value)}
+            placeholder="Digits read off the enhanced image"
+            style={{ display: "block", width: "100%", marginTop: 4 }}
+          />
+
+          <table style={{ width: "100%", marginTop: 16, borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", padding: 4 }}>Number</th>
+                <th style={{ textAlign: "left", padding: 4 }}>Username</th>
+              </tr>
+            </thead>
+            <tbody>
+              {watermarkedUsers.map((user) => {
+                const isMatch = matchedNumber !== null && user.paddedNumber === matchedNumber;
+                return (
+                  <tr
+                    key={user.id}
+                    data-matched={isMatch ? "true" : undefined}
+                    style={isMatch ? { background: "rgba(90, 200, 120, 0.25)", fontWeight: "bold" } : undefined}
+                  >
+                    <td style={{ padding: 4 }}>{user.paddedNumber}</td>
+                    <td style={{ padding: 4 }}>{user.username ?? user.id}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );

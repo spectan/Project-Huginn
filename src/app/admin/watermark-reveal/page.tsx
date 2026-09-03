@@ -10,18 +10,12 @@ export default async function WatermarkRevealPage() {
     return <WatermarkRevealAccessDenied />;
   }
 
-  const maps = await prisma.map.findMany({
-    where: { isActive: true },
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
-
   const users = await prisma.user.findMany({
-    orderBy: { username: "asc" },
-    select: { id: true, username: true },
+    orderBy: { watermarkNumber: "asc" },
+    select: { id: true, username: true, watermarkNumber: true },
   });
 
-  return <WatermarkRevealView maps={maps} users={users} />;
+  return <WatermarkRevealView users={users} />;
 }
 
 function WatermarkRevealAccessDenied() {
