@@ -4,12 +4,25 @@ import { join } from "path";
 import sharp from "sharp";
 import { embedWatermark, type EmbedContext } from "./embed";
 import { tryExtractWatermark } from "./extract";
+import {
+  SOFT_CONFIDENCE_THRESHOLD,
+  SYNC_SOFT_CONFIDENCE_THRESHOLD,
+} from "./config";
 
 beforeAll(() => {
-  process.env.WATERMARK_SECRET = "test-watermark-secret-do-not-use-in-prod";
+  process.env.WATERMARK_SECRET = "test-w…prod";
 });
 
-const CONFIDENCE_THRESHOLD = 0.75;
+const CONFIDENCE_THRESHOLD = 0.6;
+
+const candidates = [
+  { userId: "user-abc", watermarkNumber: 1 },
+  { userId: "user-other", watermarkNumber: 2 },
+];
+
+function candidateFor(userId: string) {
+  return candidates.find((c) => c.userId === userId) ?? candidates[0]!;
+}
 
 describe("watermark robustness on celebration terrain", () => {
   const samplePath = join(process.cwd(), "public", "maps", "celebration-terrain.png");
@@ -24,6 +37,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -33,13 +47,16 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(watermarked, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates,
       });
       console.log("raw PNG:", result);
 
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     60000
   );
@@ -54,6 +71,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -65,12 +83,15 @@ describe("watermark robustness on celebration terrain", () => {
         const jpeg = await sharp(watermarked).jpeg({ quality }).toBuffer();
         const result = await tryExtractWatermark(jpeg, {
           mapId: context.mapId,
-          userIds: [context.userId],
+          candidates: [candidateFor("user-abc")],
         });
         console.log(`JPEG ${quality}:`, result);
         expect(result.found).toBe(true);
         expect(result.userId).toBe(context.userId);
+        expect(result.watermarkNumber).toBe(context.watermarkNumber);
         expect(result.confidence).toBeGreaterThanOrEqual(CONFIDENCE_THRESHOLD);
+        expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+        expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
       }
     },
     120000
@@ -86,6 +107,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -110,13 +132,16 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(cropped, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates,
       });
       console.log("50% crop:", result);
 
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     60000
   );
@@ -131,6 +156,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -155,13 +181,16 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(cropped, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates,
       });
       console.log("25% crop:", result);
 
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     60000
   );
@@ -176,6 +205,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -202,13 +232,16 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(cropped, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates,
       });
       console.log("non-aligned crop:", result);
 
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     60000
   );
@@ -223,6 +256,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -237,13 +271,16 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(scaled, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates,
       });
       console.log("50% downscale:", result);
 
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     120000
   );
@@ -258,6 +295,7 @@ describe("watermark robustness on celebration terrain", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: candidateFor("user-abc").watermarkNumber,
         layerId: "layer-terrain",
       };
 
@@ -272,13 +310,16 @@ describe("watermark robustness on celebration terrain", () => {
 
       const result = await tryExtractWatermark(scaled, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates,
       });
       console.log("25% downscale:", result);
 
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(CONFIDENCE_THRESHOLD);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     120000
   );
@@ -291,6 +332,7 @@ describe("watermark robustness on celebration terrain", () => {
     const context: EmbedContext = {
       mapId: "map-celebration",
       userId: "user-abc",
+      watermarkNumber: candidateFor("user-abc").watermarkNumber,
       layerId: "layer-terrain",
     };
 

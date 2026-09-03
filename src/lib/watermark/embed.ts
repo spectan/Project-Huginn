@@ -35,9 +35,10 @@ function clampByte(value: number): number {
 }
 
 export interface EmbedContext {
+  layerId: string;
   mapId: string;
   userId: string;
-  layerId: string;
+  watermarkNumber: number;
 }
 
 export interface EmbedOptions {
@@ -96,7 +97,7 @@ export async function embedWatermark(
   const blocksH = paddedH / BLOCK_SIZE;
   const totalBlocks = blocksW * blocksH;
 
-  const bitStream = getEmbeddedBitStream(context.mapId, context.userId);
+  const bitStream = getEmbeddedBitStream(context.watermarkNumber);
 
   const modifiedLuma = new Float64Array(pixelCount);
   originalLuma.forEach((v, i) => (modifiedLuma[i] = v));

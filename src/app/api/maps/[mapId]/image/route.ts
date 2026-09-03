@@ -22,6 +22,17 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const layerId = searchParams.get("layer") ?? undefined;
 
+  const user = await prisma.user.findUnique({
+    where: { id: viewer.id },
+    select: { watermarkNumber: true },
+  });
+
+  if (user === null || user.watermarkNumber === null) {
+    return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
+  }
+
+  const watermarkNumber = user.watermarkNumber;
+
   let imagePath: string | null = null;
   let resolvedLayerId = "";
 
@@ -53,7 +64,7 @@ export async function GET(
 
   const watermarked = await embedWatermark(
     rawFilePath,
-    { mapId, userId: viewer.id, layerId: resolvedLayerId },
+    { mapId, userId: viewer.id, layerId: resolvedLayerId, watermarkNumber },
     { cache: true }
   );
 

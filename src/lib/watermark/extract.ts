@@ -21,11 +21,13 @@ import { getEmbeddedBitStream } from "./codec";
 export interface ExtractContext {
   mapId: string;
   userId: string;
+  watermarkNumber: number;
 }
 
 export interface ExtractResult {
   found: boolean;
   userId: string | null;
+  watermarkNumber: number | null;
   confidence: number;
   syncConfidence: number;
   softConfidence: number;
@@ -314,9 +316,10 @@ async function findBestAlignment(
   }
 
   // Small-to-medium screenshots: search every candidate scale at full block
-  // density and evaluate both sync confidence and payload confidence for the
-  // reference user. The image is small enough that the 64×8×8 DCTs per scale are
-  // cheap, so we do not need sampled coarse search.
+  // density. The image is small enough that the 64×8×8 DCTs per scale are cheap.
+  // Scale selection uses the hard sync confidence (which is user-agnostic)
+  // instead of an arbitrary reference user's payload, so the choice does not
+  // depend on which user happened to be first in the list.
   const seenDimensions = new Set<string>();
   const candidates: Array<{
     scale: number;
@@ -324,7 +327,6 @@ async function findBestAlignment(
     offsetY: number;
     syncConfidence: number;
     syncSoftConfidence: number;
-    payloadConfidence: number;
   }> = [];
 
   for (const scale of EXTRACT_SCALE_FACTORS) {
@@ -345,11 +347,7 @@ async function findBestAlignment(
       1
     );
 
-    const {
-      syncConfidence,
-      syncSoftConfidence,
-      confidence: payloadConfidence,
-    } = extractAtOffset(
+    const { syncConfidence, syncSoftConfidence } = extractAtOffset(
       image,
       referenceBitStream,
       offsetX,
@@ -363,7 +361,6 @@ async function findBestAlignment(
       offsetY,
       syncConfidence,
       syncSoftConfidence,
-      payloadConfidence,
     });
 
     if (syncConfidence >= 0.99) {
@@ -375,15 +372,13 @@ async function findBestAlignment(
     return { scale: 1, offsetX: 0, offsetY: 0, syncConfidence: -1, syncSoftConfidence: -1 };
   }
 
-  // Prefer the scale/offset that gives the highest payload hard confidence,
-  // but only among candidates with a usable hard sync signal. This stops an
-  // up-scaled, noisy scale from beating the true scale just because its sync
-  // pattern happens to align a little better.
+  // Pick the scale/offset with the strongest hard sync signal. The sync
+  // pattern is identical for every user, so this is neutral across candidates.
   const viable = candidates.filter(
     (c) => c.syncConfidence >= SYNC_CONFIDENCE_THRESHOLD
   );
   const pool = viable.length > 0 ? viable : candidates;
-  pool.sort((a, b) => b.payloadConfidence - a.payloadConfidence);
+  pool.sort((a, b) => b.syncConfidence - a.syncConfidence);
   const best = pool[0]!;
 
   return {
@@ -401,7 +396,7 @@ export async function extractWatermark(
 ): Promise<ExtractResult> {
   assertSecret();
 
-  const bitStream = getEmbeddedBitStream(context.mapId, context.userId);
+  const bitStream = getEmbeddedBitStream(context.watermarkNumber);
   const { scale, offsetX, offsetY, syncConfidence, syncSoftConfidence } =
     await findBestAlignment(imageBuffer, bitStream);
 
@@ -421,6 +416,7 @@ export async function extractWatermark(
     return {
       found: false,
       userId: null,
+      watermarkNumber: null,
       confidence,
       syncConfidence,
       softConfidence,
@@ -434,6 +430,7 @@ export async function extractWatermark(
   return {
     found: true,
     userId: context.userId,
+    watermarkNumber: context.watermarkNumber,
     confidence,
     syncConfidence,
     softConfidence,
@@ -446,13 +443,14 @@ export async function extractWatermark(
 
 export async function tryExtractWatermark(
   imageBuffer: Buffer,
-  context: { mapId: string; userIds: string[] }
+  context: { mapId: string; candidates: Array<{ userId: string; watermarkNumber: number }> }
 ): Promise<ExtractResult> {
   assertSecret();
-  if (context.userIds.length === 0) {
+  if (context.candidates.length === 0) {
     return {
       found: false,
       userId: null,
+      watermarkNumber: null,
       confidence: 0,
       syncConfidence: 0,
       softConfidence: 0,
@@ -467,8 +465,7 @@ export async function tryExtractWatermark(
   // via the known sync pattern. The sync pattern is identical for every user,
   // so the alignment is user-agnostic.
   const referenceBitStream = getEmbeddedBitStream(
-    context.mapId,
-    context.userIds[0]!
+    context.candidates[0]!.watermarkNumber
   );
   const { scale, offsetX, offsetY, syncConfidence, syncSoftConfidence } =
     await findBestAlignment(imageBuffer, referenceBitStream);
@@ -479,6 +476,7 @@ export async function tryExtractWatermark(
     return {
       found: false,
       userId: null,
+      watermarkNumber: null,
       confidence: 0,
       syncConfidence,
       softConfidence: 0,
@@ -491,9 +489,9 @@ export async function tryExtractWatermark(
 
   const image = await loadImageLuma(imageBuffer, scale);
 
-  const candidates: ExtractResult[] = [];
-  for (const userId of context.userIds) {
-    const bitStream = getEmbeddedBitStream(context.mapId, userId);
+  const candidateResults: ExtractResult[] = [];
+  for (const candidate of context.candidates) {
+    const bitStream = getEmbeddedBitStream(candidate.watermarkNumber);
     const {
       syncConfidence: userSync,
       syncSoftConfidence: userSyncSoft,
@@ -501,9 +499,10 @@ export async function tryExtractWatermark(
       softConfidence,
     } = extractAtOffset(image, bitStream, offsetX, offsetY);
 
-    candidates.push({
+    candidateResults.push({
       found: false,
-      userId,
+      userId: candidate.userId,
+      watermarkNumber: candidate.watermarkNumber,
       confidence,
       syncConfidence: userSync,
       softConfidence,
@@ -514,9 +513,9 @@ export async function tryExtractWatermark(
     });
   }
 
-  candidates.sort((a, b) => b.softConfidence - a.softConfidence);
-  const best = candidates[0]!;
-  const secondBest = candidates[1];
+  candidateResults.sort((a, b) => b.softConfidence - a.softConfidence);
+  const best = candidateResults[0]!;
+  const secondBest = candidateResults[1];
 
   const margin = secondBest ? best.softConfidence - secondBest.softConfidence : 1;
 
@@ -531,6 +530,7 @@ export async function tryExtractWatermark(
   return {
     found: false,
     userId: best.userId,
+    watermarkNumber: best.watermarkNumber,
     confidence: best.confidence,
     syncConfidence: best.syncConfidence,
     softConfidence: best.softConfidence,

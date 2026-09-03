@@ -1,24 +1,18 @@
-import { createHash } from "crypto";
-import { PAYLOAD_BITS, SYNC_PATTERN, WATERMARK_SECRET } from "./config";
+import { PAYLOAD_BITS, SYNC_PATTERN } from "./config";
 
 /**
- * Derive the deterministic payload bits for a (mapId, userId) pair.
+ * Encode a user watermark number as the payload bits.
  *
- * The reveal process will brute-force known users and look for a matching
- * payload; 16 bits is enough to make accidental false positives unlikely
- * (~1/65k per candidate) while keeping each bit's samples numerous.
+ * The reveal process brute-forces known users by their watermark number.
+ * 16 bits supports up to 65,535 users; the app caps the assignment at 9,999.
  */
 export function getUserPayloadBits(
-  mapId: string,
-  userId: string
+  watermarkNumber: number
 ): (0 | 1)[] {
-  const hash = createHash("sha256")
-    .update(`${WATERMARK_SECRET}:${mapId}:${userId}`)
-    .digest("hex");
-
   const bits: (0 | 1)[] = [];
   for (let i = 0; i < PAYLOAD_BITS; i++) {
-    bits.push(parseInt(hash[i]!, 16) % 2 === 0 ? 0 : 1);
+    const bit = (watermarkNumber >> (PAYLOAD_BITS - 1 - i)) & 1;
+    bits.push(bit === 1 ? 1 : 0);
   }
   return bits;
 }
@@ -27,9 +21,8 @@ export function getUserPayloadBits(
  * Full bit stream: known sync pattern followed by the user payload bits.
  */
 export function getEmbeddedBitStream(
-  mapId: string,
-  userId: string
+  watermarkNumber: number
 ): (0 | 1)[] {
-  const payloadBits = getUserPayloadBits(mapId, userId);
+  const payloadBits = getUserPayloadBits(watermarkNumber);
   return [...SYNC_PATTERN, ...payloadBits];
 }

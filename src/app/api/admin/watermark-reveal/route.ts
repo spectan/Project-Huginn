@@ -34,6 +34,7 @@ export async function POST(request: Request) {
     found: boolean;
     username: string | null;
     userId: string | null;
+    watermarkNumber: number | null;
     confidence: number;
     syncConfidence: number;
     softConfidence: number;
@@ -45,6 +46,7 @@ export async function POST(request: Request) {
     found: false,
     username: null,
     userId: null,
+    watermarkNumber: null,
     confidence: 0,
     syncConfidence: 0,
     softConfidence: 0,
@@ -57,19 +59,21 @@ export async function POST(request: Request) {
   if (typeof userId === "string" && userId.length > 0) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, username: true },
+      select: { id: true, username: true, watermarkNumber: true },
     });
 
-    if (user !== null) {
+    if (user !== null && user.watermarkNumber !== null) {
       const result = await extractWatermark(imageBuffer, {
         mapId,
         userId: user.id,
+        watermarkNumber: user.watermarkNumber,
       });
 
       best = {
         found: result.found,
         username: user.username,
         userId: result.userId,
+        watermarkNumber: result.watermarkNumber,
         confidence: result.confidence,
         syncConfidence: result.syncConfidence,
         softConfidence: result.softConfidence,
@@ -84,24 +88,28 @@ export async function POST(request: Request) {
       where: { mapId },
       select: { userId: true },
     });
-    const userIds = new Set(permissions.map((p) => p.userId));
-    userIds.add(viewer.id); // admins may also have watermarked images
+    const permissionUserIds = new Set(permissions.map((p) => p.userId));
+    permissionUserIds.add(viewer.id); // admins may also have watermarked images
 
     const users = await prisma.user.findMany({
-      where: { id: { in: Array.from(userIds) } },
-      select: { id: true, username: true },
+      where: { id: { in: Array.from(permissionUserIds) } },
+      select: { id: true, username: true, watermarkNumber: true },
     });
     const usersById = new Map(users.map((u) => [u.id, u.username]));
+    const candidates = users
+      .filter((u) => u.watermarkNumber !== null)
+      .map((u) => ({ userId: u.id, watermarkNumber: u.watermarkNumber! }));
 
     const result = await tryExtractWatermark(imageBuffer, {
       mapId,
-      userIds: Array.from(userIds),
+      candidates,
     });
 
     best = {
       found: result.found,
       username: result.userId ? usersById.get(result.userId) ?? null : null,
       userId: result.userId,
+      watermarkNumber: result.watermarkNumber,
       confidence: result.confidence,
       syncConfidence: result.syncConfidence,
       softConfidence: result.softConfidence,

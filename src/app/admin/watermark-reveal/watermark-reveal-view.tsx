@@ -17,6 +17,7 @@ type RevealResult = {
   found: boolean;
   username: string | null;
   userId: string | null;
+  watermarkNumber: number | null;
   confidence: number;
   syncConfidence: number;
   softConfidence: number;
@@ -68,6 +69,7 @@ export function WatermarkRevealView({
           found: false,
           username: null,
           userId: null,
+          watermarkNumber: null,
           confidence: 0,
           syncConfidence: 0,
           softConfidence: 0,

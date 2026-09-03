@@ -4,11 +4,15 @@ import { join } from "path";
 import { embedWatermark, type EmbedContext } from "./embed";
 import { tryExtractWatermark } from "./extract";
 import { forwardDCT2D, inverseDCT2D } from "./dct";
+import {
+  SOFT_CONFIDENCE_THRESHOLD,
+  SYNC_SOFT_CONFIDENCE_THRESHOLD,
+} from "./config";
 
 // These tests depend on WATERMARK_SECRET being set. We set a deterministic
 // dev secret for the test process.
 beforeAll(() => {
-  process.env.WATERMARK_SECRET = "test-watermark-secret-do-not-use-in-prod";
+  process.env.WATERMARK_SECRET = "test-w…prod";
 });
 
 describe("DCT round-trip", () => {
@@ -44,6 +48,7 @@ describe("watermark embed/extract", () => {
       const context: EmbedContext = {
         mapId: "map-celebration",
         userId: "user-abc",
+        watermarkNumber: 1,
         layerId: "layer-terrain",
       };
 
@@ -55,13 +60,19 @@ describe("watermark embed/extract", () => {
 
       const result = await tryExtractWatermark(watermarked, {
         mapId: context.mapId,
-        userIds: [context.userId, "user-other"],
+        candidates: [
+          { userId: context.userId, watermarkNumber: context.watermarkNumber },
+          { userId: "user-other", watermarkNumber: 2 },
+        ],
       });
 
       console.log("extract result:", result);
       expect(result.found).toBe(true);
       expect(result.userId).toBe(context.userId);
+      expect(result.watermarkNumber).toBe(context.watermarkNumber);
       expect(result.confidence).toBeGreaterThan(0.75);
+      expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+      expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
     },
     60000
   );

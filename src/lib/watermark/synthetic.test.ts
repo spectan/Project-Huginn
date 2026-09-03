@@ -2,6 +2,10 @@ import { describe, expect, it, beforeAll } from "vitest";
 import { embedWatermark, type EmbedContext } from "./embed";
 import { tryExtractWatermark } from "./extract";
 import sharp from "sharp";
+import {
+  SOFT_CONFIDENCE_THRESHOLD,
+  SYNC_SOFT_CONFIDENCE_THRESHOLD,
+} from "./config";
 
 beforeAll(() => {
   process.env.WATERMARK_SECRET = "test-watermark-secret-do-not-use-in-prod";
@@ -25,6 +29,7 @@ describe("watermark embed/extract on synthetic image", () => {
     const context: EmbedContext = {
       mapId: "map-celebration",
       userId: "user-abc",
+      watermarkNumber: 1,
       layerId: "layer-terrain",
     };
 
@@ -32,7 +37,10 @@ describe("watermark embed/extract on synthetic image", () => {
 
     const result = await tryExtractWatermark(watermarked, {
       mapId: context.mapId,
-      userIds: [context.userId, "user-other"],
+      candidates: [
+        { userId: context.userId, watermarkNumber: context.watermarkNumber },
+        { userId: "user-other", watermarkNumber: 2 },
+      ],
     });
 
     console.log("synthetic result:", result);
@@ -42,6 +50,9 @@ describe("watermark embed/extract on synthetic image", () => {
     );
     expect(result.found).toBe(true);
     expect(result.userId).toBe(context.userId);
+    expect(result.watermarkNumber).toBe(context.watermarkNumber);
     expect(result.confidence).toBeGreaterThan(0.75);
+    expect(result.softConfidence).toBeGreaterThan(SOFT_CONFIDENCE_THRESHOLD);
+    expect(result.syncSoftConfidence).toBeGreaterThan(SYNC_SOFT_CONFIDENCE_THRESHOLD);
   });
 });

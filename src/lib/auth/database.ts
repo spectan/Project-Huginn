@@ -21,10 +21,16 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
       return { expiresAt, id: session.id, token };
     },
     createUser: async ({ passwordHash, username }) => {
+      const maxRecord = await prisma.user.findFirst({
+        orderBy: { watermarkNumber: "desc" },
+        select: { watermarkNumber: true }
+      });
+      const watermarkNumber = (maxRecord?.watermarkNumber ?? 0) + 1;
       return prisma.user.create({
         data: {
           passwordHash,
-          username
+          username,
+          watermarkNumber
         }
       });
     },

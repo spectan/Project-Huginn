@@ -11,7 +11,7 @@ export const WATERMARK_SECRET = process.env.WATERMARK_SECRET ?? "";
 export const BLOCK_SIZE = 8;
 
 /** Watermark format version. Bumped when the embedding scheme changes. */
-export const WATERMARK_VERSION = 2;
+export const WATERMARK_VERSION = 3;
 
 /**
  * Number of payload bits. A shorter payload lets us spread each bit across
