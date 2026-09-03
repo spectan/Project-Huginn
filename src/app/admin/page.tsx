@@ -15,7 +15,7 @@ export default async function AdminDashboardPage() {
       <section className="history-empty">
         <p>Welcome to the admin dashboard.</p>
         <p>
-          Use the tabs above to manage accounts, review the history log, restore deleted markers, or inspect watermarks.
+          Use the tabs above to review alerts, manage accounts, inspect the history log, restore deleted markers, or inspect watermarks.
         </p>
       </section>
     </main>

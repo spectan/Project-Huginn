@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getSessionExpiry, createSessionToken, hashSessionToken } from "./session";
 import type { AuthServiceDependencies } from "./auth-service";
 
-export function createAuthDependencies(): AuthServiceDependencies {
+export function createAuthDependencies(clientIp?: string): AuthServiceDependencies {
   return {
     createSession: async (userId) => {
       const token = createSessionToken();
@@ -47,11 +47,14 @@ export function createAuthDependencies(): AuthServiceDependencies {
     },
     hashPassword: async (password) => argon2.hash(password),
     recordAudit: async (input) => {
+      const metadata = clientIp !== undefined && clientIp.length > 0
+        ? { ...input.metadata, clientIp }
+        : input.metadata;
       await prisma.auditEvent.create({
         data: {
           action: input.action,
           actorUserId: input.actorUserId,
-          metadata: input.metadata as Prisma.InputJsonValue,
+          metadata: metadata as Prisma.InputJsonValue,
           targetId: input.targetId,
           targetType: input.targetType
         }

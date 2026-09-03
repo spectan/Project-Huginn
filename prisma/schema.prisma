@@ -58,6 +58,18 @@ enum AuditTargetType {
   SYSTEM
 }
 
+enum AlertSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
 model User {
   id                 String              @id @default(cuid())
   username           String              @unique
@@ -100,6 +112,9 @@ model User {
   mapSettings        UserMapSettings[]
   mapPermissions     UserMapPermission[]
   canaryMarkers      CanaryMarker[]
+  alerts             Alert[]             @relation("AlertActor")
+  acknowledgedAlerts Alert[]             @relation("AlertAcknowledgedBy")
+  resolvedAlerts     Alert[]             @relation("AlertResolvedBy")
 
   @@index([approvalStatus])
   @@index([accessLevel])
@@ -144,6 +159,7 @@ model Map {
   userSettings    UserMapSettings[]
   userPermissions UserMapPermission[]
   canaryMarkers   CanaryMarker[]
+  alerts          Alert[]
 
   @@index([isActive])
   @@map("maps")
@@ -443,6 +459,35 @@ model AuditEvent {
   @@index([action, createdAt])
   @@index([mapId, createdAt])
   @@map("audit_events")
+}
+
+model Alert {
+  id                   String        @id @default(cuid())
+  rule                 String
+  severity             AlertSeverity
+  status               AlertStatus   @default(OPEN)
+  title                String
+  description          String
+  actorUserId          String?
+  actor                User?         @relation("AlertActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  mapId                String?
+  map                  Map?          @relation(fields: [mapId], references: [id], onDelete: SetNull)
+  metadata             Json
+  acknowledgedByUserId String?
+  acknowledgedBy       User?         @relation("AlertAcknowledgedBy", fields: [acknowledgedByUserId], references: [id], onDelete: SetNull)
+  resolvedByUserId     String?
+  resolvedBy           User?         @relation("AlertResolvedBy", fields: [resolvedByUserId], references: [id], onDelete: SetNull)
+  acknowledgedAt       DateTime?
+  resolvedAt           DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  @@index([status])
+  @@index([severity])
+  @@index([createdAt])
+  @@index([actorUserId])
+  @@index([rule, createdAt])
+  @@map("alerts")
 }
 
 model Event {

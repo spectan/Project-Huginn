@@ -410,7 +410,7 @@ export async function tryExtractWatermark(
     context.mapId,
     context.userIds[0]!
   );
-  const { scale, offsetX, offsetY, syncConfidence } = await findBestAlignment(
+  const { scale, offsetX, offsetY } = await findBestAlignment(
     imageBuffer,
     referenceBitStream
   );

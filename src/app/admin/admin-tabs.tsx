@@ -5,21 +5,23 @@ import Link from "next/link";
 export type AdminRoute =
   | "/admin"
   | "/admin/accounts"
+  | "/admin/alerts"
   | "/admin/history"
   | "/admin/deleted-markers"
   | "/admin/watermark-reveal";
 
-type AdminTabsProps = {
-  currentRoute: AdminRoute;
-};
-
 const tabs = [
   { href: "/admin", label: "Dashboard" },
+  { href: "/admin/alerts", label: "Alerts" },
   { href: "/admin/accounts", label: "Accounts" },
   { href: "/admin/history", label: "History Log" },
   { href: "/admin/deleted-markers", label: "Deleted Markers" },
   { href: "/admin/watermark-reveal", label: "Watermark" },
 ] as const;
+
+type AdminTabsProps = {
+  currentRoute: AdminRoute;
+};
 
 export function AdminTabs({ currentRoute }: AdminTabsProps) {
   return (
