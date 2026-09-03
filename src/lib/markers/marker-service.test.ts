@@ -904,9 +904,6 @@ describe("marker service", () => {
       return;
     }
 
-    const canaryRecords = await deps.listCanaryMarkers({ mapId: "map-1", userId: reader.id });
-
-    expect(canaryRecords).toHaveLength(CANARY_MARKERS_PER_MAP);
     expect(result.value).toEqual({
       markers: [
         {
@@ -921,8 +918,7 @@ describe("marker service", () => {
           type: "tower",
           x: 25,
           y: 30
-        },
-        ...canaryRecords.map((record) => record.payload)
+        }
       ],
       map: {
         heightPx: 2048,
@@ -955,9 +951,107 @@ describe("marker service", () => {
     }));
   });
 
+  it("serves no canary markers by default and never touches the canary store", async () => {
+    let canaryStoreCalls = 0;
+    const listCanaryMarkers = deps.listCanaryMarkers;
+    deps.listCanaryMarkers = async (input) => {
+      canaryStoreCalls += 1;
+      return listCanaryMarkers(input);
+    };
+    const createCanaryMarkers = deps.createCanaryMarkers;
+    deps.createCanaryMarkers = async (input) => {
+      canaryStoreCalls += 1;
+      return createCanaryMarkers(input);
+    };
+
+    const byDefault = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
+    const explicitFalse = await listMarkers({ actor: reader, includeCanaries: false, mapId: "map-1" }, deps);
+
+    expect(byDefault.ok).toBe(true);
+    expect(explicitFalse.ok).toBe(true);
+
+    if (!byDefault.ok || !explicitFalse.ok) {
+      return;
+    }
+
+    expect(byDefault.value.markers).toEqual([]);
+    expect(explicitFalse.value.markers).toEqual([]);
+    expect(canaryStoreCalls).toBe(0);
+  });
+
+  it("merges canary markers into the served list when includeCanaries is true", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    const result = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-1" }, deps);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const canaryRecords = await deps.listCanaryMarkers({ mapId: "map-1", userId: reader.id });
+    const canaryPayloads = canaryRecords.map((record) => record.payload);
+
+    expect(canaryRecords).toHaveLength(CANARY_MARKERS_PER_MAP);
+    expect(result.value.markers).toHaveLength(1 + CANARY_MARKERS_PER_MAP);
+    expect(result.value.markers).toContainEqual(expect.objectContaining({ id: "tower-1" }));
+
+    for (const payload of canaryPayloads) {
+      expect(result.value.markers).toContainEqual(payload);
+    }
+  });
+
+  it("interleaves canary markers deterministically across calls", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    const first = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-1" }, deps);
+    const second = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-1" }, deps);
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+
+    if (!first.ok || !second.ok) {
+      return;
+    }
+
+    expect(first.value.markers).toEqual(second.value.markers);
+
+    const canaryRecords = await deps.listCanaryMarkers({ mapId: "map-1", userId: reader.id });
+    const expectedIds = ["tower-1", ...canaryRecords.map((record) => (
+      (record.payload as { id: string }).id
+    ))];
+
+    expect(first.value.markers.map((marker) => marker.id).sort()).toEqual(expectedIds.sort());
+  });
+
   it("reuses the viewer's canary markers across list calls", async () => {
-    const first = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
-    const second = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
+    const first = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-1" }, deps);
+    const second = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-1" }, deps);
 
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(true);
@@ -974,8 +1068,8 @@ describe("marker service", () => {
   });
 
   it("serves different canary markers to different viewers", async () => {
-    const readerResult = await listMarkers({ actor: reader, mapId: "map-1" }, deps);
-    const writerResult = await listMarkers({ actor: writer, mapId: "map-1" }, deps);
+    const readerResult = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-1" }, deps);
+    const writerResult = await listMarkers({ actor: writer, includeCanaries: true, mapId: "map-1" }, deps);
 
     expect(readerResult.ok).toBe(true);
     expect(writerResult.ok).toBe(true);
@@ -991,7 +1085,7 @@ describe("marker service", () => {
   });
 
   it("does not create canary markers when read access is denied", async () => {
-    const result = await listMarkers({ actor: reader, mapId: "map-2" }, deps);
+    const result = await listMarkers({ actor: reader, includeCanaries: true, mapId: "map-2" }, deps);
 
     expect(result).toEqual({ ok: false, error: "Read access is required" });
 

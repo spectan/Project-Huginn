@@ -25,7 +25,6 @@ describe("DeletedMarkersView", () => {
   it("renders deleted marker restore rows", () => {
     render(React.createElement(DeletedMarkersView, { markers: deletedMarkers }));
 
-    expect(screen.getByRole("main").className).toContain("history-page--dark");
     expect(screen.getByRole("heading", { name: "Deleted markers" })).toBeTruthy();
     expect(screen.getByText("Mako 945")).toBeTruthy();
     expect(screen.getByText("100, 200")).toBeTruthy();

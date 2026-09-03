@@ -1,5 +1,3 @@
-import { AdminHeader } from "./admin-header";
-
 type AdminAccessDeniedProps = {
   title: string;
   message?: string;
@@ -7,9 +5,9 @@ type AdminAccessDeniedProps = {
 
 export function AdminAccessDenied({ title, message = "Admin access is required" }: AdminAccessDeniedProps) {
   return (
-    <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin" title={title} />
-      <section className="history-empty">{message}</section>
-    </main>
+    <>
+      <h1 className="admin-page-title">{title}</h1>
+      <section className="admin-empty">{message}</section>
+    </>
   );
 }

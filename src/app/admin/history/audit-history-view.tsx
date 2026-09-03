@@ -1,4 +1,3 @@
-import { AdminHeader } from "../admin-header";
 import type { AuditHistoryEvent } from "@/lib/audit-history/audit-history";
 
 type AuditHistoryViewProps = {
@@ -8,21 +7,20 @@ type AuditHistoryViewProps = {
 
 export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) {
   return (
-    <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/history" title="History" />
+    <>
+      <h1 className="admin-page-title">History</h1>
       {events.length === 0 ? (
-        <section className="history-empty">No history events yet</section>
+        <section className="admin-empty">No history events yet</section>
       ) : (
-        <div className="history-table-wrap">
-          <table className="history-table">
+        <div className="admin-panel">
+          <table className="admin-table">
             <thead>
               <tr>
                 <th>Time</th>
                 <th>Actor</th>
                 <th>Action</th>
                 <th>Target</th>
-                <th>X</th>
-                <th>Y</th>
+                <th>Position</th>
                 <th>Map</th>
                 <th>Metadata</th>
               </tr>
@@ -51,11 +49,10 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
                       </>
                     )}
                   </td>
-                  <td>{event.x !== null ? event.x : "—"}</td>
-                  <td>{event.y !== null ? event.y : "—"}</td>
+                  <td>{formatPosition(event.x, event.y)}</td>
                   <td>{event.mapName.length > 0 ? event.mapName : "None"}</td>
                   <td>
-                    <code>{formatMetadata(event.metadata)}</code>
+                    <code className="admin-code">{formatMetadata(event.metadata)}</code>
                   </td>
                 </tr>
               ))}
@@ -64,20 +61,11 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
         </div>
       )}
       {nextCursor !== null ? (
-        <nav className="history-pagination" aria-label="History pages">
+        <nav className="admin-pagination" aria-label="History pages">
           <a href={`/admin/history?before=${encodeURIComponent(nextCursor)}`}>Older</a>
         </nav>
       ) : null}
-    </main>
-  );
-}
-
-export function AuditHistoryAccessDenied({ message }: { message: string }) {
-  return (
-    <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/history" title="History" />
-      <section className="history-empty">{message}</section>
-    </main>
+    </>
   );
 }
 
@@ -106,6 +94,14 @@ function formatAction(action: AuditHistoryEvent["action"]): string {
 
 function formatTargetType(type: AuditHistoryEvent["targetType"]): string {
   return type.charAt(0) + type.slice(1).toLowerCase();
+}
+
+function formatPosition(x: number | null, y: number | null): string {
+  if (x === null || y === null) {
+    return "—";
+  }
+
+  return `${x}, ${y}`;
 }
 
 function formatMetadata(metadata: Record<string, unknown>): string {

@@ -38,6 +38,30 @@ describe("generateCanaryMarkers", () => {
       expect(payload.y).toBeLessThan(bounds.heightPx);
     }
   });
+
+  it("generates cuid-shaped ids indistinguishable from real marker ids", () => {
+    const generated = generateCanaryMarkers({ mapId: "map-1", userId: "user-1" }, bounds);
+
+    expect(generated.length).toBeGreaterThan(0);
+
+    for (const { payload } of generated) {
+      expect(payload.id).toMatch(/^c[0-9a-z]{24}$/);
+    }
+  });
+
+  it("generates tower creator numbers that pass the real marker validator", () => {
+    const towers = Array.from({ length: 20 }, (_, index) =>
+      generateCanaryMarkers({ mapId: "map-1", userId: `user-${index}` }, bounds)
+    ).flat().filter(({ payload }) => payload.type === "tower");
+
+    expect(towers.length).toBeGreaterThan(0);
+
+    for (const { payload } of towers) {
+      if (payload.type === "tower") {
+        expect(payload.makerNumber).toMatch(/^\d{1,3}$/);
+      }
+    }
+  });
 });
 
 describe("getOrCreateCanaries", () => {

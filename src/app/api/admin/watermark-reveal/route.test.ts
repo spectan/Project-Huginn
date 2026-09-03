@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  boostChromaImage: vi.fn(),
   isolateChromaImage: vi.fn(),
   currentViewer: null as null | {
     accessLevel: "WRITE";
@@ -16,7 +15,6 @@ vi.mock("@/lib/auth/current-viewer", () => ({
 }));
 
 vi.mock("@/lib/watermark/enhance", () => ({
-  boostChromaImage: mocks.boostChromaImage,
   isolateChromaImage: mocks.isolateChromaImage
 }));
 
@@ -26,7 +24,6 @@ describe("POST /api/admin/watermark-reveal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.currentViewer = null;
-    mocks.boostChromaImage.mockResolvedValue(Buffer.from("boosted-png"));
     mocks.isolateChromaImage.mockResolvedValue(Buffer.from("isolated-png"));
   });
 
@@ -35,7 +32,7 @@ describe("POST /api/admin/watermark-reveal", () => {
 
     await expect(response.json()).resolves.toEqual({ error: "Admin access is required" });
     expect(response.status).toBe(403);
-    expect(mocks.boostChromaImage).not.toHaveBeenCalled();
+    expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
 
     mocks.currentViewer = {
       accessLevel: "WRITE",
@@ -46,7 +43,7 @@ describe("POST /api/admin/watermark-reveal", () => {
     const nonAdminResponse = await POST(createRevealRequest(true));
 
     expect(nonAdminResponse.status).toBe(403);
-    expect(mocks.boostChromaImage).not.toHaveBeenCalled();
+    expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
   });
 
   it("rejects requests without an image", async () => {
@@ -61,10 +58,10 @@ describe("POST /api/admin/watermark-reveal", () => {
 
     await expect(response.json()).resolves.toEqual({ error: "Image is required" });
     expect(response.status).toBe(400);
-    expect(mocks.boostChromaImage).not.toHaveBeenCalled();
+    expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
   });
 
-  it("returns both enhanced previews as data URLs", async () => {
+  it("returns the enhanced preview as a data URL", async () => {
     mocks.currentViewer = {
       accessLevel: "WRITE",
       approvalStatus: "APPROVED",
@@ -76,31 +73,25 @@ describe("POST /api/admin/watermark-reveal", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      saturationPreview: `data:image/png;base64,${Buffer.from("boosted-png").toString("base64")}`,
-      chromaPreview: `data:image/png;base64,${Buffer.from("isolated-png").toString("base64")}`
+      preview: `data:image/png;base64,${Buffer.from("isolated-png").toString("base64")}`
     });
-    expect(mocks.boostChromaImage).toHaveBeenCalledTimes(1);
     expect(mocks.isolateChromaImage).toHaveBeenCalledTimes(1);
-    expect(mocks.boostChromaImage.mock.calls[0]?.[0]).toBeInstanceOf(Buffer);
+    expect(mocks.isolateChromaImage.mock.calls[0]?.[0]).toBeInstanceOf(Buffer);
   });
 
-  it("returns null previews when enhancement fails", async () => {
+  it("returns a null preview when enhancement fails", async () => {
     mocks.currentViewer = {
       accessLevel: "WRITE",
       approvalStatus: "APPROVED",
       id: "admin-1",
       isAdmin: true
     };
-    mocks.boostChromaImage.mockRejectedValue(new Error("not an image"));
     mocks.isolateChromaImage.mockRejectedValue(new Error("not an image"));
 
     const response = await POST(createRevealRequest(true));
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
-      saturationPreview: null,
-      chromaPreview: null
-    });
+    await expect(response.json()).resolves.toEqual({ preview: null });
   });
 });
 

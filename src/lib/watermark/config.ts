@@ -2,21 +2,21 @@ import { createHash } from "crypto";
 import { join } from "path";
 
 /** Watermark format version. Bumped when the embedding scheme changes. */
-export const WATERMARK_VERSION = 8;
+export const WATERMARK_VERSION = 9;
 
 /**
  * Alpha (0-255) of the red digit overlay in the small tile. The watermark is
  * a barely-visible red digit pattern; invisibility comes from the low alpha,
  * robustness from the stroke width (wide strokes survive resampling).
  */
-export const OVERLAY_ALPHA = 8;
+export const OVERLAY_ALPHA = 6;
 
 /**
  * Alpha (0-255) of the large digit overlay tile. Roughly half of
  * OVERLAY_ALPHA: the large digits cover far more area, so they need less
  * per-pixel strength to carry the same signal.
  */
-export const LARGE_TILE_ALPHA = 4;
+export const LARGE_TILE_ALPHA = 3;
 
 // Dual-scale tiling geometry. The small tile stays readable around native
 // zoom; the large tile survives heavy downscaling (browser zoom-out).

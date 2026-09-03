@@ -20,7 +20,13 @@ type AlertListItem = {
   resolvedAt: string | null;
 };
 
-export function AlertsDashboardView() {
+const severityPillClass: Record<AlertSeverity, string> = {
+  HIGH: "admin-pill admin-pill--danger",
+  MEDIUM: "admin-pill admin-pill--warning",
+  LOW: "admin-pill admin-pill--info"
+};
+
+export function AlertsSection() {
   const [alerts, setAlerts] = useState<AlertListItem[] | null>(null);
   const [statusFilter, setStatusFilter] = useState<AlertStatus | "ALL">("OPEN");
   const [detecting, setDetecting] = useState(false);
@@ -79,27 +85,17 @@ export function AlertsDashboardView() {
     }
   };
 
-  const severityColor = (severity: AlertSeverity) => {
-    switch (severity) {
-      case "HIGH":
-        return "#ef4444";
-      case "MEDIUM":
-        return "#f59e0b";
-      default:
-        return "#3b82f6";
-    }
-  };
-
   return (
-    <section className="history-empty">
-      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
-        <button type="button" className="history-action-button" onClick={runDetection} disabled={detecting}>
+    <section className="admin-panel">
+      <h2 className="admin-section-title">Alerts</h2>
+      <div className="admin-toolbar">
+        <button type="button" className="admin-btn" onClick={runDetection} disabled={detecting}>
           {detecting ? "Running detection…" : "Run detection now"}
         </button>
         <label>
-          Filter:
+          Status:{" "}
           <select
-            className="history-select"
+            className="admin-select"
             value={statusFilter}
             onChange={(e) => {
               setStatusFilter(e.target.value as AlertStatus | "ALL");
@@ -115,63 +111,79 @@ export function AlertsDashboardView() {
         </label>
       </div>
 
-      {error && <p style={{ color: "#ef4444" }}>{error}</p>}
-      {loading && <p>Loading…</p>}
+      {error !== null ? <section className="admin-empty">{error}</section> : null}
+      {loading ? <p>Loading…</p> : null}
 
       {alerts !== null && alerts.length === 0 ? (
-        <p>No alerts.</p>
-      ) : (
-        <ul style={{ listStyle: "none", padding: 0 }}>
-          {alerts?.map((alert) => (
-            <li
-              key={alert.id}
-              style={{
-                border: "1px solid rgba(148, 163, 184, 0.24)",
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 12,
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                <div>
-                  <strong>{alert.title}</strong>
-                  <span
-                    style={{
-                      marginLeft: 8,
-                      textTransform: "lowercase",
-                      fontSize: 12,
-                      padding: "2px 6px",
-                      borderRadius: 4,
-                      background: severityColor(alert.severity),
-                      color: "#fff",
-                    }}
-                  >
+        <section className="admin-empty">No alerts.</section>
+      ) : null}
+
+      {alerts !== null && alerts.length > 0 ? (
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Alert</th>
+              <th>Map</th>
+              <th>Actor</th>
+              <th>Time</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alerts.map((alert) => (
+              <tr key={alert.id}>
+                <td>
+                  <span className={severityPillClass[alert.severity]}>
                     {alert.severity.toLowerCase()}
                   </span>
-                </div>
-                <small>{new Date(alert.createdAt).toLocaleString()}</small>
-              </div>
-              <p>{alert.description}</p>
-              <small>
-                {alert.actorUsername && <>User: {alert.actorUsername} </>}
-                {alert.mapName && <>Map: {alert.mapName} </>}
-                Status: {alert.status.toLowerCase()}
-              </small>
-              <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-                {alert.status === "OPEN" && (
-                  <>
-                    <button type="button" className="history-action-button" onClick={() => updateStatus(alert.id, "acknowledge")}>Acknowledge</button>
-                    <button type="button" className="history-action-button" onClick={() => updateStatus(alert.id, "resolve")}>Resolve</button>
-                  </>
-                )}
-                {alert.status === "ACKNOWLEDGED" && (
-                  <button type="button" className="history-action-button" onClick={() => updateStatus(alert.id, "resolve")}>Resolve</button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+                </td>
+                <td>
+                  <strong>{alert.title}</strong>
+                  <small>{alert.description}</small>
+                  <small>Status: {alert.status.toLowerCase()}</small>
+                </td>
+                <td>{alert.mapName ?? "—"}</td>
+                <td>{alert.actorUsername ?? "—"}</td>
+                <td>
+                  <time dateTime={alert.createdAt}>
+                    {new Date(alert.createdAt).toLocaleString()}
+                  </time>
+                </td>
+                <td>
+                  {alert.status === "OPEN" && (
+                    <>
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--ghost admin-btn--small"
+                        onClick={() => updateStatus(alert.id, "acknowledge")}
+                      >
+                        Acknowledge
+                      </button>{" "}
+                      <button
+                        type="button"
+                        className="admin-btn admin-btn--ghost admin-btn--small"
+                        onClick={() => updateStatus(alert.id, "resolve")}
+                      >
+                        Resolve
+                      </button>
+                    </>
+                  )}
+                  {alert.status === "ACKNOWLEDGED" && (
+                    <button
+                      type="button"
+                      className="admin-btn admin-btn--ghost admin-btn--small"
+                      onClick={() => updateStatus(alert.id, "resolve")}
+                    >
+                      Resolve
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
     </section>
   );
 }

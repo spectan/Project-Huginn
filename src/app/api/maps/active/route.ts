@@ -19,7 +19,7 @@ export async function GET() {
   }
 
   const result = await listMarkers(
-    { actor: viewer, mapId: map.id },
+    { actor: viewer, includeCanaries: true, mapId: map.id },
     createMarkerDependencies()
   );
 

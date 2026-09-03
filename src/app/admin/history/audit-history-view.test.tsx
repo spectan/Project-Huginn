@@ -39,11 +39,10 @@ describe("AuditHistoryView", () => {
       })
     );
 
-    expect(screen.getByRole("main").className).toContain("history-page--dark");
     expect(screen.getByRole("heading", { name: "History" })).toBeTruthy();
     expect(screen.getAllByText("Mako")).toHaveLength(1);
     expect(screen.getByText("Marker created")).toBeTruthy();
-    expect(screen.getAllByText("Admin")).toHaveLength(2); // header + actor cell
+    expect(screen.getAllByText("Admin")).toHaveLength(1); // actor cell
     expect(screen.getByText("User approved")).toBeTruthy();
     expect(screen.getByText("Wurm")).toBeTruthy();
     expect(screen.getByText('{"markerType":"tower"}')).toBeTruthy();

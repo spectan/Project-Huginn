@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { AdminHeader } from "../admin-header";
 import type { DeletedMarkerSummary } from "@/lib/deleted-markers/deleted-marker-service";
 
 type DeletedMarkersViewProps = {
@@ -13,14 +12,14 @@ export function DeletedMarkersView({ markers }: DeletedMarkersViewProps) {
   const [error, setError] = useState<string | null>(null);
 
   return (
-    <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/deleted-markers" title="Deleted markers" />
-      {error !== null ? <section className="history-empty">{error}</section> : null}
+    <>
+      <h1 className="admin-page-title">Deleted markers</h1>
+      {error !== null ? <section className="admin-empty">{error}</section> : null}
       {markers.length === 0 ? (
-        <section className="history-empty">No restorable deleted markers</section>
+        <section className="admin-empty">No restorable deleted markers</section>
       ) : (
-        <div className="history-table-wrap">
-          <table className="history-table">
+        <div className="admin-panel">
+          <table className="admin-table">
             <thead>
               <tr>
                 <th>Marker</th>
@@ -53,7 +52,7 @@ export function DeletedMarkersView({ markers }: DeletedMarkersViewProps) {
                   <td>
                     <button
                       aria-label={`Restore ${marker.label}`}
-                      className="history-action-button"
+                      className="admin-btn admin-btn--small"
                       disabled={pendingMarkerId === marker.id}
                       onClick={() => {
                         setPendingMarkerId(marker.id);
@@ -71,7 +70,7 @@ export function DeletedMarkersView({ markers }: DeletedMarkersViewProps) {
           </table>
         </div>
       )}
-    </main>
+    </>
   );
 }
 

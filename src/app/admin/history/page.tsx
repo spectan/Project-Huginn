@@ -1,7 +1,8 @@
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createAuditHistoryDependencies } from "@/lib/audit-history/database";
 import { listAuditHistory } from "@/lib/audit-history/audit-history";
-import { AuditHistoryAccessDenied, AuditHistoryView } from "./audit-history-view";
+import { AdminAccessDenied } from "../admin-access-denied";
+import { AuditHistoryView } from "./audit-history-view";
 
 type AdminHistoryPageProps = {
   searchParams?: Promise<{
@@ -13,7 +14,7 @@ export default async function AdminHistoryPage({ searchParams }: AdminHistoryPag
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
-    return <AuditHistoryAccessDenied message="Admin access is required" />;
+    return <AdminAccessDenied title="History" />;
   }
 
   const params = await searchParams;
@@ -23,7 +24,7 @@ export default async function AdminHistoryPage({ searchParams }: AdminHistoryPag
   );
 
   if (!result.ok) {
-    return <AuditHistoryAccessDenied message={result.error} />;
+    return <AdminAccessDenied title="History" message={result.error} />;
   }
 
   return (

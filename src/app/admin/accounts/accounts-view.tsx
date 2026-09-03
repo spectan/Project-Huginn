@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, type ChangeEvent, type FormEvent } from "react";
-import { AdminHeader } from "../admin-header";
 import type { AdminMapSummary, AdminUserSummary } from "@/lib/admin/users";
 
 type AdminAccountsViewProps = {
@@ -22,54 +21,63 @@ export function AdminAccountsView({ maps, users, viewerCanManageGlobalAccounts }
   const visibleAccountUsers = normalizedUserSearchQuery.length === 0
     ? accountUsers
     : accountUsers.filter((user) => user.username.toLowerCase().includes(normalizedUserSearchQuery));
+  const columnCount = viewerCanManageGlobalAccounts ? 7 : 6;
 
   return (
-    <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/accounts" title="Accounts" />
-      {error !== null ? <section className="history-empty">{error}</section> : null}
-      <label className="accounts-user-search">
-        <span>Search users</span>
+    <>
+      <h1 className="admin-page-title">Accounts</h1>
+      {error !== null ? <section className="admin-empty">{error}</section> : null}
+      <div className="admin-toolbar">
         <input
-          className="history-text-input"
+          aria-label="Search users"
+          className="admin-input"
           onChange={(event) => setUserSearchQuery(event.currentTarget.value)}
           placeholder="Search users"
           type="search"
           value={userSearchQuery}
         />
-      </label>
+      </div>
       {accountUsers.length === 0 ? (
-        <section className="history-empty">No accounts yet</section>
+        <section className="admin-empty">No accounts yet</section>
       ) : visibleAccountUsers.length === 0 ? (
-        <section className="history-empty">No accounts match your search</section>
+        <section className="admin-empty">No accounts match your search</section>
       ) : (
-        <div className="accounts-admin-list">
-          {visibleAccountUsers.map((user) => (
-            <AdminAccountCard
-              key={createAdminAccountCardKey(user)}
-              maps={maps}
-              onError={setError}
-              onUserChange={(nextUser) => setAccountUsers((current) => upsertAdminUser(current, nextUser))}
-              onUserRemove={(userId) => setAccountUsers((current) => current.filter((candidate) => candidate.id !== userId))}
-              user={user}
-              viewerCanManageGlobalAccounts={viewerCanManageGlobalAccounts}
-            />
-          ))}
-        </div>
+        <section className="admin-panel">
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th aria-label="Server permissions" />
+                <th>User</th>
+                <th>Status</th>
+                {viewerCanManageGlobalAccounts ? <th>Admin</th> : null}
+                <th>Created</th>
+                <th>Approver</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleAccountUsers.map((user) => (
+                <AdminAccountRows
+                  columnCount={columnCount}
+                  key={createAdminAccountCardKey(user)}
+                  maps={maps}
+                  onError={setError}
+                  onUserChange={(nextUser) => setAccountUsers((current) => upsertAdminUser(current, nextUser))}
+                  onUserRemove={(userId) => setAccountUsers((current) => current.filter((candidate) => candidate.id !== userId))}
+                  user={user}
+                  viewerCanManageGlobalAccounts={viewerCanManageGlobalAccounts}
+                />
+              ))}
+            </tbody>
+          </table>
+        </section>
       )}
-    </main>
+    </>
   );
 }
 
-export function AdminAccountsAccessDenied({ message }: { message: string }) {
-  return (
-    <main className="history-page history-page--dark">
-      <AdminHeader currentRoute="/admin/accounts" title="Accounts" />
-      <section className="history-empty">{message}</section>
-    </main>
-  );
-}
-
-function AdminAccountCard({
+function AdminAccountRows({
+  columnCount,
   maps,
   onError,
   onUserChange,
@@ -77,6 +85,7 @@ function AdminAccountCard({
   user,
   viewerCanManageGlobalAccounts
 }: {
+  columnCount: number;
   maps: AdminMapSummary[];
   onError(error: string | null): void;
   onUserChange(user: AdminUserSummary): void;
@@ -90,166 +99,164 @@ function AdminAccountCard({
   const [isGlobalAdmin, setIsGlobalAdmin] = useState(user.isAdmin);
   const [operatorFlags, setOperatorFlags] = useState<OperatorByMap>(() => createOperatorState(maps, user));
   const [permissionsOpen, setPermissionsOpen] = useState(false);
-  const titleId = `account-title-${user.id}`;
 
   return (
-    <article aria-labelledby={titleId} className="accounts-user-card">
-      <div className="accounts-user-header">
-        <div className="accounts-user-identity">
-          <h2 id={titleId}>{user.username}</h2>
-          <div className="accounts-user-meta">
-            <span className={`accounts-status accounts-status--${user.approvalStatus.toLowerCase()}`}>
-              {formatApprovalStatus(user.approvalStatus)}
-            </span>
-          </div>
-        </div>
-
-        {viewerCanManageGlobalAccounts ? (
-          <label className="accounts-admin-check history-check">
-            <input
-              aria-label={`Admin for ${user.username}`}
-              checked={isGlobalAdmin}
-              form={accountFormId}
-              name="isAdmin"
-              onChange={(event) => setIsGlobalAdmin(event.currentTarget.checked)}
-              type="checkbox"
-            />
-            <span>Admin</span>
-          </label>
-        ) : null}
-
-        <form
-          className="accounts-card-actions"
-          id={accountFormId}
-          onSubmit={(event) => void updateAdminUser(
-            event,
-            user.id,
-            maps,
-            viewerCanManageGlobalAccounts,
-            isGlobalAdmin,
-            accessLevels,
-            operatorFlags,
-            onUserChange,
-            onError
-          )}
-        >
-          <button aria-label={`Save ${user.username}`} className="history-action-button" type="submit">
-            Save
+    <>
+      <tr>
+        <td>
+          <button
+            aria-controls={permissionPanelId}
+            aria-expanded={permissionsOpen}
+            aria-label={`${permissionsOpen ? "Hide" : "Show"} server permissions for ${user.username}`}
+            className="admin-btn admin-btn--ghost admin-btn--small"
+            onClick={() => setPermissionsOpen((current) => !current)}
+            type="button"
+          >
+            {permissionsOpen ? "▾" : "▸"}
           </button>
-          {viewerCanManageGlobalAccounts ? (
-            <button
-              aria-label={`Remove ${user.username}`}
-              className="history-action-button history-action-button--danger"
-              onClick={() => void removeAdminUser(user.id, onUserRemove, onError)}
-              type="button"
-            >
-              Remove
+        </td>
+        <td>
+          <strong>{user.username}</strong>
+        </td>
+        <td>
+          <span className={`admin-pill admin-pill--${user.approvalStatus.toLowerCase()}`}>
+            {formatApprovalStatus(user.approvalStatus)}
+          </span>
+        </td>
+        {viewerCanManageGlobalAccounts ? (
+          <td>
+            <label className="admin-check">
+              <input
+                aria-label={`Admin for ${user.username}`}
+                checked={isGlobalAdmin}
+                form={accountFormId}
+                name="isAdmin"
+                onChange={(event) => setIsGlobalAdmin(event.currentTarget.checked)}
+                type="checkbox"
+              />
+            </label>
+          </td>
+        ) : null}
+        <td>
+          <time dateTime={user.createdAt}>Created {formatTimestamp(user.createdAt)}</time>
+        </td>
+        <td>Approved by - {user.approvedByUsername ?? "Unknown"}</td>
+        <td>
+          <form
+            className="admin-toolbar"
+            id={accountFormId}
+            onSubmit={(event) => void updateAdminUser(
+              event,
+              user.id,
+              maps,
+              viewerCanManageGlobalAccounts,
+              isGlobalAdmin,
+              accessLevels,
+              operatorFlags,
+              onUserChange,
+              onError
+            )}
+          >
+            <button aria-label={`Save ${user.username}`} className="admin-btn admin-btn--small" type="submit">
+              Save
             </button>
-          ) : null}
-        </form>
-      </div>
-
-      <div className="accounts-permission-controls">
-        <button
-          aria-controls={permissionPanelId}
-          aria-expanded={permissionsOpen}
-          aria-label={`${permissionsOpen ? "Hide" : "Show"} server permissions for ${user.username}`}
-          className="accounts-permission-toggle"
-          onClick={() => setPermissionsOpen((current) => !current)}
-          type="button"
-        >
-          {permissionsOpen ? "Hide servers" : "Show servers"}
-        </button>
-      </div>
-
+            {viewerCanManageGlobalAccounts ? (
+              <button
+                aria-label={`Remove ${user.username}`}
+                className="admin-btn admin-btn--danger admin-btn--small"
+                onClick={() => void removeAdminUser(user.id, onUserRemove, onError)}
+                type="button"
+              >
+                Remove
+              </button>
+            ) : null}
+          </form>
+        </td>
+      </tr>
       {permissionsOpen ? (
-        <div
-          aria-label={`Server permissions for ${user.username}`}
-          className="accounts-permission-panel"
-          id={permissionPanelId}
-          role="group"
-        >
-          <label className="accounts-bulk-access">
-            <span>Set all access</span>
-            <select
-              aria-label={`Set all server access for ${user.username}`}
-              className="history-select"
-              onChange={(event) => setAllAccessLevels(event, maps, setAccessLevels)}
-              value=""
+        <tr>
+          <td colSpan={columnCount}>
+            <div
+              aria-label={`Server permissions for ${user.username}`}
+              id={permissionPanelId}
+              role="group"
             >
-              <option value="">Choose</option>
-              <option value="NONE">None</option>
-              <option value="READ">Read</option>
-              <option value="WRITE">Write</option>
-            </select>
-          </label>
-          <div className="accounts-permission-pairs">
-            {maps.map((map) => (
-              <div className="accounts-server-setting" key={map.id}>
-                <div className="accounts-server-name">
-                  <span>Server</span>
-                  <strong>{map.name}</strong>
-                </div>
-                <label className="accounts-server-control">
-                  <span>Access</span>
+              <div className="admin-toolbar">
+                <div>
+                  <small>Set all access</small>
                   <select
-                    aria-label={`Access for ${user.username} on ${map.name}`}
-                    className="history-select accounts-permission-select"
-                    form={accountFormId}
-                    name={`accessLevel:${map.id}`}
-                    onChange={(event) => updateAccessLevel(map.id, event.currentTarget.value, setAccessLevels)}
-                    value={accessLevels[map.id] ?? "NONE"}
+                    aria-label={`Set all server access for ${user.username}`}
+                    className="admin-select"
+                    onChange={(event) => setAllAccessLevels(event, maps, setAccessLevels)}
+                    value=""
                   >
+                    <option value="">Choose</option>
                     <option value="NONE">None</option>
                     <option value="READ">Read</option>
                     <option value="WRITE">Write</option>
                   </select>
-                </label>
-                <label className="history-check accounts-operator-check">
-                  <input
-                    aria-label={`Operator for ${user.username} on ${map.name}`}
-                    checked={isGlobalAdmin || (operatorFlags[map.id] ?? false)}
-                    disabled={isGlobalAdmin}
-                    form={accountFormId}
-                    name={`isOperator:${map.id}`}
-                    onChange={(event) => updateOperatorFlag(map.id, event.currentTarget.checked, setOperatorFlags)}
-                    type="checkbox"
-                  />
-                  <span>Operator</span>
-                </label>
+                </div>
               </div>
-            ))}
-          </div>
-        </div>
+              {maps.map((map) => (
+                <div className="admin-toolbar" key={map.id}>
+                  <div>
+                    <small>Server</small>
+                    <strong>{map.name}</strong>
+                  </div>
+                  <div>
+                    <small>Access</small>
+                    <select
+                      aria-label={`Access for ${user.username} on ${map.name}`}
+                      className="admin-select"
+                      form={accountFormId}
+                      name={`accessLevel:${map.id}`}
+                      onChange={(event) => updateAccessLevel(map.id, event.currentTarget.value, setAccessLevels)}
+                      value={accessLevels[map.id] ?? "NONE"}
+                    >
+                      <option value="NONE">None</option>
+                      <option value="READ">Read</option>
+                      <option value="WRITE">Write</option>
+                    </select>
+                  </div>
+                  <label className="admin-check">
+                    <input
+                      aria-label={`Operator for ${user.username} on ${map.name}`}
+                      checked={isGlobalAdmin || (operatorFlags[map.id] ?? false)}
+                      disabled={isGlobalAdmin}
+                      form={accountFormId}
+                      name={`isOperator:${map.id}`}
+                      onChange={(event) => updateOperatorFlag(map.id, event.currentTarget.checked, setOperatorFlags)}
+                      type="checkbox"
+                    />
+                    <span>Operator</span>
+                  </label>
+                </div>
+              ))}
+            </div>
+            {viewerCanManageGlobalAccounts ? (
+              <form
+                className="admin-toolbar"
+                onSubmit={(event) => void updateAdminUserPassword(event, user.id, onUserChange, onError)}
+              >
+                <small>Password</small>
+                <input
+                  aria-label={`New password for ${user.username}`}
+                  autoComplete="new-password"
+                  className="admin-input"
+                  maxLength={128}
+                  minLength={12}
+                  name="password"
+                  type="password"
+                />
+                <button aria-label={`Change password ${user.username}`} className="admin-btn admin-btn--small" type="submit">
+                  Change
+                </button>
+              </form>
+            ) : null}
+          </td>
+        </tr>
       ) : null}
-
-      <div className="accounts-footer-row">
-        {viewerCanManageGlobalAccounts ? (
-          <form
-            className="accounts-password-form"
-            onSubmit={(event) => void updateAdminUserPassword(event, user.id, onUserChange, onError)}
-          >
-            <span>Password</span>
-            <input
-              aria-label={`New password for ${user.username}`}
-              autoComplete="new-password"
-              className="history-text-input"
-              maxLength={128}
-              minLength={12}
-              name="password"
-              type="password"
-            />
-            <button aria-label={`Change password ${user.username}`} className="history-action-button" type="submit">
-              Change
-            </button>
-          </form>
-        ) : null}
-        <div className="accounts-user-audit">
-          <time dateTime={user.createdAt}>Created {formatTimestamp(user.createdAt)}</time>
-          <span>Approved by - {user.approvedByUsername ?? "Unknown"}</span>
-        </div>
-      </div>
-    </article>
+    </>
   );
 }
 

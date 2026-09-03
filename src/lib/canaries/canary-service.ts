@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import type { WorkspaceMarker } from "@/lib/markers/marker-types";
 
 export const CANARY_MARKERS_PER_MAP = 3;
@@ -106,7 +106,7 @@ function buildTowerCanary(random: SeededRandom, x: number, y: number): Workspace
     id: randomMarkerId(),
     lastModifiedBy: pick(USERNAMES, random),
     makerName: pick(VILLAGE_NAMES, random),
-    makerNumber: `T-${Math.floor(random() * 900) + 100}`,
+    makerNumber: `${Math.floor(random() * 900) + 100}`,
     planned: random() < 0.2,
     ql: formatDecimal(randomHundredths(random, 2000, 9900)),
     towerType: pick(TOWER_TYPES, random),
@@ -154,8 +154,22 @@ function formatDecimal(hundredths: number): string {
   return (hundredths / 100).toFixed(2);
 }
 
+const BASE36_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
 function randomMarkerId(): string {
-  return randomUUID().replaceAll("-", "").slice(0, 25);
+  // cuid-shaped: leading "c" plus 24 lowercase base36 characters, so canary
+  // markers are indistinguishable from real Prisma-generated ids.
+  let id = "c";
+
+  while (id.length < 25) {
+    for (const byte of randomBytes(8)) {
+      if (byte < 252 && id.length < 25) {
+        id += BASE36_ALPHABET[byte % 36];
+      }
+    }
+  }
+
+  return id;
 }
 
 function pick<T>(values: readonly T[], random: SeededRandom): T {

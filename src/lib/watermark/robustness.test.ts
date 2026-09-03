@@ -131,8 +131,8 @@ const scenarios: Array<{ name: string; degrade: Degrade }> = [
 
 // Minimum margin of chroma-isolated red-chroma signal the watermarked image
 // must keep over the identically processed unmarked control. Tuned against
-// the scenarios above: the worst measured margin (400x300 crop, ≈ 5.1) is
-// about 2x this bound.
+// the scenarios above: the worst measured margin (400x300 crop, ≈ 3.9) is
+// about 1.5x this bound; all other scenarios measure ≈ 5 or better.
 const SIGNAL_MARGIN = 2.5;
 
 describe("digit watermark robustness", () => {

@@ -1,13 +1,14 @@
 import { listAdminUsers } from "@/lib/admin/users";
 import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
-import { AdminAccountsAccessDenied, AdminAccountsView } from "./accounts-view";
+import { AdminAccessDenied } from "../admin-access-denied";
+import { AdminAccountsView } from "./accounts-view";
 
 export default async function AdminAccountsPage() {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
-    return <AdminAccountsAccessDenied message="Admin access is required" />;
+    return <AdminAccessDenied title="Accounts" />;
   }
 
   const result = await listAdminUsers(
@@ -16,7 +17,7 @@ export default async function AdminAccountsPage() {
   );
 
   if (!result.ok) {
-    return <AdminAccountsAccessDenied message={result.error} />;
+    return <AdminAccessDenied title="Accounts" message={result.error} />;
   }
 
   return (

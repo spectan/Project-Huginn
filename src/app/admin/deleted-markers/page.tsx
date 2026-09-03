@@ -1,14 +1,14 @@
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createDeletedMarkerDependencies } from "@/lib/deleted-markers/database";
 import { listRestorableDeletedMarkers } from "@/lib/deleted-markers/deleted-marker-service";
-import { AuditHistoryAccessDenied } from "../history/audit-history-view";
+import { AdminAccessDenied } from "../admin-access-denied";
 import { DeletedMarkersView } from "./deleted-markers-view";
 
 export default async function AdminDeletedMarkersPage() {
   const viewer = await getCurrentViewer();
 
   if (viewer === null) {
-    return <AuditHistoryAccessDenied message="Admin access is required" />;
+    return <AdminAccessDenied title="Deleted markers" />;
   }
 
   const result = await listRestorableDeletedMarkers(
@@ -17,7 +17,7 @@ export default async function AdminDeletedMarkersPage() {
   );
 
   if (!result.ok) {
-    return <AuditHistoryAccessDenied message={result.error} />;
+    return <AdminAccessDenied title="Deleted markers" message={result.error} />;
   }
 
   return <DeletedMarkersView markers={result.value} />;

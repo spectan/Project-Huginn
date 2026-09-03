@@ -2,8 +2,17 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import type { CanaryDependencies, CanaryRecord } from "./canary-service";
 
-export function createCanaryDependencies(): CanaryDependencies {
+export function createCanaryDependencies(): CanaryDependencies & {
+  listAllCanaryMarkers(): Promise<CanaryRecord[]>;
+} {
   return {
+    listAllCanaryMarkers: async () => {
+      const records = await prisma.canaryMarker.findMany({
+        orderBy: [{ mapId: "asc" }, { userId: "asc" }, { slot: "asc" }]
+      });
+
+      return records.map(normalizeCanaryRecord);
+    },
     listCanaryMarkers: async ({ mapId, userId }) => {
       const records = await prisma.canaryMarker.findMany({
         orderBy: { slot: "asc" },

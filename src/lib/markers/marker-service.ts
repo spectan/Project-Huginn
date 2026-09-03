@@ -315,7 +315,7 @@ export type CreateMarkerInput =
   | PathCreateMarkerInput;
 
 export async function listMarkers(
-  input: { actor: Actor; mapId: string },
+  input: { actor: Actor; includeCanaries?: boolean; mapId: string },
   dependencies: MarkerServiceDependencies
 ): Promise<Result<{ map: WorkspaceMap; markers: WorkspaceMarker[] }>> {
   if (!canReadMap(input.actor, input.mapId)) {
@@ -330,26 +330,42 @@ export async function listMarkers(
   }
 
   const markers = await dependencies.listActiveMarkers(map.id);
-  const canaries = await getOrCreateCanaries(
-    { mapId: map.id, userId: input.actor.id },
-    { heightPx: map.heightPx, widthPx: map.widthPx },
-    dependencies
-  );
+  const serialized: WorkspaceMarker[] = [
+    ...markers.towers.map(serializeTower),
+    ...markers.deeds.map(serializeDeed),
+    ...markers.notes.map(serializeNote),
+    ...markers.rifts.map(serializeRift),
+    ...markers.camps.map(serializeCamp),
+    ...markers.minedoors.map(serializeMinedoor),
+    ...markers.locateSouls.map(serializeLocateSoul),
+    ...markers.paths.map(serializePath)
+  ];
+
+  if (input.includeCanaries === true) {
+    const canaries = await getOrCreateCanaries(
+      { mapId: map.id, userId: input.actor.id },
+      { heightPx: map.heightPx, widthPx: map.widthPx },
+      dependencies
+    );
+    interleaveCanaries(serialized, canaries);
+  }
 
   return ok({
     map: serializeMap(map),
-    markers: [
-      ...markers.towers.map(serializeTower),
-      ...markers.deeds.map(serializeDeed),
-      ...markers.notes.map(serializeNote),
-      ...markers.rifts.map(serializeRift),
-      ...markers.camps.map(serializeCamp),
-      ...markers.minedoors.map(serializeMinedoor),
-      ...markers.locateSouls.map(serializeLocateSoul),
-      ...markers.paths.map(serializePath),
-      ...canaries
-    ]
+    markers: serialized
   });
+}
+
+// Inserts each canary at a deterministic position derived from its id so
+// decoys blend into the served list instead of trailing at the end.
+function interleaveCanaries(markers: WorkspaceMarker[], canaries: WorkspaceMarker[]): void {
+  for (const canary of canaries) {
+    let hash = 0;
+    for (let index = 0; index < canary.id.length; index += 1) {
+      hash = (Math.imul(hash, 31) + canary.id.charCodeAt(index)) | 0;
+    }
+    markers.splice(Math.abs(hash) % (markers.length + 1), 0, canary);
+  }
 }
 
 export async function createMarker(

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
-import { boostChromaImage, isolateChromaImage } from "@/lib/watermark/enhance";
+import { isolateChromaImage } from "@/lib/watermark/enhance";
 
 export async function POST(request: Request) {
   const viewer = await getCurrentViewer();
@@ -23,24 +23,17 @@ export async function POST(request: Request) {
 
   const imageBuffer = Buffer.from(await imageFile.arrayBuffer());
 
-  // Both enhancements are best-effort; the admin reads the overlaid digits
-  // off whichever rendering makes them legible and matches them to a user.
-  let saturationPreview: string | null = null;
-  let chromaPreview: string | null = null;
-
-  try {
-    const boosted = await boostChromaImage(imageBuffer);
-    saturationPreview = `data:image/png;base64,${boosted.toString("base64")}`;
-  } catch {
-    // Preview is best-effort.
-  }
+  // Enhancement is best-effort; the admin reads the overlaid digits off the
+  // chroma-isolated rendering and matches them to a user. Nothing is stored —
+  // the upload is processed in memory and discarded.
+  let preview: string | null = null;
 
   try {
     const isolated = await isolateChromaImage(imageBuffer);
-    chromaPreview = `data:image/png;base64,${isolated.toString("base64")}`;
+    preview = `data:image/png;base64,${isolated.toString("base64")}`;
   } catch {
     // Preview is best-effort.
   }
 
-  return NextResponse.json({ saturationPreview, chromaPreview });
+  return NextResponse.json({ preview });
 }

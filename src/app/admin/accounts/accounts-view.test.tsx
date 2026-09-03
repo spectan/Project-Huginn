@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
-import { AdminAccountsAccessDenied, AdminAccountsView } from "./accounts-view";
+import { AdminAccessDenied } from "../admin-access-denied";
+import { AdminAccountsView } from "./accounts-view";
 
 const maps = [
   { id: "map-celebration", name: "Celebration" },
@@ -31,7 +32,6 @@ describe("AdminAccountsView", () => {
       })
     );
 
-    expect(screen.getByRole("main").className).toContain("history-page--dark");
     expect(screen.getByRole("heading", { name: "Accounts" })).toBeTruthy();
     expect(screen.getByText("Mako")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
@@ -50,7 +50,7 @@ describe("AdminAccountsView", () => {
     expect(screen.getByLabelText("Access for Mako on Defiance")).toHaveProperty("value", "NONE");
     expect(screen.getByRole("checkbox", { name: "Operator for Mako on Celebration" })).toBeTruthy();
     expect(screen.getByRole("checkbox", { name: "Admin for Mako" })).toBeTruthy();
-    expect(screen.getAllByText("Admin").length).toBeGreaterThan(1);
+    expect(screen.getAllByText("Admin")).toHaveLength(1);
     expect(screen.queryByText("Global admin")).toBeNull();
     expect(screen.getByRole("button", { name: "Save Mako" })).toBeTruthy();
     expect(screen.getByLabelText("New password for Mako")).toBeTruthy();
@@ -247,6 +247,7 @@ describe("AdminAccountsView", () => {
       })
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
     fireEvent.change(screen.getByLabelText("New password for Mako"), {
       target: { value: "new-secure-password" }
     });
@@ -260,6 +261,7 @@ describe("AdminAccountsView", () => {
         method: "PATCH"
       }
     ));
+    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
     expect(screen.getByLabelText("New password for Mako")).toHaveProperty("value", "");
   });
 
@@ -289,7 +291,7 @@ describe("AdminAccountsView", () => {
   });
 
   it("renders access denied in the admin layout", () => {
-    render(React.createElement(AdminAccountsAccessDenied, { message: "Admin access is required" }));
+    render(React.createElement(AdminAccessDenied, { title: "Accounts", message: "Admin access is required" }));
 
     expect(screen.getByRole("heading", { name: "Accounts" })).toBeTruthy();
     expect(screen.getByText("Admin access is required")).toBeTruthy();

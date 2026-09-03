@@ -166,8 +166,8 @@ describe("map overlay styles", () => {
     expect(narrowBlock).toContain("grid-template-columns: 1fr");
   });
 
-  it("sizes admin header map links as stable buttons", () => {
-    const block = getCssBlock(".history-header a");
+  it("sizes admin nav links as stable buttons", () => {
+    const block = getCssBlock(".admin-nav-link");
 
     expect(block).toContain("display: inline-flex");
     expect(block).toContain("align-items: center");
