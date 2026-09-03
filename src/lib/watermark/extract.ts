@@ -225,17 +225,17 @@ interface AlignmentResult {
  * of the watermarked layer, so we resize the input by each candidate scale
  * before searching offsets.
  *
- * This is a two-stage search:
- *  1. Coarse: for each scale, search offsets using a sampled subset of blocks.
- *  2. Refine: search a small neighborhood (or the full grid for large scale-1
- *     images) around each promising coarse offset using every block.
+ * For small source images (the screenshot itself is small, not the original
+ * layer), the 8×8 offset search is fast enough at full block density that we
+ * can skip the coarse/refine split and simply pick the scale/offset with the
+ * strongest sync. This avoids the refinement neighbourhood missing the true
+ * peak when the sampled coarse estimate is off by more than a couple of pixels.
  */
 async function findBestAlignment(
   imageBuffer: Buffer,
   referenceBitStream: (0 | 1)[]
 ): Promise<AlignmentResult> {
   const fullScaleImage = await loadImageLuma(imageBuffer, 1);
-
   const totalBlocks = fullScaleImage.blocksW * fullScaleImage.blocksH;
 
   // Tiny images: just search the native resolution.
@@ -245,12 +245,7 @@ async function findBestAlignment(
       referenceBitStream,
       1
     );
-    return {
-      scale: 1,
-      offsetX,
-      offsetY,
-      syncConfidence: confidence,
-    };
+    return { scale: 1, offsetX, offsetY, syncConfidence: confidence };
   }
 
   // Full-resolution layers are already at the original block size; upscaling
@@ -267,18 +262,26 @@ async function findBestAlignment(
       return { scale: 1, offsetX, offsetY, syncConfidence };
     }
 
-    // Large images need a full-block offset search because the sampled estimate
-    // can be off by more than one pixel.
     const { offsetX: fx, offsetY: fy, confidence: fullSync } = findBestOffset(
       fullScaleImage,
       referenceBitStream,
       1
     );
-
     return { scale: 1, offsetX: fx, offsetY: fy, syncConfidence: fullSync };
   }
 
-  const coarseResults: AlignmentResult[] = [];
+  // Small-to-medium screenshots: search every candidate scale at full block
+  // density and evaluate both sync confidence and payload confidence for the
+  // reference user. The image is small enough that the 64×8×8 DCTs per scale are
+  // cheap, so we do not need sampled coarse search.
+  const seenDimensions = new Set<string>();
+  const candidates: Array<{
+    scale: number;
+    offsetX: number;
+    offsetY: number;
+    syncConfidence: number;
+    payloadConfidence: number;
+  }> = [];
 
   for (const scale of EXTRACT_SCALE_FACTORS) {
     const image = await loadImageLuma(imageBuffer, scale);
@@ -286,126 +289,60 @@ async function findBestAlignment(
       continue;
     }
 
-    const sampleStep = computeSampleStep(image.blocksW * image.blocksH);
+    const dimKey = `${image.width}x${image.height}`;
+    if (seenDimensions.has(dimKey)) {
+      continue;
+    }
+    seenDimensions.add(dimKey);
+
     const { offsetX, offsetY, confidence } = findBestOffset(
       image,
       referenceBitStream,
-      sampleStep
+      1
     );
 
-    coarseResults.push({
+    const { confidence: payloadConfidence } = extractAtOffset(
+      image,
+      referenceBitStream,
+      offsetX,
+      offsetY,
+      1
+    );
+
+    candidates.push({
       scale,
       offsetX,
       offsetY,
       syncConfidence: confidence,
+      payloadConfidence,
     });
 
-    // If we already see an extremely strong sync, stop early. This keeps full-
-    // resolution and lightly downscaled images fast without hurting the search
-    // for heavily zoomed-out screenshots.
     if (confidence >= 0.99) {
       break;
     }
   }
 
-  coarseResults.sort((a, b) => b.syncConfidence - a.syncConfidence);
-  const topCandidate = coarseResults[0];
-
-  if (topCandidate === undefined) {
-    return {
-      scale: 1,
-      offsetX: 0,
-      offsetY: 0,
-      syncConfidence: -1,
-    };
+  if (candidates.length === 0) {
+    return { scale: 1, offsetX: 0, offsetY: 0, syncConfidence: -1 };
   }
 
-  // If the coarse search already finds a very strong sync, trust it and avoid
-  // the expensive full-block refinement. Otherwise refine every candidate
-  // whose coarse sync is close to the best.
-  if (topCandidate.syncConfidence >= 0.95) {
-    return topCandidate;
-  }
-
-  const maxCoarseSync = topCandidate.syncConfidence;
-  const candidatesToRefine = coarseResults.filter(
-    (c) => maxCoarseSync - c.syncConfidence <= 0.1
+  // Prefer the scale/offset that gives the highest payload confidence, but only
+  // among candidates with a usable sync signal. This stops an up-scaled, noisy
+  // scale from beating the true scale just because its sync pattern happens to
+  // align a little better.
+  const viable = candidates.filter(
+    (c) => c.syncConfidence >= SYNC_CONFIDENCE_THRESHOLD
   );
+  const pool = viable.length > 0 ? viable : candidates;
+  pool.sort((a, b) => b.payloadConfidence - a.payloadConfidence);
+  const best = pool[0]!;
 
-  const refined: AlignmentResult[] = [];
-  for (const candidate of candidatesToRefine) {
-    const image = await loadImageLuma(imageBuffer, candidate.scale);
-    if (image.blocksW === 0 || image.blocksH === 0) {
-      refined.push(candidate);
-      continue;
-    }
-
-    // Heavily upscaled images (scale ≥ 4) need a full offset search because the
-    // correct offset is harder to localize after large interpolation. Smaller
-    // upscales can use the 3×3 neighborhood around the coarse offset.
-    const useFullSearch = candidate.scale >= 4;
-
-    let bestOffsetX = candidate.offsetX;
-    let bestOffsetY = candidate.offsetY;
-    let bestSync = -1;
-
-    if (useFullSearch) {
-      for (let oy = 0; oy < BLOCK_SIZE; oy++) {
-        for (let ox = 0; ox < BLOCK_SIZE; ox++) {
-          const { syncConfidence } = extractAtOffset(
-            image,
-            referenceBitStream,
-            ox,
-            oy
-          );
-          if (syncConfidence > bestSync) {
-            bestSync = syncConfidence;
-            bestOffsetX = ox;
-            bestOffsetY = oy;
-          }
-        }
-      }
-    } else {
-      for (let dy = -1; dy <= 1; dy++) {
-        const oy = candidate.offsetY + dy;
-        if (oy < 0 || oy >= BLOCK_SIZE) {
-          continue;
-        }
-        for (let dx = -1; dx <= 1; dx++) {
-          const ox = candidate.offsetX + dx;
-          if (ox < 0 || ox >= BLOCK_SIZE) {
-            continue;
-          }
-          const { syncConfidence } = extractAtOffset(
-            image,
-            referenceBitStream,
-            ox,
-            oy
-          );
-          if (syncConfidence > bestSync) {
-            bestSync = syncConfidence;
-            bestOffsetX = ox;
-            bestOffsetY = oy;
-          }
-        }
-      }
-    }
-
-    refined.push({
-      scale: candidate.scale,
-      offsetX: bestOffsetX,
-      offsetY: bestOffsetY,
-      syncConfidence: bestSync,
-    });
-  }
-
-  // Prefer the smallest scale when multiple candidates have similar sync
-  // confidence. This avoids incorrectly upscaling a cropped full-resolution
-  // screenshot when a slightly lower (but still high) sync belongs to scale 1.
-  const maxSync = Math.max(...refined.map((r) => r.syncConfidence));
-  const tied = refined.filter((r) => maxSync - r.syncConfidence <= 0.1);
-  tied.sort((a, b) => a.scale - b.scale);
-  return tied[0]!;
+  return {
+    scale: best.scale,
+    offsetX: best.offsetX,
+    offsetY: best.offsetY,
+    syncConfidence: best.syncConfidence,
+  };
 }
 
 export async function extractWatermark(

@@ -62,10 +62,10 @@ export const EXTRACT_SCALE_FACTORS: number[] = [1, 2, 4, 8];
 export const MAX_ALIGNMENT_DIMENSION = 2048;
 
 /** Minimum sync confidence required before a watermark is considered found. */
-export const SYNC_CONFIDENCE_THRESHOLD = 0.8;
+export const SYNC_CONFIDENCE_THRESHOLD = 0.75;
 
 /** Minimum overall bit-match confidence required for a positive detection. */
-export const CONFIDENCE_THRESHOLD = 0.6;
+export const CONFIDENCE_THRESHOLD = 0.55;
 
 /**
  * Target number of blocks evaluated during the coarse alignment search.
