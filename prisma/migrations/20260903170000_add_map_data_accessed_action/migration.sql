@@ -1,3 +1,4 @@
 -- AlterEnum
-ALTER TYPE "AuditAction" ADD VALUE 'MAP_DATA_ACCESSED';
-
+-- No-op: MAP_DATA_ACCESSED is now added by 20260903141710_remove_unused_audit_actions,
+-- where it must exist to remap legacy MARKER_LIST_VIEW audit rows. Kept so the
+-- migration history (and Prisma ledger) stays intact.
