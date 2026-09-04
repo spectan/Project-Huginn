@@ -73,7 +73,7 @@ describe("AlertsSection", () => {
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
     const viewAll = screen.getByRole("link", { name: "View all →" });
-    expect(viewAll.getAttribute("href")).toBe("/admin/alerts");
+    expect(viewAll.getAttribute("href")).toBe("/admin/security");
   });
 
   it("shows the empty state when there are no open alerts", async () => {

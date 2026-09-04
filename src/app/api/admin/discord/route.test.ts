@@ -44,7 +44,11 @@ const configFixture = {
   alertSeverityMedium: false,
   alertSeverityLow: false,
   notifyRegistrations: true,
-  notifyApprovals: false
+  notifyApprovals: false,
+  notifyMarkerCreated: true,
+  notifyMarkerUpdated: false,
+  notifyMarkerDeleted: true,
+  notifyShareLinks: false
 };
 
 describe("GET /api/admin/discord", () => {

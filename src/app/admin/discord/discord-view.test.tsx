@@ -10,7 +10,11 @@ const baseConfig = {
   alertSeverityMedium: false,
   alertSeverityLow: true,
   notifyRegistrations: false,
-  notifyApprovals: true
+  notifyApprovals: true,
+  notifyMarkerCreated: true,
+  notifyMarkerUpdated: false,
+  notifyMarkerDeleted: true,
+  notifyShareLinks: false
 };
 
 type StubResult = { ok: boolean; status: number; body: unknown };
@@ -53,7 +57,7 @@ describe("DiscordView", () => {
     vi.unstubAllGlobals();
   });
 
-  it("loads the config and renders it into the form", async () => {
+  it("loads the config and renders all fields into the form", async () => {
     const fetchMock = stubFetch();
 
     render(React.createElement(DiscordView));
@@ -65,6 +69,10 @@ describe("DiscordView", () => {
     expect(screen.getByLabelText("Low")).toHaveProperty("checked", true);
     expect(screen.getByLabelText("New registrations")).toHaveProperty("checked", false);
     expect(screen.getByLabelText("Account approvals")).toHaveProperty("checked", true);
+    expect(screen.getByLabelText("Created")).toHaveProperty("checked", true);
+    expect(screen.getByLabelText("Updated")).toHaveProperty("checked", false);
+    expect(screen.getByLabelText("Deleted")).toHaveProperty("checked", true);
+    expect(screen.getByLabelText("Share link created")).toHaveProperty("checked", false);
     expect(fetchMock).toHaveBeenCalledWith("/api/admin/discord");
   });
 
@@ -78,13 +86,15 @@ describe("DiscordView", () => {
       target: { value: "https://discord.com/api/webhooks/999/xyz" }
     });
     fireEvent.click(screen.getByLabelText("Medium"));
+    fireEvent.click(screen.getByLabelText("Deleted"));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(putBody(fetchMock)).toEqual({
         ...baseConfig,
         webhookUrl: "https://discord.com/api/webhooks/999/xyz",
-        alertSeverityMedium: true
+        alertSeverityMedium: true,
+        notifyMarkerDeleted: false
       });
     });
     expect(await screen.findByText("Saved ✓")).toBeTruthy();

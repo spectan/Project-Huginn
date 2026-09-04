@@ -2,8 +2,6 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { prisma } from "@/lib/db/prisma";
 import { AdminAccessDenied } from "./admin-access-denied";
 import { AlertsSection } from "./alerts-section";
-import { CanarySection } from "./canary-section";
-import { WatermarkSection } from "./watermark-section";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
@@ -14,7 +12,7 @@ export default async function AdminDashboardPage() {
     return <AdminAccessDenied title="Dashboard" />;
   }
 
-  const [stats, users] = await Promise.all([loadAdminDashboardStats(), loadWatermarkUsers()]);
+  const stats = await loadAdminDashboardStats();
 
   return (
     <>
@@ -38,8 +36,6 @@ export default async function AdminDashboardPage() {
         </div>
       </div>
       <AlertsSection />
-      <WatermarkSection users={users} />
-      <CanarySection />
     </>
   );
 }
@@ -68,11 +64,4 @@ async function loadAdminDashboardStats() {
     totalUsers,
     unresolvedAlerts
   };
-}
-
-async function loadWatermarkUsers() {
-  return prisma.user.findMany({
-    orderBy: { watermarkNumber: "asc" },
-    select: { id: true, username: true, watermarkNumber: true }
-  });
 }

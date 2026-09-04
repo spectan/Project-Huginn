@@ -157,9 +157,6 @@ function AdminAccountRows({
               onError
             )}
           >
-            <button aria-label={`Save ${user.username}`} className="admin-btn admin-btn--small" type="submit">
-              Save
-            </button>
             {viewerCanManageGlobalAccounts ? (
               <button
                 aria-label={`Remove ${user.username}`}
@@ -197,14 +194,10 @@ function AdminAccountRows({
                   </select>
                 </div>
               </div>
-              {maps.map((map) => (
-                <div className="admin-toolbar" key={map.id}>
-                  <div>
-                    <small>Server</small>
-                    <strong>{map.name}</strong>
-                  </div>
-                  <div>
-                    <small>Access</small>
+              <div className="admin-server-grid">
+                {maps.map((map) => (
+                  <div className="admin-server-cell" key={map.id}>
+                    <strong className="admin-server-cell__name">{map.name}</strong>
                     <select
                       aria-label={`Access for ${user.username} on ${map.name}`}
                       className="admin-select"
@@ -217,42 +210,54 @@ function AdminAccountRows({
                       <option value="READ">Read</option>
                       <option value="WRITE">Write</option>
                     </select>
+                    <label className="admin-check">
+                      <input
+                        aria-label={`Operator for ${user.username} on ${map.name}`}
+                        checked={isGlobalAdmin || (operatorFlags[map.id] ?? false)}
+                        disabled={isGlobalAdmin}
+                        form={accountFormId}
+                        name={`isOperator:${map.id}`}
+                        onChange={(event) => updateOperatorFlag(map.id, event.currentTarget.checked, setOperatorFlags)}
+                        type="checkbox"
+                      />
+                      <span>Operator</span>
+                    </label>
                   </div>
-                  <label className="admin-check">
-                    <input
-                      aria-label={`Operator for ${user.username} on ${map.name}`}
-                      checked={isGlobalAdmin || (operatorFlags[map.id] ?? false)}
-                      disabled={isGlobalAdmin}
-                      form={accountFormId}
-                      name={`isOperator:${map.id}`}
-                      onChange={(event) => updateOperatorFlag(map.id, event.currentTarget.checked, setOperatorFlags)}
-                      type="checkbox"
-                    />
-                    <span>Operator</span>
-                  </label>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-            {viewerCanManageGlobalAccounts ? (
-              <form
-                className="admin-toolbar"
-                onSubmit={(event) => void updateAdminUserPassword(event, user.id, onUserChange, onError)}
+            <div className="admin-card-footer">
+              {viewerCanManageGlobalAccounts ? (
+                <form
+                  className="admin-password-form"
+                  onSubmit={(event) => void updateAdminUserPassword(event, user.id, onUserChange, onError)}
+                >
+                  <small>Password</small>
+                  <input
+                    aria-label={`New password for ${user.username}`}
+                    autoComplete="new-password"
+                    className="admin-input"
+                    maxLength={128}
+                    minLength={12}
+                    name="password"
+                    type="password"
+                  />
+                  <button aria-label={`Change password ${user.username}`} className="admin-btn admin-btn--small" type="submit">
+                    Change
+                  </button>
+                </form>
+              ) : (
+                <span />
+              )}
+              <button
+                aria-label={`Save ${user.username}`}
+                className="admin-btn"
+                form={accountFormId}
+                type="submit"
               >
-                <small>Password</small>
-                <input
-                  aria-label={`New password for ${user.username}`}
-                  autoComplete="new-password"
-                  className="admin-input"
-                  maxLength={128}
-                  minLength={12}
-                  name="password"
-                  type="password"
-                />
-                <button aria-label={`Change password ${user.username}`} className="admin-btn admin-btn--small" type="submit">
-                  Change
-                </button>
-              </form>
-            ) : null}
+                Save
+              </button>
+            </div>
           </td>
         </tr>
       ) : null}

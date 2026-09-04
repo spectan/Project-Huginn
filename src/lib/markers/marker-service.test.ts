@@ -2,11 +2,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CANARY_MARKERS_PER_MAP } from "@/lib/canaries/canary-service";
 
 const mocks = vi.hoisted(() => ({
-  triggerAlertDetection: vi.fn()
+  triggerAlertDetection: vi.fn(),
+  dispatchDiscordNotification: vi.fn(async () => ({ ok: true as const, value: null }))
 }));
 
 vi.mock("@/lib/alerts/alert-service", () => ({
   triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
+vi.mock("@/lib/discord/discord-service", () => ({
+  dispatchDiscordNotification: mocks.dispatchDiscordNotification
+}));
+
+vi.mock("@/lib/discord/database", () => ({
+  createDiscordDependencies: vi.fn(() => ({}))
 }));
 
 import {
@@ -1250,6 +1259,174 @@ describe("marker service", () => {
 
     expect(listed.value.markers.some((marker) => marker.id === created.value.id)).toBe(false);
     expect(listed.value.markers).toContainEqual(result.value.marker);
+  });
+});
+
+describe("marker service discord notifications", () => {
+  let deps: MarkerServiceDependencies & { auditEvents: unknown[] };
+
+  beforeEach(() => {
+    mocks.dispatchDiscordNotification.mockReset();
+    mocks.dispatchDiscordNotification.mockResolvedValue({ ok: true, value: null });
+    deps = createDependencies();
+  });
+
+  it("dispatches a marker created notification after a successful create", async () => {
+    const result = await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      {
+        kind: "marker",
+        action: "created",
+        username: "Writer",
+        mapName: "Celebration",
+        markerType: "tower"
+      },
+      expect.anything()
+    );
+  });
+
+  it("dispatches a marker updated notification after a successful update", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+    mocks.dispatchDiscordNotification.mockClear();
+
+    const result = await updateMarker({
+      actor: writer,
+      input: {
+        damage: "1.00",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "90.00",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      markerId: "tower-1",
+      markerType: "tower"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      {
+        kind: "marker",
+        action: "updated",
+        username: "Writer",
+        mapName: "Celebration",
+        markerType: "tower"
+      },
+      expect.anything()
+    );
+  });
+
+  it("dispatches a marker deleted notification after a successful delete", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+    mocks.dispatchDiscordNotification.mockClear();
+
+    const result = await deleteMarker({
+      actor: writer,
+      markerId: "tower-1",
+      markerType: "tower"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      {
+        kind: "marker",
+        action: "deleted",
+        username: "Writer",
+        mapName: "Celebration",
+        markerType: "tower"
+      },
+      expect.anything()
+    );
+  });
+
+  it("does not dispatch when the mutation fails", async () => {
+    const denied = await createMarker({
+      actor: reader,
+      input: {
+        category: "Landmarks",
+        text: "Scout here",
+        title: "Mine entrance",
+        type: "note",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(denied.ok).toBe(false);
+
+    const missing = await deleteMarker({
+      actor: writer,
+      markerId: "tower-404",
+      markerType: "tower"
+    }, deps);
+
+    expect(missing.ok).toBe(false);
+    expect(mocks.dispatchDiscordNotification).not.toHaveBeenCalled();
+  });
+
+  it("does not let a discord dispatch failure break the mutation", async () => {
+    mocks.dispatchDiscordNotification.mockImplementation(() => {
+      throw new Error("discord pipeline exploded");
+    });
+
+    const result = await createMarker({
+      actor: writer,
+      input: {
+        damage: "0.25",
+        makerName: "Mako",
+        makerNumber: "945",
+        ql: "89.50",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(result.ok).toBe(true);
   });
 });
 

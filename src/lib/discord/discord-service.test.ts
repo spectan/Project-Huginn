@@ -3,6 +3,8 @@ import type { AlertWithActor } from "@/lib/alerts/alert-types";
 import {
   buildAccountEventEmbed,
   buildAlertEmbed,
+  buildMarkerEventEmbed,
+  buildShareLinkEmbed,
   DISCORD_NOT_CONFIGURED_ERROR,
   dispatchDiscordNotification,
   getDiscordConfig,
@@ -24,6 +26,10 @@ function createConfig(overrides: Partial<DiscordConfigData> = {}): DiscordConfig
     alertSeverityLow: false,
     notifyRegistrations: false,
     notifyApprovals: false,
+    notifyMarkerCreated: false,
+    notifyMarkerUpdated: false,
+    notifyMarkerDeleted: false,
+    notifyShareLinks: false,
     ...overrides
   };
 }
@@ -117,7 +123,11 @@ describe("discord service", () => {
           alertSeverityMedium: false,
           alertSeverityLow: false,
           notifyRegistrations: false,
-          notifyApprovals: false
+          notifyApprovals: false,
+          notifyMarkerCreated: false,
+          notifyMarkerUpdated: false,
+          notifyMarkerDeleted: false,
+          notifyShareLinks: false
         }
       });
     });
@@ -202,7 +212,11 @@ describe("discord service", () => {
         alertSeverityMedium: "yes",
         alertSeverityLow: 0,
         notifyRegistrations: true,
-        notifyApprovals: undefined
+        notifyApprovals: undefined,
+        notifyMarkerCreated: true,
+        notifyMarkerUpdated: 1,
+        notifyMarkerDeleted: 0,
+        notifyShareLinks: "on"
       }, deps);
 
       expect(result).toEqual({
@@ -214,7 +228,11 @@ describe("discord service", () => {
           alertSeverityMedium: true,
           alertSeverityLow: false,
           notifyRegistrations: true,
-          notifyApprovals: false
+          notifyApprovals: false,
+          notifyMarkerCreated: true,
+          notifyMarkerUpdated: true,
+          notifyMarkerDeleted: false,
+          notifyShareLinks: true
         }
       });
       expect(deps.__test.saved).toHaveLength(1);
@@ -274,6 +292,47 @@ describe("discord service", () => {
       expect(embed.fields).toEqual([
         { name: "Username", value: "bob", inline: true },
         { name: "Approved by", value: "root", inline: true }
+      ]);
+    });
+  });
+
+  describe("buildMarkerEventEmbed", () => {
+    it.each([
+      ["created", "Marker created", 0x3b82f6],
+      ["updated", "Marker updated", 0xf59e0b],
+      ["deleted", "Marker deleted", 0xef4444]
+    ] as const)("builds a %s embed with title %q and color %#x", (action, title, color) => {
+      const embed = buildMarkerEventEmbed({
+        action,
+        username: "Writer",
+        mapName: "Celebration",
+        markerType: "tower"
+      });
+
+      expect(embed.title).toBe(title);
+      expect(embed.color).toBe(color);
+      expect(embed.fields).toEqual([
+        { name: "User", value: "Writer", inline: true },
+        { name: "Map", value: "Celebration", inline: true },
+        { name: "Type", value: "tower", inline: true }
+      ]);
+    });
+  });
+
+  describe("buildShareLinkEmbed", () => {
+    it("builds a purple share link embed with the expiry in hours", () => {
+      const embed = buildShareLinkEmbed({
+        username: "alice",
+        mapName: "Deliverance",
+        expiresInHours: 4
+      });
+
+      expect(embed.title).toBe("Share link created");
+      expect(embed.color).toBe(0x8b5cf6);
+      expect(embed.fields).toEqual([
+        { name: "User", value: "alice", inline: true },
+        { name: "Map", value: "Deliverance", inline: true },
+        { name: "Expires in", value: "4 hours", inline: true }
       ]);
     });
   });
@@ -380,6 +439,70 @@ describe("discord service", () => {
 
       const embed = postedEmbed(onFetch);
       expect(embed.color).toBe(0x22c55e);
+    });
+
+    it.each([
+      ["created", "notifyMarkerCreated"],
+      ["updated", "notifyMarkerUpdated"],
+      ["deleted", "notifyMarkerDeleted"]
+    ] as const)("gates marker %s notifications on the %s toggle", async (action, toggle) => {
+      const message = {
+        kind: "marker",
+        action,
+        username: "Writer",
+        mapName: "Celebration",
+        markerType: "tower"
+      } as const;
+
+      const offFetch = fetchMock();
+      vi.stubGlobal("fetch", offFetch);
+      const offDeps = createDependencies(createConfig({ [toggle]: false }));
+      await dispatchDiscordNotification(message, offDeps);
+      expect(offFetch).not.toHaveBeenCalled();
+
+      const onFetch = fetchMock();
+      vi.stubGlobal("fetch", onFetch);
+      const onDeps = createDependencies(createConfig({ [toggle]: true }));
+      await dispatchDiscordNotification(message, onDeps);
+      expect(onFetch).toHaveBeenCalledTimes(1);
+
+      const embed = postedEmbed(onFetch);
+      expect(embed.title).toBe(`Marker ${action}`);
+      expect(embed.fields).toEqual([
+        { name: "User", value: "Writer", inline: true },
+        { name: "Map", value: "Celebration", inline: true },
+        { name: "Type", value: "tower", inline: true }
+      ]);
+    });
+
+    it("gates share link notifications on the notifyShareLinks toggle", async () => {
+      const message = {
+        kind: "share",
+        username: "alice",
+        mapName: "Deliverance",
+        expiresInHours: 4
+      } as const;
+
+      const offFetch = fetchMock();
+      vi.stubGlobal("fetch", offFetch);
+      const offDeps = createDependencies(createConfig({ notifyShareLinks: false }));
+      await dispatchDiscordNotification(message, offDeps);
+      expect(offFetch).not.toHaveBeenCalled();
+
+      const onFetch = fetchMock();
+      vi.stubGlobal("fetch", onFetch);
+      const onDeps = createDependencies(createConfig({ notifyShareLinks: true }));
+      await dispatchDiscordNotification(message, onDeps);
+      expect(onFetch).toHaveBeenCalledTimes(1);
+
+      const embed = postedEmbed(onFetch);
+      expect(embed.title).toBe("Share link created");
+      expect(embed.color).toBe(0x8b5cf6);
+      expect(embed.fields).toEqual([
+        { name: "User", value: "alice", inline: true },
+        { name: "Map", value: "Deliverance", inline: true },
+        { name: "Expires in", value: "4 hours", inline: true }
+      ]);
     });
 
     it("tolerates fetch failures", async () => {

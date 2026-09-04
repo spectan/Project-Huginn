@@ -43,8 +43,8 @@ describe("AdminAccountsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
     expect(screen.getByRole("group", { name: "Server permissions for Mako" })).toBeTruthy();
     expect(screen.getByLabelText("Set all server access for Mako")).toBeTruthy();
-    expect(screen.getAllByText("Server")).toHaveLength(2);
-    expect(screen.getAllByText("Access")).toHaveLength(2);
+    expect(screen.getByText("Celebration")).toBeTruthy();
+    expect(screen.getByText("Defiance")).toBeTruthy();
     expect(screen.getAllByText("Operator")).toHaveLength(2);
     expect(screen.getByLabelText("Access for Mako on Celebration")).toHaveProperty("value", "READ");
     expect(screen.getByLabelText("Access for Mako on Defiance")).toHaveProperty("value", "NONE");

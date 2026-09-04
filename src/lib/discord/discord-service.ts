@@ -9,11 +9,25 @@ export type DiscordConfigData = {
   alertSeverityLow: boolean;
   notifyRegistrations: boolean;
   notifyApprovals: boolean;
+  notifyMarkerCreated: boolean;
+  notifyMarkerUpdated: boolean;
+  notifyMarkerDeleted: boolean;
+  notifyShareLinks: boolean;
 };
+
+export type DiscordMarkerAction = "created" | "updated" | "deleted";
 
 export type DiscordNotificationMessage =
   | { kind: "alert"; alert: AlertWithActor }
-  | { kind: "registration" | "approval"; username: string; actorUsername?: string };
+  | { kind: "registration" | "approval"; username: string; actorUsername?: string }
+  | {
+      kind: "marker";
+      action: DiscordMarkerAction;
+      username: string;
+      mapName: string;
+      markerType: string;
+    }
+  | { kind: "share"; username: string; mapName: string; expiresInHours: number };
 
 export type DiscordEmbedField = {
   name: string;
@@ -45,7 +59,11 @@ const DEFAULT_DISCORD_CONFIG: DiscordConfigData = {
   alertSeverityMedium: false,
   alertSeverityLow: false,
   notifyRegistrations: false,
-  notifyApprovals: false
+  notifyApprovals: false,
+  notifyMarkerCreated: false,
+  notifyMarkerUpdated: false,
+  notifyMarkerDeleted: false,
+  notifyShareLinks: false
 };
 
 const SEVERITY_COLORS: Record<AlertSeverity, number> = {
@@ -54,7 +72,14 @@ const SEVERITY_COLORS: Record<AlertSeverity, number> = {
   LOW: 0x3b82f6
 };
 
+const MARKER_ACTION_COLORS: Record<DiscordMarkerAction, number> = {
+  created: 0x3b82f6,
+  updated: 0xf59e0b,
+  deleted: 0xef4444
+};
+
 const ACCOUNT_EVENT_COLOR = 0x22c55e;
+const SHARE_LINK_COLOR = 0x8b5cf6;
 const TEST_MESSAGE_COLOR = 0x9ca3af;
 
 export async function getDiscordConfig(
@@ -90,7 +115,11 @@ export async function saveDiscordConfig(
     alertSeverityMedium: getBoolean(input, "alertSeverityMedium"),
     alertSeverityLow: getBoolean(input, "alertSeverityLow"),
     notifyRegistrations: getBoolean(input, "notifyRegistrations"),
-    notifyApprovals: getBoolean(input, "notifyApprovals")
+    notifyApprovals: getBoolean(input, "notifyApprovals"),
+    notifyMarkerCreated: getBoolean(input, "notifyMarkerCreated"),
+    notifyMarkerUpdated: getBoolean(input, "notifyMarkerUpdated"),
+    notifyMarkerDeleted: getBoolean(input, "notifyMarkerDeleted"),
+    notifyShareLinks: getBoolean(input, "notifyShareLinks")
   });
 
   return ok(saved);
@@ -106,9 +135,7 @@ export async function dispatchDiscordNotification(
     return ok(null);
   }
 
-  const embed = message.kind === "alert"
-    ? buildAlertEmbed(message.alert)
-    : buildAccountEventEmbed(message.kind, message);
+  const embed = buildEmbed(message);
 
   try {
     await postEmbed(config.webhookUrl, embed);
@@ -196,6 +223,61 @@ export function buildAccountEventEmbed(
   };
 }
 
+export function buildMarkerEventEmbed(
+  input: {
+    action: DiscordMarkerAction;
+    username: string;
+    mapName: string;
+    markerType: string;
+  }
+): DiscordEmbed {
+  return {
+    title: `Marker ${input.action}`,
+    description:
+      `${input.username} ${input.action} a ${input.markerType} marker on ${input.mapName}.`,
+    color: MARKER_ACTION_COLORS[input.action],
+    fields: [
+      { name: "User", value: input.username, inline: true },
+      { name: "Map", value: input.mapName, inline: true },
+      { name: "Type", value: input.markerType, inline: true }
+    ],
+    timestamp: new Date().toISOString()
+  };
+}
+
+export function buildShareLinkEmbed(
+  input: { username: string; mapName: string; expiresInHours: number }
+): DiscordEmbed {
+  return {
+    title: "Share link created",
+    description:
+      `${input.username} created a read-only share link for ${input.mapName}.`,
+    color: SHARE_LINK_COLOR,
+    fields: [
+      { name: "User", value: input.username, inline: true },
+      { name: "Map", value: input.mapName, inline: true },
+      { name: "Expires in", value: `${input.expiresInHours} hours`, inline: true }
+    ],
+    timestamp: new Date().toISOString()
+  };
+}
+
+function buildEmbed(message: DiscordNotificationMessage): DiscordEmbed {
+  if (message.kind === "alert") {
+    return buildAlertEmbed(message.alert);
+  }
+
+  if (message.kind === "marker") {
+    return buildMarkerEventEmbed(message);
+  }
+
+  if (message.kind === "share") {
+    return buildShareLinkEmbed(message);
+  }
+
+  return buildAccountEventEmbed(message.kind, message);
+}
+
 async function loadConfig(
   dependencies: DiscordServiceDependencies
 ): Promise<DiscordConfigData> {
@@ -220,6 +302,21 @@ function shouldDispatch(
       case "LOW":
         return config.alertSeverityLow;
     }
+  }
+
+  if (message.kind === "marker") {
+    switch (message.action) {
+      case "created":
+        return config.notifyMarkerCreated;
+      case "updated":
+        return config.notifyMarkerUpdated;
+      case "deleted":
+        return config.notifyMarkerDeleted;
+    }
+  }
+
+  if (message.kind === "share") {
+    return config.notifyShareLinks;
   }
 
   return message.kind === "registration"

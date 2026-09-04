@@ -15,14 +15,19 @@ describe("AdminNav", () => {
     usePathnameMock.mockReturnValue("/admin");
   });
 
-  it("renders all admin sections", () => {
+  it("renders all admin sections in alphabetical order", () => {
     render(React.createElement(AdminNav));
 
     expect(screen.getByText("Huginn")).toBeTruthy();
-    expect(screen.getAllByRole("link")).toHaveLength(6);
-    for (const label of ["Dashboard", "Alerts", "Accounts", "History Log", "Deleted Markers", "Discord"]) {
-      expect(screen.getByRole("link", { name: label })).toBeTruthy();
-    }
+    const links = screen.getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Accounts",
+      "Dashboard",
+      "Deleted Markers",
+      "Discord",
+      "History Log",
+      "Security"
+    ]);
     expect(screen.queryByRole("link", { name: "Watermark" })).toBeNull();
   });
 

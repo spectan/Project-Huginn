@@ -4,12 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const navItems = [
-  { href: "/admin", label: "Dashboard" },
-  { href: "/admin/alerts", label: "Alerts" },
   { href: "/admin/accounts", label: "Accounts" },
-  { href: "/admin/history", label: "History Log" },
+  { href: "/admin", label: "Dashboard" },
   { href: "/admin/deleted-markers", label: "Deleted Markers" },
   { href: "/admin/discord", label: "Discord" },
+  { href: "/admin/history", label: "History Log" },
+  { href: "/admin/security", label: "Security" }
 ] as const;
 
 function getActiveHref(pathname: string): string {
@@ -27,7 +27,7 @@ export function AdminNav() {
 
   return (
     <>
-      <div className="admin-brand">Huginn</div>
+      <Link className="admin-brand" href="/admin">Huginn</Link>
       <nav aria-label="Admin sections" className="admin-nav">
         {navItems.map((item) => {
           const isActive = activeHref === item.href;

@@ -10,6 +10,10 @@ type DiscordConfig = {
   alertSeverityLow: boolean;
   notifyRegistrations: boolean;
   notifyApprovals: boolean;
+  notifyMarkerCreated: boolean;
+  notifyMarkerUpdated: boolean;
+  notifyMarkerDeleted: boolean;
+  notifyShareLinks: boolean;
 };
 
 type Feedback = {
@@ -17,11 +21,30 @@ type Feedback = {
   message: string;
 };
 
-function FeedbackText({ feedback }: { feedback: Feedback }) {
-  if (feedback.kind === "error") {
-    return <span className="admin-pill admin-pill--danger">{feedback.message}</span>;
-  }
-  return <span>{feedback.message}</span>;
+function FeedbackPill({ feedback }: { feedback: Feedback }) {
+  const modifier = feedback.kind === "error" ? "admin-pill--danger" : "admin-pill--approved";
+  return <span className={`admin-pill ${modifier}`}>{feedback.message}</span>;
+}
+
+function Toggle({
+  checked,
+  label,
+  onChange
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="admin-check">
+      <input
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+      <span>{label}</span>
+    </label>
+  );
 }
 
 export function DiscordView() {
@@ -101,20 +124,23 @@ export function DiscordView() {
       <h1 className="admin-page-title">Discord</h1>
 
       {loadError !== null ? <section className="admin-empty">{loadError}</section> : null}
-      {config === null && loadError === null ? <p>Loading…</p> : null}
+      {config === null && loadError === null ? (
+        <section className="admin-empty">Loading…</section>
+      ) : null}
 
       {config !== null ? (
-        <section className="admin-panel">
-          <h2 className="admin-section-title">Webhook</h2>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void save();
-            }}
-          >
-            <p>
-              <label>
-                Webhook URL{" "}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save();
+          }}
+        >
+          <div className="admin-discord-grid">
+            <section className="admin-panel">
+              <h2 className="admin-section-title">Connection</h2>
+
+              <label className="admin-discord-field">
+                <span>Webhook URL</span>
                 <input
                   className="admin-input"
                   onChange={(event) => update({ webhookUrl: event.target.value })}
@@ -123,83 +149,117 @@ export function DiscordView() {
                   value={config.webhookUrl}
                 />
               </label>
-            </p>
-            <p>
-              <label className="admin-check">
-                <input
-                  checked={config.enabled}
-                  onChange={(event) => update({ enabled: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>Enabled</span>
-              </label>
-            </p>
 
-            <h2 className="admin-section-title">Security alerts</h2>
-            <p>
-              <label className="admin-check">
-                <input
-                  checked={config.alertSeverityHigh}
-                  onChange={(event) => update({ alertSeverityHigh: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>High</span>
-              </label>{" "}
-              <label className="admin-check">
-                <input
-                  checked={config.alertSeverityMedium}
-                  onChange={(event) => update({ alertSeverityMedium: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>Medium</span>
-              </label>{" "}
-              <label className="admin-check">
-                <input
-                  checked={config.alertSeverityLow}
-                  onChange={(event) => update({ alertSeverityLow: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>Low</span>
-              </label>
-            </p>
+              <div className="admin-discord-enabled">
+                <label className="admin-check">
+                  <input
+                    checked={config.enabled}
+                    onChange={(event) => update({ enabled: event.target.checked })}
+                    type="checkbox"
+                  />
+                  <span>Enabled</span>
+                </label>
+                <span className="admin-discord-enabled-hint">
+                  Post notifications to this webhook
+                </span>
+              </div>
 
-            <h2 className="admin-section-title">Account events</h2>
-            <p>
-              <label className="admin-check">
-                <input
-                  checked={config.notifyRegistrations}
-                  onChange={(event) => update({ notifyRegistrations: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>New registrations</span>
-              </label>{" "}
-              <label className="admin-check">
-                <input
-                  checked={config.notifyApprovals}
-                  onChange={(event) => update({ notifyApprovals: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>Account approvals</span>
-              </label>
-            </p>
+              <div className="admin-toolbar admin-discord-actions">
+                <button className="admin-btn" disabled={saving || sendingTest} type="submit">
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  className="admin-btn admin-btn--ghost"
+                  disabled={saving || sendingTest}
+                  onClick={() => void sendTest()}
+                  type="button"
+                >
+                  {sendingTest ? "Sending…" : "Send test message"}
+                </button>
+              </div>
 
-            <div className="admin-toolbar">
-              <button className="admin-btn" disabled={saving || sendingTest} type="submit">
-                {saving ? "Saving…" : "Save"}
-              </button>
-              <button
-                className="admin-btn admin-btn--ghost"
-                disabled={saving || sendingTest}
-                onClick={() => void sendTest()}
-                type="button"
-              >
-                {sendingTest ? "Sending…" : "Send test message"}
-              </button>
-              {saveFeedback !== null ? <FeedbackText feedback={saveFeedback} /> : null}
-              {testFeedback !== null ? <FeedbackText feedback={testFeedback} /> : null}
-            </div>
-          </form>
-        </section>
+              {saveFeedback !== null || testFeedback !== null ? (
+                <div className="admin-discord-feedback">
+                  {saveFeedback !== null ? <FeedbackPill feedback={saveFeedback} /> : null}
+                  {testFeedback !== null ? <FeedbackPill feedback={testFeedback} /> : null}
+                </div>
+              ) : null}
+            </section>
+
+            <section className="admin-panel">
+              <h2 className="admin-section-title">Notifications</h2>
+
+              <div className="admin-discord-group">
+                <span className="admin-discord-group__label">Security alerts</span>
+                <div className="admin-toggle-grid">
+                  <Toggle
+                    checked={config.alertSeverityHigh}
+                    label="High"
+                    onChange={(checked) => update({ alertSeverityHigh: checked })}
+                  />
+                  <Toggle
+                    checked={config.alertSeverityMedium}
+                    label="Medium"
+                    onChange={(checked) => update({ alertSeverityMedium: checked })}
+                  />
+                  <Toggle
+                    checked={config.alertSeverityLow}
+                    label="Low"
+                    onChange={(checked) => update({ alertSeverityLow: checked })}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-discord-group">
+                <span className="admin-discord-group__label">Account events</span>
+                <div className="admin-toggle-grid">
+                  <Toggle
+                    checked={config.notifyRegistrations}
+                    label="New registrations"
+                    onChange={(checked) => update({ notifyRegistrations: checked })}
+                  />
+                  <Toggle
+                    checked={config.notifyApprovals}
+                    label="Account approvals"
+                    onChange={(checked) => update({ notifyApprovals: checked })}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-discord-group">
+                <span className="admin-discord-group__label">Marker activity</span>
+                <div className="admin-toggle-grid">
+                  <Toggle
+                    checked={config.notifyMarkerCreated}
+                    label="Created"
+                    onChange={(checked) => update({ notifyMarkerCreated: checked })}
+                  />
+                  <Toggle
+                    checked={config.notifyMarkerUpdated}
+                    label="Updated"
+                    onChange={(checked) => update({ notifyMarkerUpdated: checked })}
+                  />
+                  <Toggle
+                    checked={config.notifyMarkerDeleted}
+                    label="Deleted"
+                    onChange={(checked) => update({ notifyMarkerDeleted: checked })}
+                  />
+                </div>
+              </div>
+
+              <div className="admin-discord-group">
+                <span className="admin-discord-group__label">Share links</span>
+                <div className="admin-toggle-grid">
+                  <Toggle
+                    checked={config.notifyShareLinks}
+                    label="Share link created"
+                    onChange={(checked) => update({ notifyShareLinks: checked })}
+                  />
+                </div>
+              </div>
+            </section>
+          </div>
+        </form>
       ) : null}
     </>
   );

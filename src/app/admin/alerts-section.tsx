@@ -51,7 +51,7 @@ export function AlertsSection() {
     <section className="admin-panel">
       <div className="admin-section-header">
         <h2 className="admin-section-title">Alerts</h2>
-        <Link className="admin-btn admin-btn--ghost admin-btn--small" href="/admin/alerts">
+        <Link className="admin-btn admin-btn--ghost admin-btn--small" href="/admin/security">
           View all →
         </Link>
       </div>

@@ -1,5 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_USER_MAP_SETTINGS } from "@/lib/map-settings/map-settings";
+
+const mocks = vi.hoisted(() => ({
+  dispatchDiscordNotification: vi.fn(async () => ({ ok: true as const, value: null }))
+}));
+
+vi.mock("@/lib/discord/discord-service", () => ({
+  dispatchDiscordNotification: mocks.dispatchDiscordNotification
+}));
+
+vi.mock("@/lib/discord/database", () => ({
+  createDiscordDependencies: vi.fn(() => ({}))
+}));
 import {
   createShareLink,
   resolveShareLink,
@@ -94,6 +106,11 @@ function createTestContext() {
 }
 
 describe("createShareLink", () => {
+  beforeEach(() => {
+    mocks.dispatchDiscordNotification.mockReset();
+    mocks.dispatchDiscordNotification.mockResolvedValue({ ok: true, value: null });
+  });
+
   it.each([
     { expiresInHours: 0, valid: false },
     { expiresInHours: 1, valid: true },
@@ -280,6 +297,63 @@ describe("createShareLink", () => {
     expect(alerts[0]?.description).toBe(
       "alice created a read-only share link for map-1 that expires in 2 hours"
     );
+  });
+
+  it("dispatches a share notification after the link is created", async () => {
+    const { dependencies } = createTestContext();
+
+    const result = await createShareLink(
+      { actor: APPROVED_ACTOR, expiresInHours: 4, mapId: "map-1" },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      {
+        kind: "share",
+        username: "alice",
+        mapName: "Deliverance",
+        expiresInHours: 4
+      },
+      expect.anything()
+    );
+  });
+
+  it("falls back to the map id in the discord notification when the map name is unavailable", async () => {
+    const { dependencies } = createTestContext();
+    dependencies.findMapName = vi.fn(async () => null);
+
+    const result = await createShareLink(
+      { actor: APPROVED_ACTOR, expiresInHours: 2, mapId: "map-1" },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      {
+        kind: "share",
+        username: "alice",
+        mapName: "map-1",
+        expiresInHours: 2
+      },
+      expect.anything()
+    );
+  });
+
+  it("still returns the link when the discord dispatch throws", async () => {
+    const { dependencies, links } = createTestContext();
+    mocks.dispatchDiscordNotification.mockImplementation(() => {
+      throw new Error("discord unavailable");
+    });
+
+    const result = await createShareLink(
+      { actor: APPROVED_ACTOR, expiresInHours: 1, mapId: "map-1" },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(links).toHaveLength(1);
   });
 
   it("still returns the link when the audit write fails", async () => {

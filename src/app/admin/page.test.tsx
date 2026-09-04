@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -12,11 +12,6 @@ const mocks = vi.hoisted(() => ({
   riftCount: vi.fn(async () => 0),
   towerCount: vi.fn(async () => 1),
   userCount: vi.fn(async (args?: { where?: unknown }) => (args === undefined ? 9 : 3)),
-  userFindMany: vi.fn(async () => [
-    { id: "user-1", username: "Mako", watermarkNumber: 7 },
-    { id: "user-2", username: "Stargrace", watermarkNumber: 123 },
-    { id: "user-3", username: null, watermarkNumber: null }
-  ]),
   viewer: null as null | { isAdmin: boolean }
 }));
 
@@ -35,7 +30,7 @@ vi.mock("@/lib/db/prisma", () => ({
     pathMarker: { count: mocks.pathMarkerCount },
     rift: { count: mocks.riftCount },
     tower: { count: mocks.towerCount },
-    user: { count: mocks.userCount, findMany: mocks.userFindMany }
+    user: { count: mocks.userCount }
   }
 }));
 
@@ -78,14 +73,14 @@ describe("AdminDashboardPage", () => {
 
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(1);
-    expect(links[0]?.getAttribute("href")).toBe("/admin/alerts");
+    expect(links[0]?.getAttribute("href")).toBe("/admin/security");
   });
 
   it("renders the read-only alerts section", async () => {
     render(await AdminDashboardPage());
 
     expect(screen.getByRole("heading", { name: "Alerts" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "View all →" }).getAttribute("href")).toBe("/admin/alerts");
+    expect(screen.getByRole("link", { name: "View all →" }).getAttribute("href")).toBe("/admin/security");
     expect(screen.queryByRole("button", { name: "Run detection now" })).toBeNull();
     expect(screen.queryByRole("combobox")).toBeNull();
     expect(await screen.findByText("No alerts.")).toBeTruthy();
@@ -96,26 +91,13 @@ describe("AdminDashboardPage", () => {
     expect(url.searchParams.get("limit")).toBe("10");
   });
 
-  it("renders the watermark section with a compact UserID lookup", async () => {
+  it("does not render the watermark or canary sections — they live on the security page", async () => {
     render(await AdminDashboardPage());
 
-    expect(screen.getByRole("heading", { name: "Watermark" })).toBeTruthy();
-    expect(screen.getByText(/Paste or drop a screenshot/)).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
 
-    const digitsInput = screen.getByLabelText("UserID");
-    fireEvent.change(digitsInput, { target: { value: "0007" } });
-    expect(screen.getByText("Mako")).toBeTruthy();
-
-    fireEvent.change(digitsInput, { target: { value: "9999" } });
-    expect(screen.getByText("No match")).toBeTruthy();
-  });
-
-  it("renders the canary section", async () => {
-    render(await AdminDashboardPage());
-
-    expect(screen.getByRole("heading", { name: "Canaries" })).toBeTruthy();
-    expect(screen.getByLabelText(/Paste a leaked marker dump/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Identify" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Watermark" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Canaries" })).toBeNull();
   });
 
   it("renders access denied for anonymous viewers", async () => {

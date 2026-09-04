@@ -517,6 +517,10 @@ model DiscordConfig {
   alertSeverityLow    Boolean  @default(false)
   notifyRegistrations Boolean  @default(false)
   notifyApprovals     Boolean  @default(false)
+  notifyMarkerCreated Boolean  @default(false)
+  notifyMarkerUpdated Boolean  @default(false)
+  notifyMarkerDeleted Boolean  @default(false)
+  notifyShareLinks    Boolean  @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

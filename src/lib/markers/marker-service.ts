@@ -1,5 +1,10 @@
 import { triggerAlertDetection } from "@/lib/alerts/alert-service";
 import { getOrCreateCanaries, type CanaryDependencies } from "@/lib/canaries/canary-service";
+import { createDiscordDependencies } from "@/lib/discord/database";
+import {
+  dispatchDiscordNotification,
+  type DiscordNotificationMessage
+} from "@/lib/discord/discord-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
   TOWER_PLACEMENT_DISTANCE_TILES,
@@ -57,6 +62,7 @@ import type {
 
 type Actor = UserAccess & {
   id: string;
+  username: string;
 };
 
 type MapRecord = {
@@ -405,7 +411,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializeTower(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -423,7 +429,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializeDeed(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -441,7 +447,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializeRift(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -459,7 +465,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializeCamp(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -477,7 +483,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializeMinedoor(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -495,7 +501,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializeLocateSoul(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -513,7 +519,7 @@ export async function createMarker(
       updatedByUserId: input.actor.id
     });
     const marker = serializePath(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
     return ok(marker);
   }
 
@@ -534,7 +540,7 @@ export async function createMarker(
     updatedByUserId: input.actor.id
   });
   const marker = serializeNote(created);
-  await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, marker);
+  await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
   return ok(marker);
 }
 
@@ -583,7 +589,7 @@ export async function updateMarker(
     }
 
     const marker = serializeTower(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -613,7 +619,7 @@ export async function updateMarker(
     }
 
     const marker = serializeDeed(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -643,7 +649,7 @@ export async function updateMarker(
     }
 
     const marker = serializeRift(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -673,7 +679,7 @@ export async function updateMarker(
     }
 
     const marker = serializeCamp(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -703,7 +709,7 @@ export async function updateMarker(
     }
 
     const marker = serializeMinedoor(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -733,7 +739,7 @@ export async function updateMarker(
     }
 
     const marker = serializeLocateSoul(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -763,7 +769,7 @@ export async function updateMarker(
     }
 
     const marker = serializePath(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
     return ok(marker);
   }
 
@@ -792,7 +798,7 @@ export async function updateMarker(
   }
 
   const marker = serializeNote(updated);
-  await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, marker);
+  await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
   return ok(marker);
 }
 
@@ -850,7 +856,7 @@ export async function disbandDeedMarker(
 
   const marker = serializeNote(conversion.note);
 
-  await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, existing.mapId, marker);
+  await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, existing.mapId, existing.map.name, marker);
   await recordAudit(dependencies, {
     action: "MARKER_DELETED",
     actorUserId: input.actor.id,
@@ -1052,6 +1058,13 @@ export async function deleteMarker(
     targetType: getAuditTargetType(input.markerType)
   });
   triggerAlertsSafely();
+  dispatchDiscordSafely({
+    kind: "marker",
+    action: "deleted",
+    username: input.actor.username,
+    mapName: existing.map.name,
+    markerType: input.markerType
+  });
 
   return ok({
     deletedAt,
@@ -1337,7 +1350,7 @@ async function softDeleteMarker(
 async function findExistingMarkerForDelete(
   input: { markerId: string; markerType: MarkerType },
   dependencies: MarkerServiceDependencies
-): Promise<{ mapId: string } | null> {
+): Promise<{ mapId: string; map: MapRecord } | null> {
   if (input.markerType === "tower") {
     return dependencies.findTower(input.markerId);
   }
@@ -1390,6 +1403,7 @@ async function auditMarkerWrite(
   action: "MARKER_CREATED" | "MARKER_UPDATED",
   actor: Actor,
   mapId: string,
+  mapName: string,
   marker: WorkspaceMarker
 ): Promise<void> {
   await recordAudit(dependencies, {
@@ -1407,6 +1421,13 @@ async function auditMarkerWrite(
     },
     targetId: marker.id,
     targetType: getAuditTargetType(marker.type)
+  });
+  dispatchDiscordSafely({
+    kind: "marker",
+    action: action === "MARKER_CREATED" ? "created" : "updated",
+    username: actor.username,
+    mapName,
+    markerType: marker.type
   });
 }
 
@@ -1464,6 +1485,14 @@ function triggerAlertsSafely(): void {
     triggerAlertDetection();
   } catch {
     // Alert detection is fire-and-forget; failures must not block the request.
+  }
+}
+
+function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
+  try {
+    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
+  } catch {
+    // Discord notifications are fire-and-forget; failures must not block the request.
   }
 }
 

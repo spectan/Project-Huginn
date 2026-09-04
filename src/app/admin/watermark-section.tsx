@@ -19,6 +19,7 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
   const [digits, setDigits] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [armed, setArmed] = useState(false);
 
   const trimmedDigits = digits.trim();
   const paddedDigits = trimmedDigits.padStart(4, "0");
@@ -84,6 +85,15 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
     }
   }
 
+  function handleDrop(event: React.DragEvent) {
+    event.preventDefault();
+    setArmed(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+    if (droppedFile !== undefined && droppedFile.type.startsWith("image/")) {
+      setFile(droppedFile);
+    }
+  }
+
   useEffect(() => {
     document.addEventListener("paste", handlePaste);
     return () => {
@@ -94,29 +104,61 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
   return (
     <section className="admin-panel">
       <h2 className="admin-section-title">Watermark</h2>
-      <form onSubmit={handleSubmit}>
-        <div className="admin-empty" onPaste={handlePaste} tabIndex={0}>
-          {file === null ? (
-            <label htmlFor="image">Paste or drop a screenshot, or choose a file:</label>
+      <div className="admin-watermark-grid">
+        <form className="admin-watermark-upload" onSubmit={handleSubmit}>
+          <div
+            className={`admin-dropzone${armed ? " is-armed" : ""}`}
+            onDragLeave={() => setArmed(false)}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setArmed(true);
+            }}
+            onDrop={handleDrop}
+            onPaste={handlePaste}
+            tabIndex={0}
+          >
+            <label className="admin-dropzone-hint" htmlFor="image">
+              Paste, drop, or choose a screenshot
+            </label>
+            <input
+              key={fileInputKey}
+              className="admin-visually-hidden"
+              id="image"
+              type="file"
+              accept="image/png,image/jpeg"
+              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            />
+            {file !== null ? (
+              <p className="admin-dropzone-file">
+                <strong>{file.name}</strong> ({Math.round(file.size / 1024)} KB)
+              </p>
+            ) : null}
+            <label className="admin-btn admin-btn--ghost" htmlFor="image">
+              Choose file
+            </label>
+          </div>
+          <p className="admin-watermark-actions">
+            <button className="admin-btn" type="submit" disabled={loading || file === null}>
+              {loading ? "Revealing..." : "Reveal"}
+            </button>
+          </p>
+        </form>
+
+        <div className="admin-watermark-result">
+          {result !== null && result.preview !== null ? (
+            /* eslint-disable-next-line @next/next/no-img-element -- data-URL preview with unknown dimensions */
+            <img
+              className="admin-preview-img"
+              src={result.preview}
+              alt="Chroma-isolated watermark preview"
+            />
+          ) : result !== null ? (
+            <div className="admin-watermark-placeholder">Enhancement failed for this image</div>
           ) : (
-            <p>
-              <strong>Ready:</strong> {file.name} ({Math.round(file.size / 1024)} KB)
-            </p>
+            <div className="admin-watermark-placeholder">Watermarked image will appear here</div>
           )}
-          <input
-            key={fileInputKey}
-            id="image"
-            type="file"
-            accept="image/png,image/jpeg"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
         </div>
-        <p>
-          <button className="admin-btn" type="submit" disabled={loading || file === null}>
-            {loading ? "Revealing..." : "Reveal"}
-          </button>
-        </p>
-      </form>
+      </div>
 
       {error !== null && (
         <p>
@@ -124,23 +166,7 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
         </p>
       )}
 
-      {result !== null && (
-        <div className="admin-stat">
-          <span>Chroma isolation</span>
-          {result.preview !== null ? (
-            /* eslint-disable-next-line @next/next/no-img-element -- data-URL preview with unknown dimensions */
-            <img
-              className="admin-preview-img"
-              src={result.preview}
-              alt="Chroma-isolated watermark preview"
-            />
-          ) : (
-            <p>Enhancement failed for this image</p>
-          )}
-        </div>
-      )}
-
-      <div className="admin-toolbar">
+      <div className="admin-toolbar admin-watermark-lookup">
         <label htmlFor="digits">UserID</label>
         <input
           id="digits"
@@ -152,7 +178,13 @@ export function WatermarkSection({ users }: { users: UserOption[] }) {
           placeholder="Enter the UserID you see"
         />
         {trimmedDigits.length > 0 ? (
-          <span>{matchedUser === null ? "No match" : (matchedUser.username ?? matchedUser.id)}</span>
+          matchedUser === null ? (
+            <span className="admin-watermark-nomatch">No match</span>
+          ) : (
+            <span className="admin-pill admin-pill--approved">
+              {matchedUser.username ?? matchedUser.id}
+            </span>
+          )
         ) : null}
       </div>
     </section>

@@ -69,7 +69,6 @@ export function AdminAlertsView() {
 
   return (
     <>
-      <h1 className="admin-page-title">Alerts</h1>
       <div className="admin-toolbar">
         <label>
           Status{" "}

@@ -10,24 +10,28 @@ const users = [
 ];
 
 describe("WatermarkSection", () => {
-  it("renders the compact drop zone without a reference table", () => {
+  it("renders the two-pane layout with a dropzone and an empty result pane", () => {
     render(React.createElement(WatermarkSection, { users }));
 
     expect(screen.getByRole("heading", { name: "Watermark" })).toBeTruthy();
-    expect(screen.getByLabelText(/Paste or drop a screenshot/)).toBeTruthy();
+    expect(screen.getByLabelText(/Paste, drop, or choose a screenshot/)).toBeTruthy();
+    expect(screen.getByText("Choose file")).toBeTruthy();
+    expect(screen.queryByText("Chroma isolation")).toBeNull();
+    expect(screen.getByText("Watermarked image will appear here")).toBeTruthy();
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByText("0007")).toBeNull();
     expect(screen.queryByText("Mako")).toBeNull();
     expect(screen.queryByText("Stargrace")).toBeNull();
   });
 
-  it("shows the matching username as digits are typed, or 'No match'", () => {
+  it("shows the matching username as an approved pill as digits are typed, or 'No match'", () => {
     render(React.createElement(WatermarkSection, { users }));
 
     const digitsInput = screen.getByLabelText("UserID");
 
     fireEvent.change(digitsInput, { target: { value: "123" } });
-    expect(screen.getByText("Stargrace")).toBeTruthy();
+    const match = screen.getByText("Stargrace");
+    expect(match.className).toContain("admin-pill--approved");
 
     fireEvent.change(digitsInput, { target: { value: "0007" } });
     expect(screen.getByText("Mako")).toBeTruthy();
@@ -40,7 +44,7 @@ describe("WatermarkSection", () => {
     expect(screen.queryByText("No match")).toBeNull();
   });
 
-  it("posts the uploaded image and renders the enhanced preview", async () => {
+  it("shows the selected filename and posts the image, then renders the enhanced preview", async () => {
     const fetchMock = vi.fn(async () => ({
       json: async () => ({
         preview: "data:image/png;base64,Y2hyb21h"
@@ -52,7 +56,10 @@ describe("WatermarkSection", () => {
     const { container } = render(React.createElement(WatermarkSection, { users }));
 
     const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
-    fireEvent.change(screen.getByLabelText(/Paste or drop a screenshot/), { target: { files: [file] } });
+    fireEvent.change(screen.getByLabelText(/Paste, drop, or choose a screenshot/), { target: { files: [file] } });
+
+    expect(screen.getByText("shot.png")).toBeTruthy();
+
     fireEvent.submit(container.querySelector("form") as HTMLFormElement);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -62,7 +69,25 @@ describe("WatermarkSection", () => {
     expect(init.body.get("image")).toBeTruthy();
 
     expect(await screen.findByAltText("Chroma-isolated watermark preview")).toBeTruthy();
-    expect(screen.getByText("Chroma isolation")).toBeTruthy();
-    expect(screen.queryByText("Saturation boost")).toBeNull();
+    expect(screen.queryByText("Watermarked image will appear here")).toBeNull();
+  });
+
+  it("renders the failed-enhancement state when the preview is null", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        json: async () => ({ preview: null }),
+        ok: true
+      }))
+    );
+
+    const { container } = render(React.createElement(WatermarkSection, { users }));
+
+    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText(/Paste, drop, or choose a screenshot/), { target: { files: [file] } });
+    fireEvent.submit(container.querySelector("form") as HTMLFormElement);
+
+    expect(await screen.findByText("Enhancement failed for this image")).toBeTruthy();
+    expect(screen.queryByAltText("Chroma-isolated watermark preview")).toBeNull();
   });
 });

@@ -2585,7 +2585,7 @@ body {
  * Layout (rendered by src/app/admin/layout.tsx — pages must NOT render these):
  *   .admin-shell              Root flex wrapper; defines all --admin-* tokens. `<div className="admin-shell">`
  *   .admin-sidebar            216px sticky left sidebar (horizontal tab bar under 900px).
- *   .admin-brand              "Huginn Admin" wordmark at the top of the sidebar.
+ *   .admin-brand              "Huginn" wordmark in the sidebar; links to the dashboard.
  *   .admin-nav                Nav link column; `.admin-nav-link` + `.admin-nav-link--active` for links.
  *   .admin-main               Right-hand column wrapping topbar + content.
  *   .admin-topbar             Slim 48px top bar; `.admin-topbar-title` holds "Admin / <Section>",
@@ -2605,6 +2605,15 @@ body {
  *   .admin-textarea           Multi-line text area. `<textarea className="admin-textarea" …>`
  *   .admin-select             Select dropdown. `<select className="admin-select">…</select>`
  *   .admin-check              Checkbox label row. `<label className="admin-check"><input type="checkbox"><span>Admin</span></label>`
+ *   .admin-card-footer        Bottom row of an expanded account card; pushes its children apart.
+ *                             `<div className="admin-card-footer">…<button>Save</button></div>`
+ *   .admin-password-form      Inline password-change row inside .admin-card-footer.
+ *   .admin-server-grid        3-column grid of per-server permission cells (2 columns under 1100px, 1 under 720px).
+ *                             `<div className="admin-server-grid">…</div>`
+ *   .admin-server-cell        One server permission cell; internal grid keeps name / access select / operator
+ *                             checkbox aligned across cells: `<div className="admin-server-cell">`
+ *                             `<strong className="admin-server-cell__name">Celebration</strong><select …>…</select>`
+ *                             `<label className="admin-check">…</label></div>`
  *   .admin-pill               Status pill; modifiers --approved/--pending/--rejected/--info/--warning/--danger.
  *                             `<span className="admin-pill admin-pill--approved">Approved</span>`
  *   .admin-empty              Empty-state / info box. `<section className="admin-empty">No alerts</section>`
@@ -2613,6 +2622,36 @@ body {
  *   .admin-stat               Single tile: `<div className="admin-stat"><span>Open alerts</span><strong>12</strong></div>`
  *   .admin-code               Monospace metadata cell. `<code className="admin-code">{json}</code>`
  *   .admin-preview-img        Fitted pixelated preview image. `<img className="admin-preview-img" …>`
+ *   .admin-watermark-grid     Two-pane watermark layout (upload dropzone | result; 1 column under 720px).
+ *   .admin-dropzone           Large dashed drop/paste zone (min-height 180px, centered column);
+ *                             `.is-armed` highlights it while a file is dragged over.
+ *                             `<div className="admin-dropzone">…</div>`
+ *   .admin-dropzone-hint      Instruction text inside the dropzone.
+ *   .admin-dropzone-file      Selected-file summary (name + size) inside the dropzone.
+ *   .admin-watermark-actions  Centered action row beneath the dropzone (Reveal button).
+ *   .admin-watermark-result   Result pane holding the framed preview or `.admin-watermark-placeholder`.
+ *   .admin-watermark-placeholder  Dashed placeholder box for the empty / failed result states.
+ *   .admin-watermark-lookup   UserID lookup row beneath the grid (pairs with .admin-toolbar);
+ *                             a match renders as `.admin-pill--approved`, a miss as muted
+ *                             `.admin-watermark-nomatch` text.
+ *   .admin-discord-grid       Two-pane Discord settings layout (Connection | Notifications;
+ *                             1 column under 900px). `<div className="admin-discord-grid">…</div>`
+ *   .admin-discord-field      Labeled full-width input stack: small muted uppercase label above
+ *                             the input. `<label className="admin-discord-field"><span>Webhook URL</span>`
+ *                             `<input className="admin-input" …></label>`
+ *   .admin-discord-enabled    Prominent bordered "Enabled" toggle row with a trailing muted hint
+ *                             (`.admin-discord-enabled-hint`).
+ *   .admin-discord-actions    Action row (Save / Send test message) inside the Connection panel;
+ *                             pairs with .admin-toolbar.
+ *   .admin-discord-feedback   Feedback row under the actions; renders .admin-pill results
+ *                             (--approved for success, --danger for errors).
+ *   .admin-discord-group      Notification toggle group separated from the previous group by a
+ *                             top border; `.admin-discord-group__label` is the small muted
+ *                             uppercase group heading.
+ *   .admin-toggle-grid        2-column grid of .admin-check toggles (1 column under 720px).
+ *                             `<div className="admin-toggle-grid"><label className="admin-check">…</label>…</div>`
+ *   .admin-visually-hidden    Visually hidden but still focusable/labelable control
+ *                             (e.g. a restyled native file input).
  *
  * Tokens (scoped to .admin-shell): --admin-bg, --admin-panel, --admin-panel-2, --admin-border,
  *   --admin-text, --admin-muted, --admin-accent, --admin-danger, --admin-success, --admin-warning, --admin-radius.
@@ -2650,11 +2689,18 @@ body {
 }
 
 .admin-brand {
+  display: block;
   border-bottom: 1px solid var(--admin-border);
   padding: 14px 16px;
+  color: var(--admin-text);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  text-decoration: none;
+}
+
+.admin-brand:hover {
+  color: var(--admin-accent);
 }
 
 .admin-nav {
@@ -2924,6 +2970,66 @@ body {
   white-space: nowrap;
 }
 
+.admin-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.admin-password-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-password-form .admin-input {
+  width: 220px;
+}
+
+.admin-server-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.admin-server-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  padding: 6px 8px;
+  background: var(--admin-panel-2);
+}
+
+.admin-server-cell__name {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-server-cell .admin-select {
+  width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .admin-server-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .admin-server-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .admin-pill {
   display: inline-flex;
   align-items: center;
@@ -3040,6 +3146,194 @@ body {
   border: 1px solid var(--admin-border);
   border-radius: var(--admin-radius);
   image-rendering: pixelated;
+}
+
+.admin-watermark-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  box-sizing: border-box;
+  min-height: 180px;
+  border: 1px dashed var(--admin-border);
+  border-radius: var(--admin-radius);
+  padding: 16px;
+  background: var(--admin-panel-2);
+  color: var(--admin-muted);
+  text-align: center;
+}
+
+.admin-dropzone.is-armed {
+  border-color: var(--admin-accent);
+  background: rgba(59, 130, 246, 0.08);
+  color: var(--admin-text);
+}
+
+.admin-dropzone-hint {
+  margin: 0;
+  font-size: 12px;
+}
+
+.admin-dropzone-file {
+  margin: 0;
+  color: var(--admin-text);
+  font-size: 12px;
+}
+
+.admin-watermark-actions {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 0;
+}
+
+.admin-watermark-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-watermark-result .admin-preview-img {
+  width: 100%;
+  background: var(--admin-panel-2);
+}
+
+.admin-watermark-placeholder {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 180px;
+  border: 1px dashed var(--admin-border);
+  border-radius: var(--admin-radius);
+  padding: 16px;
+  color: var(--admin-muted);
+  text-align: center;
+}
+
+.admin-watermark-lookup {
+  margin-top: 12px;
+}
+
+.admin-watermark-nomatch {
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.admin-discord-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+}
+
+.admin-discord-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.admin-discord-field > span {
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-discord-field .admin-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-discord-enabled {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius);
+  padding: 8px 10px;
+  background: var(--admin-panel-2);
+}
+
+.admin-discord-enabled .admin-check {
+  font-size: 13px;
+}
+
+.admin-discord-enabled-hint {
+  margin-left: auto;
+  color: var(--admin-muted);
+  font-size: 11px;
+}
+
+.admin-discord-actions {
+  margin-top: 12px;
+}
+
+.admin-discord-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.admin-discord-group + .admin-discord-group {
+  margin-top: 12px;
+  border-top: 1px solid var(--admin-border);
+  padding-top: 12px;
+}
+
+.admin-discord-group__label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+}
+
+@media (max-width: 900px) {
+  .admin-discord-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 720px) {
+  .admin-toggle-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.admin-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .admin-watermark-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 @media (max-width: 900px) {

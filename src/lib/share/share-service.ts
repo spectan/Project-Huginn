@@ -1,3 +1,8 @@
+import { createDiscordDependencies } from "@/lib/discord/database";
+import {
+  dispatchDiscordNotification,
+  type DiscordNotificationMessage
+} from "@/lib/discord/discord-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { canReadMap, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -117,15 +122,25 @@ export async function createShareLink(
     tokenHash: hashShareToken(token)
   });
 
+  const mapName = await resolveMapName(input.mapId, dependencies);
+
   await recordShareLinkCreation(
     input.actor,
     {
       expiresInHours,
       layerId,
-      mapId: input.mapId
+      mapId: input.mapId,
+      mapName
     },
     dependencies
   );
+
+  dispatchDiscordSafely({
+    kind: "share",
+    username: input.actor.username,
+    mapName,
+    expiresInHours
+  });
 
   return ok({ expiresAt, token });
 }
@@ -165,6 +180,7 @@ async function recordShareLinkCreation(
     expiresInHours: number;
     layerId: string | null;
     mapId: string;
+    mapName: string;
   },
   dependencies: ShareDependencies
 ): Promise<void> {
@@ -188,10 +204,9 @@ async function recordShareLinkCreation(
   }
 
   try {
-    const mapName = (await dependencies.findMapName(details.mapId)) ?? details.mapId;
     await dependencies.createShareLinkAlert({
       actorUserId: actor.id,
-      description: `${actor.username} created a read-only share link for ${mapName} that expires in ${details.expiresInHours} hours`,
+      description: `${actor.username} created a read-only share link for ${details.mapName} that expires in ${details.expiresInHours} hours`,
       mapId: details.mapId,
       metadata: {
         expiresInHours: details.expiresInHours
@@ -202,6 +217,23 @@ async function recordShareLinkCreation(
     });
   } catch {
     // Alert failures must not break share link creation.
+  }
+}
+
+async function resolveMapName(mapId: string, dependencies: ShareDependencies): Promise<string> {
+  try {
+    return (await dependencies.findMapName(mapId)) ?? mapId;
+  } catch {
+    // Fall back to the map id when the lookup fails.
+    return mapId;
+  }
+}
+
+function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
+  try {
+    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
+  } catch {
+    // Discord notifications are fire-and-forget; failures must not block share link creation.
   }
 }
 
