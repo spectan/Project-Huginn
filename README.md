@@ -76,7 +76,7 @@ Clone the repository and install dependencies:
 
 ```bash
 git clone <repository-url>
-cd map.samuel.zone
+cd wurm-map-util
 npm install
 ```
 
@@ -182,7 +182,7 @@ docker compose up -d app
 Verify the deployment:
 
 ```bash
-curl -f -H 'Host: map.samuel.zone' http://127.0.0.1:3014/api/health
+curl -f -H 'Host: map.example.com' http://127.0.0.1:3014/api/health
 ```
 
 Expected response:
@@ -207,7 +207,7 @@ docker compose up -d --force-recreate app
 Verify the deployment:
 
 ```bash
-curl -f -H 'Host: map.samuel.zone' http://127.0.0.1:3014/api/health
+curl -f -H 'Host: map.example.com' http://127.0.0.1:3014/api/health
 ```
 
 ## Administration
