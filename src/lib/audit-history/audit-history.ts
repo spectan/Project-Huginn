@@ -37,7 +37,8 @@ export type AuditHistoryAction =
   | "MARKER_DELETED"
   | "MARKER_RESTORED"
   | "MARKER_CLEANED_UP"
-  | "MAP_DATA_ACCESSED";
+  | "MAP_DATA_ACCESSED"
+  | "SHARE_LINK_CREATED";
 
 export type AuditHistoryTargetType =
   | "USER"

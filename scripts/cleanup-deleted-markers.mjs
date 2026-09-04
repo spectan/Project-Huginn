@@ -8,14 +8,26 @@ async function main() {
   const towerCount = await cleanupTowers(now);
   const deedCount = await cleanupDeeds(now);
   const noteCount = await cleanupNotes(now);
+  const shareLinkCount = await cleanupShareLinks(now);
 
   console.log(JSON.stringify({
     deletedCounts: {
       deed: deedCount,
       note: noteCount,
+      shareLink: shareLinkCount,
       tower: towerCount
     }
   }));
+}
+
+async function cleanupShareLinks(now) {
+  const deleted = await prisma.shareLink.deleteMany({
+    where: {
+      expiresAt: { lte: now }
+    }
+  });
+
+  return deleted.count;
 }
 
 async function cleanupTowers(now) {

@@ -14,7 +14,11 @@ const mocks = vi.hoisted(() => {
 
   const dependencies: ShareDependencies = {
     createShareLink: vi.fn(async () => {}),
+    createShareLinkAlert: vi.fn(async () => {}),
+    deleteShareLink: vi.fn(async () => {}),
+    findMapName: vi.fn(async () => null),
     findShareLinkWithCreator: vi.fn(async () => null),
+    recordAudit: vi.fn(async () => {}),
     settings: {
       findMap: vi.fn(async (mapId) => (mapId === "map-1" ? { id: mapId } : null)),
       findSettings: vi.fn(async () => null),

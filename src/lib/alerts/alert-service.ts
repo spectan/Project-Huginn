@@ -1,5 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { createDiscordDependencies } from "@/lib/discord/database";
+import {
+  dispatchDiscordNotification,
+  type DiscordNotificationMessage
+} from "@/lib/discord/discord-service";
 import { err, ok, type Result } from "@/lib/domain/result";
 import type {
   AlertRule,
@@ -582,7 +587,17 @@ async function createAlert(input: {
     await sendWebhook(serialized).catch(() => undefined);
   }
 
+  dispatchDiscordSafely({ kind: "alert", alert: serialized });
+
   return serialized;
+}
+
+function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
+  try {
+    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
+  } catch {
+    // Discord notifications are fire-and-forget; failures must not block alert creation.
+  }
 }
 
 function getWindowStart(since: Date, until: Date, windowMs: number): Date {

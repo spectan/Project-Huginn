@@ -17,6 +17,39 @@ export function createShareDependencies(): ShareDependencies {
         }
       });
     },
+    createShareLinkAlert: async (input) => {
+      await prisma.alert.create({
+        data: {
+          actorUserId: input.actorUserId,
+          description: input.description,
+          mapId: input.mapId,
+          metadata: input.metadata as Prisma.InputJsonValue,
+          rule: input.rule,
+          severity: input.severity,
+          status: "OPEN",
+          title: input.title
+        }
+      });
+    },
+    deleteShareLink: async (tokenHash) => {
+      await prisma.shareLink.deleteMany({
+        where: {
+          tokenHash
+        }
+      });
+    },
+    findMapName: async (mapId) => {
+      const map = await prisma.map.findUnique({
+        select: {
+          name: true
+        },
+        where: {
+          id: mapId
+        }
+      });
+
+      return map?.name ?? null;
+    },
     findShareLinkWithCreator: async (tokenHash) => prisma.shareLink.findUnique({
       select: {
         createdBy: {
@@ -34,6 +67,18 @@ export function createShareDependencies(): ShareDependencies {
         tokenHash
       }
     }),
+    recordAudit: async (input) => {
+      await prisma.auditEvent.create({
+        data: {
+          action: input.action,
+          actorUserId: input.actorUserId,
+          mapId: input.mapId,
+          metadata: input.metadata as Prisma.InputJsonValue,
+          targetId: input.targetId,
+          targetType: input.targetType
+        }
+      });
+    },
     settings: createUserMapSettingsDependencies()
   };
 }

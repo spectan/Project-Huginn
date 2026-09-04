@@ -131,6 +131,78 @@ describe("MapWorkspace share mode", () => {
     expect(screen.getByRole("button", { name: "Share map" })).toBeTruthy();
   });
 
+  it("shows the Share Map title and info tooltip inside the share panel", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Share map" }));
+
+    expect(screen.getByRole("dialog", { name: "Share read-only link" }).textContent).toContain("Share Map");
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.textContent).toContain("best used with those who do not have an account or map access");
+    expect(tooltip.textContent).toContain("your settings are copied at the time of creation");
+    expect(tooltip.textContent).toContain("will not be able to change any settings");
+  });
+
+  it("clamps the expiry input to whole hours between 1 and 24", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Share map" }));
+
+    const input = screen.getByLabelText("Expires in hours");
+
+    fireEvent.change(input, { target: { value: "48" } });
+    expect(input).toHaveProperty("value", "24");
+
+    fireEvent.change(input, { target: { value: "0" } });
+    expect(input).toHaveProperty("value", "1");
+
+    fireEvent.change(input, { target: { value: "2.7" } });
+    expect(input).toHaveProperty("value", "3");
+
+    fireEvent.change(input, { target: { value: "48" } });
+    fireEvent.blur(input);
+    expect(input).toHaveProperty("value", "24");
+
+    fireEvent.change(input, { target: { value: "0" } });
+    fireEvent.blur(input);
+    expect(input).toHaveProperty("value", "1");
+  });
+
+  it("posts an integer expiresInHours even after decimal input", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      expiresAt: "2026-09-04T22:00:00.000Z",
+      url: "/share/abc123"
+    }), { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Share map" }));
+    fireEvent.change(screen.getByLabelText("Expires in hours"), { target: { value: "3.9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Generate link" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+
+    const calls = fetchMock.mock.calls as unknown as Array<[unknown, RequestInit | undefined]>;
+    const requestInit = calls[0]?.[1];
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      expiresInHours: 4,
+      layerId: "layer-terrain"
+    });
+  });
+
   it("generates a share link and copies the absolute URL", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       expiresAt: "2026-09-04T22:00:00.000Z",
@@ -150,7 +222,7 @@ describe("MapWorkspace share mode", () => {
     const dialog = screen.getByRole("dialog", { name: "Share read-only link" });
     expect(dialog).toBeTruthy();
 
-    fireEvent.change(screen.getByLabelText("Expires after in hours"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Expires in hours"), { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Generate link" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

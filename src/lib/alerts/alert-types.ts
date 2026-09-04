@@ -5,7 +5,8 @@ export type AlertRule =
   | "NEW_IP_LOGIN"
   | "OFF_HOURS_ADMIN_ACTIVITY"
   | "REGISTRATION_SPIKE"
-  | "REPEATED_AUTH_FAILURES";
+  | "REPEATED_AUTH_FAILURES"
+  | "SHARE_LINK_CREATED";
 
 export type AlertSeverity = "LOW" | "MEDIUM" | "HIGH";
 export type AlertStatus = "OPEN" | "ACKNOWLEDGED" | "RESOLVED";

@@ -1,0 +1,3 @@
+-- AlterEnum
+ALTER TYPE "AuditAction" ADD VALUE 'SHARE_LINK_CREATED';
+

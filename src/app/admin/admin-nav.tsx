@@ -9,6 +9,7 @@ const navItems = [
   { href: "/admin/accounts", label: "Accounts" },
   { href: "/admin/history", label: "History Log" },
   { href: "/admin/deleted-markers", label: "Deleted Markers" },
+  { href: "/admin/discord", label: "Discord" },
 ] as const;
 
 function getActiveHref(pathname: string): string {

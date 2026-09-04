@@ -193,6 +193,20 @@ vi.mock("@/lib/db/prisma", () => ({
   }
 }));
 
+const discordMocks = vi.hoisted(() => ({
+  dispatchDiscordNotification: vi.fn<(message: { kind: string }, deps: unknown) => Promise<{ ok: true; value: null }>>(
+    async () => ({ ok: true, value: null })
+  )
+}));
+
+vi.mock("@/lib/discord/discord-service", () => ({
+  dispatchDiscordNotification: discordMocks.dispatchDiscordNotification
+}));
+
+vi.mock("@/lib/discord/database", () => ({
+  createDiscordDependencies: vi.fn(() => ({}))
+}));
+
 import { deleteAlert, detectAlerts, triggerAlertDetection } from "./alert-service";
 
 const userActor: TestActor = { id: "user-1", isAdmin: false, username: "alice" };
@@ -999,6 +1013,65 @@ describe("detectAlerts", () => {
 
       expect(fetchMock).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("discord dispatch", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.state.alerts = [];
+    mocks.state.auditEvents = [];
+    mocks.state.failAuditFindMany = false;
+    mocks.state.usernames = new Map([[userActor.id, userActor.username]]);
+  });
+
+  it("dispatches a discord notification with the created alert", async () => {
+    addEvents(20, { action: "MARKER_DELETED" });
+
+    await detectAlerts();
+
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+
+    const [message] = discordMocks.dispatchDiscordNotification.mock.calls[0] ?? [];
+    expect(message).toMatchObject({
+      kind: "alert",
+      alert: {
+        actorUsername: "alice",
+        rule: "DELETE_SPIKE",
+        severity: "MEDIUM",
+        title: "High marker deletion rate for alice"
+      }
+    });
+  });
+
+  it("still creates alerts when the dispatch throws synchronously", async () => {
+    discordMocks.dispatchDiscordNotification.mockImplementationOnce(() => {
+      throw new Error("discord module exploded");
+    });
+    addEvents(20, { action: "MARKER_DELETED" });
+
+    const result = await detectAlerts();
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.value.created).toBe(1);
+    }
+
+    expect(mocks.state.alerts).toHaveLength(1);
+  });
+
+  it("still creates alerts when the dispatch rejects", async () => {
+    discordMocks.dispatchDiscordNotification.mockRejectedValueOnce(new Error("network down"));
+    addEvents(20, { action: "MARKER_DELETED" });
+
+    const result = await detectAlerts();
+
+    expect(result.ok).toBe(true);
+
+    if (result.ok) {
+      expect(result.value.created).toBe(1);
+    }
   });
 });
 

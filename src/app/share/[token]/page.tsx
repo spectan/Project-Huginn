@@ -27,12 +27,14 @@ export default async function SharePage({ params }: SharePageProps) {
     return <InvalidShareLink />;
   }
 
+  const map = stampShareToken(workspace.map, token);
+
   return (
     <MapWorkspace
       initialMarkers={workspace.markers}
       initialNoteCategories={workspace.noteCategories}
       initialSettings={link.settings}
-      map={stampShareToken(workspace.map, token)}
+      map={map}
       selectedLayerId={link.layerId ?? undefined}
       servers={workspace.servers}
       shareToken={token}

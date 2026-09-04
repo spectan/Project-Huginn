@@ -19,7 +19,26 @@ export async function GET(
   let watermarkUserId: string;
   let watermarkNumber: number;
 
-  if (viewer !== null) {
+  // A share token takes precedence over any session: share visitors must get
+  // the exact same response whether or not they are signed in.
+  const shareToken = searchParams.get("share");
+
+  if (shareToken !== null && shareToken.length > 0) {
+    const shareResult = await resolveShareLink(shareToken, createShareDependencies());
+
+    if (!shareResult.ok || shareResult.value.link.mapId !== mapId) {
+      return NextResponse.json({ error: SHARE_LINK_INVALID_MESSAGE }, { status: 401 });
+    }
+
+    const creator = shareResult.value.link.createdBy;
+
+    if (creator.watermarkNumber === null) {
+      return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
+    }
+
+    watermarkUserId = creator.id;
+    watermarkNumber = creator.watermarkNumber;
+  } else if (viewer !== null) {
     if (!canReadMap(viewer, mapId)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -36,26 +55,7 @@ export async function GET(
     watermarkUserId = viewer.id;
     watermarkNumber = user.watermarkNumber;
   } else {
-    const shareToken = searchParams.get("share");
-
-    if (shareToken === null || shareToken.length === 0) {
-      return NextResponse.json({ error: "Authentication is required" }, { status: 401 });
-    }
-
-    const shareResult = await resolveShareLink(shareToken, createShareDependencies());
-
-    if (!shareResult.ok || shareResult.value.link.mapId !== mapId) {
-      return NextResponse.json({ error: SHARE_LINK_INVALID_MESSAGE }, { status: 401 });
-    }
-
-    const creator = shareResult.value.link.createdBy;
-
-    if (creator.watermarkNumber === null) {
-      return NextResponse.json({ error: "User watermark number missing" }, { status: 500 });
-    }
-
-    watermarkUserId = creator.id;
-    watermarkNumber = creator.watermarkNumber;
+    return NextResponse.json({ error: "Authentication is required" }, { status: 401 });
   }
 
   let imagePath: string | null = null;

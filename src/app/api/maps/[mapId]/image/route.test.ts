@@ -39,7 +39,11 @@ const mocks = vi.hoisted(() => {
 
   const shareDependencies: ShareDependencies = {
     createShareLink: vi.fn(async () => {}),
+    createShareLinkAlert: vi.fn(async () => {}),
+    deleteShareLink: vi.fn(async () => {}),
+    findMapName: vi.fn(async () => null),
     findShareLinkWithCreator: vi.fn(async (tokenHash) => state.shareLinks.get(tokenHash) ?? null),
+    recordAudit: vi.fn(async () => {}),
     settings: {
       findMap: vi.fn(async () => null),
       findSettings: vi.fn(async () => null),
@@ -182,7 +186,7 @@ describe("GET /api/maps/[mapId]/image", () => {
     );
   });
 
-  it("prefers the session credential over a share token", async () => {
+  it("prefers the share token over the session credential", async () => {
     mocks.state.currentViewer = {
       accessLevel: "READ",
       approvalStatus: "APPROVED",
@@ -202,10 +206,11 @@ describe("GET /api/maps/[mapId]/image", () => {
     expect(response.status).toBe(200);
     expect(mocks.embedWatermark).toHaveBeenCalledWith(
       expect.any(String),
-      { mapId: "map-1", userId: "user-1", layerId: "map-1:default", watermarkNumber: 4321 },
+      { mapId: "map-1", userId: "creator-1", layerId: "map-1:default", watermarkNumber: 9876 },
       { cache: true }
     );
   });
+
 });
 
 function seedShareLink(token: string, overrides: Partial<ShareLinkRecord> = {}): void {

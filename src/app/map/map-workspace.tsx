@@ -598,19 +598,10 @@ export default function MapWorkspace({
     },
     [dialog, displayedMarkers, pathDraft]
   );
-  const visibleMarkers = useMemo(
-    () => getVisibleMarkers(
-      displayedMarkersWithEditPreview,
-      markerView,
-      viewport,
-      markerVisibility,
-      dialog?.mode === "edit" && !isPathMarker(dialog.marker) ? dialog.marker.id : null
-    ),
-    [dialog, displayedMarkersWithEditPreview, markerVisibility, markerView, viewport]
-  );
+  const visibleMarkers = displayedMarkersWithEditPreview;
   const visibleNameMarkers = useMemo(
-    () => getVisibleNameMarkers(displayedMarkersWithEditPreview, markerView, viewport, markerVisibility),
-    [displayedMarkersWithEditPreview, markerVisibility, markerView, viewport]
+    () => getVisibleNameMarkers(displayedMarkersWithEditPreview, markerVisibility),
+    [displayedMarkersWithEditPreview, markerVisibility]
   );
   const hoveredMarkers = hoveredMarker?.markers ?? [];
   const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
@@ -2035,8 +2026,7 @@ export default function MapWorkspace({
         <SearchOverlay
           onSearchChange={setSearchQuery}
           value={searchQuery}
-        >
-          {!isShareMode && map !== null ? (
+        >          {!isShareMode && map !== null ? (
             <MapSelectionControls
               layers={mapLayers}
               onLayerChange={(layerId) => {
@@ -2679,12 +2669,12 @@ function ShareControl({
     setIsCopied(false);
 
     try {
+      const payload: Record<string, unknown> = layerId.length > 0
+        ? { expiresInHours, layerId }
+        : { expiresInHours };
+
       const response = await fetch(`/api/maps/${mapId}/share`, {
-        body: JSON.stringify(
-          layerId.length > 0
-            ? { expiresInHours, layerId }
-            : { expiresInHours }
-        ),
+        body: JSON.stringify(payload),
         headers: { "content-type": "application/json" },
         method: "POST"
       });
@@ -2741,18 +2731,37 @@ function ShareControl({
       </button>
       {isOpen ? (
         <section aria-label="Share read-only link" className="map-share-panel" role="dialog">
-          <strong>Share read-only link</strong>
+          <div className="map-share-panel-title">
+            <strong>Share Map</strong>
+            <span className="map-share-info">
+              <span aria-hidden="true" className="map-share-info-icon">i</span>
+              <span className="map-share-tooltip" role="tooltip">
+                <span>
+                  This tool generates a shared link for you to share with other players, best used
+                  with those who do not have an account or map access. When you generate a link,
+                  your settings are copied at the time of creation — meaning if you have towers
+                  disabled, they also won&apos;t see towers. The users who use this link will not
+                  be able to change any settings, or go to any other map.
+                </span>
+              </span>
+            </span>
+          </div>
           <label className="map-share-expiry">
-            <span>Expires after (hours)</span>
-            <input
-              aria-label="Expires after in hours"
-              max={SHARE_LINK_MAX_HOURS}
-              min={SHARE_LINK_MIN_HOURS}
-              onChange={(event) => setExpiresInHours(clampShareLinkHours(Number(event.target.value)))}
-              step={1}
-              type="number"
-              value={expiresInHours}
-            />
+            <span>
+              Expires in
+              <input
+                aria-label="Expires in hours"
+                max={SHARE_LINK_MAX_HOURS}
+                min={SHARE_LINK_MIN_HOURS}
+                onBlur={(event) => setExpiresInHours(clampShareLinkHours(Number(event.target.value)))}
+                onChange={(event) => setExpiresInHours(clampShareLinkHours(Number(event.target.value)))}
+                step={1}
+                type="number"
+                value={expiresInHours}
+              />
+              hours
+            </span>
+            <small className="map-share-expiry-hint">max 24</small>
           </label>
           <button
             className="map-share-generate"
@@ -5277,143 +5286,10 @@ function getCenteredPosition(
   };
 }
 
-const VIEWPORT_CULL_MARKER_THRESHOLD = 500;
-const VIEWPORT_CULL_BUFFER_RATIO = 0.5;
-const VIEWPORT_CULL_MIN_TILES = 32;
-
-type ViewportBounds = {
-  maxX: number;
-  maxY: number;
-  minX: number;
-  minY: number;
-};
-
-function getViewportCullBufferTiles(view: ViewState, viewport: ViewportSize): number {
-  return Math.max(
-    VIEWPORT_CULL_MIN_TILES,
-    (viewport.width / view.zoom) * VIEWPORT_CULL_BUFFER_RATIO,
-    (viewport.height / view.zoom) * VIEWPORT_CULL_BUFFER_RATIO
-  );
-}
-
-function getViewportBounds(
-  view: ViewState,
-  viewport: ViewportSize,
-  bufferTiles: number
-): ViewportBounds {
-  const halfWidthTiles = viewport.width / view.zoom / 2;
-  const halfHeightTiles = viewport.height / view.zoom / 2;
-  const centerX = -view.x / view.zoom + halfWidthTiles;
-  const centerY = -view.y / view.zoom + halfHeightTiles;
-
-  return {
-    maxX: centerX + halfWidthTiles + bufferTiles,
-    maxY: centerY + halfHeightTiles + bufferTiles,
-    minX: centerX - halfWidthTiles - bufferTiles,
-    minY: centerY - halfHeightTiles - bufferTiles
-  };
-}
-
-function isMarkerInViewport(
-  marker: WorkspaceMarker,
-  bounds: ViewportBounds,
-  visibility: MarkerVisibility
-): boolean {
-  if (isPathMarker(marker)) {
-    for (let index = 1; index < marker.points.length; index += 1) {
-      const start = marker.points[index - 1];
-      const end = marker.points[index];
-
-      if (
-        start !== undefined &&
-        end !== undefined &&
-        segmentIntersectsViewport(start, end, bounds)
-      ) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  if (marker.type === "deed") {
-    const left = marker.x - marker.west - (visibility.deedPerimeters ? marker.perimeter : 0);
-    const right = marker.x + marker.east + (visibility.deedPerimeters ? marker.perimeter : 0);
-    const top = marker.y - marker.north - (visibility.deedPerimeters ? marker.perimeter : 0);
-    const bottom = marker.y + marker.south + (visibility.deedPerimeters ? marker.perimeter : 0);
-
-    return left <= bounds.maxX && right >= bounds.minX && top <= bounds.maxY && bottom >= bounds.minY;
-  }
-
-  return marker.x >= bounds.minX && marker.x <= bounds.maxX && marker.y >= bounds.minY && marker.y <= bounds.maxY;
-}
-
-function segmentIntersectsViewport(
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-  bounds: ViewportBounds
-): boolean {
-  if (
-    (start.x >= bounds.minX && start.x <= bounds.maxX && start.y >= bounds.minY && start.y <= bounds.maxY) ||
-    (end.x >= bounds.minX && end.x <= bounds.maxX && end.y >= bounds.minY && end.y <= bounds.maxY)
-  ) {
-    return true;
-  }
-
-  const deltaX = end.x - start.x;
-  const deltaY = end.y - start.y;
-
-  if (deltaX === 0 && deltaY === 0) {
-    return false;
-  }
-
-  const tLeft = (bounds.minX - start.x) / deltaX;
-  const tRight = (bounds.maxX - start.x) / deltaX;
-  const tTop = (bounds.minY - start.y) / deltaY;
-  const tBottom = (bounds.maxY - start.y) / deltaY;
-
-  const tEnter = Math.max(
-    Math.min(tLeft, tRight),
-    Math.min(tTop, tBottom)
-  );
-  const tExit = Math.min(
-    Math.max(tLeft, tRight),
-    Math.max(tTop, tBottom)
-  );
-
-  return tEnter <= tExit && tExit >= 0 && tEnter <= 1;
-}
-
-function getVisibleMarkers(
-  markers: WorkspaceMarker[],
-  view: ViewState,
-  viewport: ViewportSize,
-  visibility: MarkerVisibility,
-  activeRelocatableMarkerId: string | null
-): WorkspaceMarker[] {
-  if (viewport.width === 0 || viewport.height === 0 || markers.length <= VIEWPORT_CULL_MARKER_THRESHOLD) {
-    return markers;
-  }
-
-  const bounds = getViewportBounds(view, viewport, getViewportCullBufferTiles(view, viewport));
-
-  return markers.filter((marker) => (
-    marker.id === activeRelocatableMarkerId || isMarkerInViewport(marker, bounds, visibility)
-  ));
-}
-
 function getVisibleNameMarkers(
   markers: WorkspaceMarker[],
-  view: ViewState,
-  viewport: ViewportSize,
   visibility: MarkerVisibility
 ): WorkspaceMarker[] {
-  if (viewport.width === 0 || viewport.height === 0 || markers.length <= VIEWPORT_CULL_MARKER_THRESHOLD) {
-    return markers;
-  }
-
-  const bounds = getViewportBounds(view, viewport, getViewportCullBufferTiles(view, viewport));
-
   return markers.filter((marker) => {
     if (marker.type === "deed" && !visibility.deeds) {
       return false;
@@ -5423,7 +5299,7 @@ function getVisibleNameMarkers(
       return false;
     }
 
-    return isMarkerInViewport(marker, bounds, visibility);
+    return true;
   });
 }
 

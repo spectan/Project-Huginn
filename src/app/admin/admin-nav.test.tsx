@@ -19,8 +19,8 @@ describe("AdminNav", () => {
     render(React.createElement(AdminNav));
 
     expect(screen.getByText("Huginn")).toBeTruthy();
-    expect(screen.getAllByRole("link")).toHaveLength(5);
-    for (const label of ["Dashboard", "Alerts", "Accounts", "History Log", "Deleted Markers"]) {
+    expect(screen.getAllByRole("link")).toHaveLength(6);
+    for (const label of ["Dashboard", "Alerts", "Accounts", "History Log", "Deleted Markers", "Discord"]) {
       expect(screen.getByRole("link", { name: label })).toBeTruthy();
     }
     expect(screen.queryByRole("link", { name: "Watermark" })).toBeNull();

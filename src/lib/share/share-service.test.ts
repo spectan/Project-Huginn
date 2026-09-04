@@ -5,7 +5,9 @@ import {
   resolveShareLink,
   SHARE_LINK_HOURS_INVALID_MESSAGE,
   SHARE_LINK_INVALID_MESSAGE,
-  type ShareDependencies
+  type ShareDependencies,
+  type ShareLinkAlertInput,
+  type ShareLinkAuditInput
 } from "./share-service";
 import { hashShareToken } from "./share-tokens";
 
@@ -25,10 +27,13 @@ const APPROVED_ACTOR = {
   isAdmin: false,
   mapPermissions: [
     { accessLevel: "READ", isOperator: false, mapId: "map-1" }
-  ]
+  ],
+  username: "alice"
 } as const;
 
 function createTestContext() {
+  const alerts: ShareLinkAlertInput[] = [];
+  const auditEvents: ShareLinkAuditInput[] = [];
   const links: StoredShareLink[] = [];
   const settingsRows = new Map<string, unknown>();
   const creators = new Map<string, { id: string; watermarkNumber: number | null }>();
@@ -37,8 +42,26 @@ function createTestContext() {
 
   const dependencies: ShareDependencies = {
     createShareLink: vi.fn(async (input) => {
-      links.push({ ...input });
+      links.push({
+        createdByUserId: input.createdByUserId,
+        expiresAt: input.expiresAt,
+        layerId: input.layerId,
+        mapId: input.mapId,
+        settings: input.settings,
+        tokenHash: input.tokenHash
+      });
     }),
+    createShareLinkAlert: vi.fn(async (input) => {
+      alerts.push(input);
+    }),
+    deleteShareLink: vi.fn(async (tokenHash) => {
+      const index = links.findIndex((candidate) => candidate.tokenHash === tokenHash);
+
+      if (index !== -1) {
+        links.splice(index, 1);
+      }
+    }),
+    findMapName: vi.fn(async (mapId) => (mapId === "map-1" ? "Deliverance" : null)),
     findShareLinkWithCreator: vi.fn(async (tokenHash) => {
       const link = links.find((candidate) => candidate.tokenHash === tokenHash);
 
@@ -54,6 +77,9 @@ function createTestContext() {
         settings: link.settings
       };
     }),
+    recordAudit: vi.fn(async (input) => {
+      auditEvents.push(input);
+    }),
     settings: {
       findMap: vi.fn(async (mapId) => (mapId === "map-1" ? { id: mapId } : null)),
       findSettings: vi.fn(async (userId, mapId) => {
@@ -64,7 +90,7 @@ function createTestContext() {
     }
   };
 
-  return { creators, dependencies, links, settingsRows };
+  return { alerts, auditEvents, creators, dependencies, links, settingsRows };
 }
 
 describe("createShareLink", () => {
@@ -183,6 +209,108 @@ describe("createShareLink", () => {
     expect(expiresAtMs).toBeLessThanOrEqual(after + 3 * 60 * 60 * 1000);
     expect(links[0]?.expiresAt).toEqual(result.value.expiresAt);
   });
+
+  it("records a SHARE_LINK_CREATED audit event without coordinates", async () => {
+    const { auditEvents, dependencies } = createTestContext();
+
+    const result = await createShareLink(
+      {
+        actor: APPROVED_ACTOR,
+        expiresInHours: 4,
+        layerId: "layer-1",
+        mapId: "map-1"
+      },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(auditEvents).toEqual([
+      {
+        action: "SHARE_LINK_CREATED",
+        actorUserId: "user-1",
+        mapId: "map-1",
+        metadata: {
+          expiresInHours: 4,
+          layerId: "layer-1"
+        },
+        targetId: "map-1",
+        targetType: "MAP"
+      }
+    ]);
+  });
+
+  it("creates a LOW SHARE_LINK_CREATED alert", async () => {
+    const { alerts, dependencies } = createTestContext();
+
+    const result = await createShareLink(
+      {
+        actor: APPROVED_ACTOR,
+        expiresInHours: 4,
+        mapId: "map-1"
+      },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(alerts).toEqual([
+      {
+        actorUserId: "user-1",
+        description: "alice created a read-only share link for Deliverance that expires in 4 hours",
+        mapId: "map-1",
+        metadata: {
+          expiresInHours: 4
+        },
+        rule: "SHARE_LINK_CREATED",
+        severity: "LOW",
+        title: "Share link created by alice"
+      }
+    ]);
+  });
+
+  it("falls back to the map id in the alert when the map name is unavailable", async () => {
+    const { alerts, dependencies } = createTestContext();
+    dependencies.findMapName = vi.fn(async () => null);
+
+    const result = await createShareLink(
+      { actor: APPROVED_ACTOR, expiresInHours: 2, mapId: "map-1" },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(alerts[0]?.description).toBe(
+      "alice created a read-only share link for map-1 that expires in 2 hours"
+    );
+  });
+
+  it("still returns the link when the audit write fails", async () => {
+    const { dependencies, links } = createTestContext();
+    dependencies.recordAudit = vi.fn(async () => {
+      throw new Error("audit unavailable");
+    });
+
+    const result = await createShareLink(
+      { actor: APPROVED_ACTOR, expiresInHours: 1, mapId: "map-1" },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(links).toHaveLength(1);
+  });
+
+  it("still returns the link when the alert write fails", async () => {
+    const { dependencies, links } = createTestContext();
+    dependencies.createShareLinkAlert = vi.fn(async () => {
+      throw new Error("alert unavailable");
+    });
+
+    const result = await createShareLink(
+      { actor: APPROVED_ACTOR, expiresInHours: 1, mapId: "map-1" },
+      dependencies
+    );
+
+    expect(result.ok).toBe(true);
+    expect(links).toHaveLength(1);
+  });
 });
 
 describe("resolveShareLink", () => {
@@ -194,7 +322,7 @@ describe("resolveShareLink", () => {
     expect(result).toEqual({ ok: false, error: SHARE_LINK_INVALID_MESSAGE });
   });
 
-  it("rejects expired links", async () => {
+  it("rejects expired links and deletes their rows", async () => {
     const { dependencies, links } = createTestContext();
     links.push({
       createdByUserId: "user-1",
@@ -208,6 +336,17 @@ describe("resolveShareLink", () => {
     const result = await resolveShareLink("expired-token", dependencies);
 
     expect(result).toEqual({ ok: false, error: SHARE_LINK_INVALID_MESSAGE });
+    expect(dependencies.deleteShareLink).toHaveBeenCalledWith(hashShareToken("expired-token"));
+    expect(links).toHaveLength(0);
+  });
+
+  it("does not delete rows for unknown tokens", async () => {
+    const { dependencies } = createTestContext();
+
+    const result = await resolveShareLink("not-a-real-token", dependencies);
+
+    expect(result).toEqual({ ok: false, error: SHARE_LINK_INVALID_MESSAGE });
+    expect(dependencies.deleteShareLink).not.toHaveBeenCalled();
   });
 
   it("resolves a valid link with normalized settings and creator", async () => {

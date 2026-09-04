@@ -134,10 +134,17 @@ describe("SharePage", () => {
     expect(props?.selectedLayerId).toBe("layer-topographical");
     expect(props?.servers).toEqual([{ id: "map-1", name: "Celebration" }]);
 
-    const map = props?.map as { imageSrc: string; layers: Array<{ imageSrc: string }> };
+    const map = props?.map as {
+      heightPx: number;
+      imageSrc: string;
+      layers: Array<{ heightPx: number; imageSrc: string; widthPx: number }>;
+      widthPx: number;
+    };
 
     expect(map.imageSrc).toContain(`/api/maps/${activeMap.id}/image?v=`);
     expect(map.imageSrc.endsWith("&share=share-token")).toBe(true);
+    expect(map.widthPx).toBe(activeMap.widthPx);
+    expect(map.heightPx).toBe(activeMap.heightPx);
     expect(map.layers).toHaveLength(2);
     expect(map.layers.every((layer) => layer.imageSrc.endsWith("&share=share-token"))).toBe(true);
 

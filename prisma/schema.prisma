@@ -36,6 +36,7 @@ enum AuditAction {
   MARKER_RESTORED
   MARKER_CLEANED_UP
   MAP_DATA_ACCESSED
+  SHARE_LINK_CREATED
 }
 
 enum AuditTargetType {
@@ -505,6 +506,21 @@ model Alert {
   @@index([actorUserId])
   @@index([rule, createdAt])
   @@map("alerts")
+}
+
+model DiscordConfig {
+  id                  String   @id @default("default")
+  webhookUrl          String   @default("")
+  enabled             Boolean  @default(false)
+  alertSeverityHigh   Boolean  @default(true)
+  alertSeverityMedium Boolean  @default(false)
+  alertSeverityLow    Boolean  @default(false)
+  notifyRegistrations Boolean  @default(false)
+  notifyApprovals     Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@map("discord_config")
 }
 
 model Event {

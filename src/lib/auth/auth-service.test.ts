@@ -4,8 +4,20 @@ const mocks = vi.hoisted(() => ({
   triggerAlertDetection: vi.fn()
 }));
 
+const discordMocks = vi.hoisted(() => ({
+  dispatchDiscordNotification: vi.fn(async () => ({ ok: true as const, value: null }))
+}));
+
 vi.mock("@/lib/alerts/alert-service", () => ({
   triggerAlertDetection: mocks.triggerAlertDetection
+}));
+
+vi.mock("@/lib/discord/discord-service", () => ({
+  dispatchDiscordNotification: discordMocks.dispatchDiscordNotification
+}));
+
+vi.mock("@/lib/discord/database", () => ({
+  createDiscordDependencies: vi.fn(() => ({}))
 }));
 
 import {
@@ -20,14 +32,16 @@ const adminActor = {
   accessLevel: "WRITE",
   approvalStatus: "APPROVED",
   id: "admin-id",
-  isAdmin: true
+  isAdmin: true,
+  username: "root"
 } as const;
 
 const nonAdminActor = {
   accessLevel: "WRITE",
   approvalStatus: "APPROVED",
   id: "writer-id",
-  isAdmin: false
+  isAdmin: false,
+  username: "penny"
 } as const;
 
 type TestAuthServiceDependencies = AuthServiceDependencies & {
@@ -445,6 +459,109 @@ describe("auth service alert detection triggers", () => {
     const result = await loginUser({
       password: "correct horse battery staple",
       username: "Mako"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("auth service discord dispatch", () => {
+  let deps: TestAuthServiceDependencies;
+
+  beforeEach(() => {
+    discordMocks.dispatchDiscordNotification.mockClear();
+    deps = createDependencies();
+  });
+
+  it("dispatches a registration notification after a successful registration", async () => {
+    const result = await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      { kind: "registration", username: "Mako" },
+      expect.anything()
+    );
+  });
+
+  it("does not dispatch a registration notification for duplicate usernames", async () => {
+    await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+    discordMocks.dispatchDiscordNotification.mockClear();
+
+    const result = await registerUser({
+      password: "correct horse battery staple",
+      username: "mako"
+    }, deps);
+
+    expect(result.ok).toBe(false);
+    expect(discordMocks.dispatchDiscordNotification).not.toHaveBeenCalled();
+  });
+
+  it("dispatches an approval notification with the approved user and acting admin", async () => {
+    await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+    discordMocks.dispatchDiscordNotification.mockClear();
+
+    const result = await approveUser({
+      accessLevel: "READ",
+      actor: adminActor,
+      userId: "user-1"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledWith(
+      { kind: "approval", username: "Mako", actorUsername: "root" },
+      expect.anything()
+    );
+  });
+
+  it("does not dispatch an approval notification for non-admin actors", async () => {
+    const result = await approveUser({
+      accessLevel: "READ",
+      actor: nonAdminActor,
+      userId: "user-1"
+    }, deps);
+
+    expect(result.ok).toBe(false);
+    expect(discordMocks.dispatchDiscordNotification).not.toHaveBeenCalled();
+  });
+
+  it("does not let a synchronous dispatch failure break registration", async () => {
+    discordMocks.dispatchDiscordNotification.mockImplementationOnce(() => {
+      throw new Error("discord module exploded");
+    });
+
+    const result = await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("does not let a synchronous dispatch failure break approval", async () => {
+    await registerUser({
+      password: "correct horse battery staple",
+      username: "Mako"
+    }, deps);
+    discordMocks.dispatchDiscordNotification.mockClear();
+    discordMocks.dispatchDiscordNotification.mockImplementationOnce(() => {
+      throw new Error("discord module exploded");
+    });
+
+    const result = await approveUser({
+      accessLevel: "READ",
+      actor: adminActor,
+      userId: "user-1"
     }, deps);
 
     expect(result.ok).toBe(true);

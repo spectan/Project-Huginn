@@ -1,4 +1,9 @@
 import { triggerAlertDetection } from "@/lib/alerts/alert-service";
+import { createDiscordDependencies } from "@/lib/discord/database";
+import {
+  dispatchDiscordNotification,
+  type DiscordNotificationMessage
+} from "@/lib/discord/discord-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { canAdminister, type AccessLevel, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -92,6 +97,7 @@ export async function registerUser(
     targetType: "USER"
   });
   triggerAlertsSafely();
+  dispatchDiscordSafely({ kind: "registration", username: user.username });
 
   return ok({
     sessionExpiresAt: session.expiresAt,
@@ -145,7 +151,7 @@ export async function loginUser(
 export async function approveUser(
   input: {
     accessLevel: AccessLevel;
-    actor: UserAccess & { id: string };
+    actor: UserAccess & { id: string; username: string };
     userId: string;
   },
   dependencies: AuthServiceDependencies
@@ -187,6 +193,11 @@ export async function approveUser(
     targetType: "USER"
   });
   triggerAlertsSafely();
+  dispatchDiscordSafely({
+    kind: "approval",
+    username: user.username,
+    actorUsername: input.actor.username
+  });
 
   return ok(toViewer(user));
 }
@@ -302,5 +313,13 @@ function triggerAlertsSafely(): void {
     triggerAlertDetection();
   } catch {
     // Alert detection is fire-and-forget; failures must not block the request.
+  }
+}
+
+function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
+  try {
+    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
+  } catch {
+    // Discord notifications are fire-and-forget; failures must not block the request.
   }
 }

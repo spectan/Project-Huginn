@@ -1510,6 +1510,58 @@ body {
   right: 0;
 }
 
+.map-share-panel-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.map-share-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.85);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.map-share-tooltip {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 8px);
+  right: 0;
+  display: grid;
+  gap: 4px;
+  width: 220px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.95);
+  color: #e5e7eb;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.42);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.map-share-info:hover .map-share-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
 .map-event-feed-button-icon {
   position: relative;
   display: block;
@@ -1684,9 +1736,23 @@ body {
 
 .map-share-expiry {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 64px;
+  gap: 2px;
+}
+
+.map-share-expiry > span {
+  display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.map-share-expiry input {
+  width: 56px;
+  text-align: center;
+}
+
+.map-share-expiry-hint {
+  color: #94a3b8;
+  font-size: 11px;
 }
 
 .map-share-expiry input,
