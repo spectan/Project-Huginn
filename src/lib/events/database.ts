@@ -56,10 +56,10 @@ export async function findLatestUniqueSlain(
     },
     where: {
       mapId,
-      message: {
-        contains: "slain",
-        mode: "insensitive"
-      }
+      OR: [
+        { message: { contains: "slain", mode: "insensitive" } },
+        { message: { contains: "slayed", mode: "insensitive" } }
+      ]
     }
   });
 }

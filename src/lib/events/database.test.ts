@@ -9,12 +9,15 @@ const mocks = vi.hoisted(() => {
   const eventFindFirst = vi.fn(async (args: {
     orderBy: { timestamp: "asc" | "desc" };
     select: { message: true; timestamp: true };
-    where: { mapId: string; message: { contains: string; mode: "insensitive" } };
+    where: {
+      mapId: string;
+      OR: Array<{ message: { contains: string; mode: "insensitive" } }>;
+    };
   }) => {
-    const needle = args.where.message.contains.toLowerCase();
+    const needles = args.where.OR.map((clause) => clause.message.contains.toLowerCase());
     const matches = state.events
       .filter((event) => event.mapId === args.where.mapId)
-      .filter((event) => event.message.toLowerCase().includes(needle))
+      .filter((event) => needles.some((needle) => event.message.toLowerCase().includes(needle)))
       .sort((a, b) => (args.orderBy.timestamp === "desc"
         ? b.timestamp - a.timestamp
         : a.timestamp - b.timestamp));
@@ -71,9 +74,26 @@ describe("findLatestUniqueSlain", () => {
     expect(mocks.eventFindFirst).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         mapId: "map-1",
-        message: { contains: "slain", mode: "insensitive" }
+        OR: [
+          { message: { contains: "slain", mode: "insensitive" } },
+          { message: { contains: "slayed", mode: "insensitive" } }
+        ]
       })
     }));
+  });
+
+  it("matches slayed wording used by real unique kill events", async () => {
+    mocks.state.events.push(
+      { id: "event-1", mapId: "map-1", message: "Blazecraze, Alyeska slayed The venerable red dragon", timestamp: 1783100000 },
+      { id: "event-2", mapId: "map-1", message: "Mako slain the Kyklops", timestamp: 1783000000 }
+    );
+
+    const result = await findLatestUniqueSlain("map-1");
+
+    expect(result).toEqual({
+      message: "Blazecraze, Alyeska slayed The venerable red dragon",
+      timestamp: 1783100000
+    });
   });
 
   it("ignores events without slain in the message", async () => {
