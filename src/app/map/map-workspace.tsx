@@ -92,6 +92,8 @@ const MAP_TIP_INTERVAL_MS = 15000;
 const SHARE_LINK_MIN_HOURS = 1;
 const SHARE_LINK_MAX_HOURS = 24;
 const SHARE_LINK_DEFAULT_HOURS = 24;
+const UNIQUE_RESPAWN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const UNIQUE_ALERT_DISMISSED_STORAGE_KEY = "huginn:unique-alert-dismissed";
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
 const TILE_SIZE_METERS = 4;
@@ -315,6 +317,7 @@ type MapWorkspaceProps = {
   initialMarkers: WorkspaceMarker[];
   initialNoteCategories?: readonly NoteCategory[];
   initialSettings?: UserMapSettings;
+  lastUniqueSlainAt?: string | null;
   map: WorkspaceMap | null;
   selectedLayerId?: string;
   servers?: readonly WorkspaceServer[];
@@ -327,6 +330,7 @@ export default function MapWorkspace({
   initialMarkers,
   initialNoteCategories = DEFAULT_NOTE_CATEGORIES,
   initialSettings = DEFAULT_USER_MAP_SETTINGS,
+  lastUniqueSlainAt = null,
   map,
   selectedLayerId,
   servers = [],
@@ -616,6 +620,23 @@ export default function MapWorkspace({
     mapPermissions: viewer.mapPermissions
   }, map.id);
   const isShareMode = shareToken !== undefined;
+  const uniqueAlertMapId = map?.id ?? null;
+  // Read via useSyncExternalStore: the server snapshot is "not loaded" so the banner is decided
+  // only after mount (localStorage is unavailable during SSR) without a hydration mismatch.
+  const uniqueAlertSnapshot = useUniqueAlertSnapshot(uniqueAlertMapId);
+  const slainAtMs = lastUniqueSlainAt === null ? Number.NaN : Date.parse(lastUniqueSlainAt);
+  const isUniquePotentiallyAlive = lastUniqueSlainAt === null || (
+    !Number.isNaN(slainAtMs) && uniqueAlertSnapshot.now - slainAtMs >= UNIQUE_RESPAWN_WINDOW_MS
+  );
+  const isUniqueAlertDismissed = uniqueAlertSnapshot.dismissedCycle === lastUniqueSlainAt;
+  const showUniqueAlert = canViewMap && !isShareMode && uniqueAlertSnapshot.loaded &&
+    isUniquePotentiallyAlive && !isUniqueAlertDismissed;
+  const dismissUniqueAlert = useCallback(() => {
+    if (uniqueAlertMapId === null) {
+      return;
+    }
+    dismissUniqueAlertCycle(uniqueAlertMapId, lastUniqueSlainAt);
+  }, [lastUniqueSlainAt, uniqueAlertMapId]);
   const canWriteMapMarkers = map !== null && viewer !== null && canWriteMarkers({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
@@ -2048,6 +2069,13 @@ export default function MapWorkspace({
           ) : null}
         </SearchOverlay>
       ) : null}
+      {showUniqueAlert ? (
+        <UniqueAliveAlert
+          lastUniqueSlainAt={lastUniqueSlainAt}
+          now={uniqueAlertSnapshot.now}
+          onDismiss={dismissUniqueAlert}
+        />
+      ) : null}
       {contextMenu !== null ? (
         contextMenu.mode === "map" ? (
           <MapContextMenu
@@ -2355,6 +2383,136 @@ function AddMarkerSubmenu({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function readDismissedUniqueAlertCycle(mapId: string): string | null | undefined {
+  try {
+    const raw = window.localStorage.getItem(UNIQUE_ALERT_DISMISSED_STORAGE_KEY);
+
+    if (raw === null) {
+      return undefined;
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+
+    if (typeof parsed !== "object" || parsed === null) {
+      return undefined;
+    }
+
+    const cycle = (parsed as Record<string, unknown>)[mapId];
+    return typeof cycle === "string" || cycle === null ? cycle : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeDismissedUniqueAlertCycle(mapId: string, cycle: string | null): void {
+  try {
+    const raw = window.localStorage.getItem(UNIQUE_ALERT_DISMISSED_STORAGE_KEY);
+    const parsed: unknown = raw === null ? null : JSON.parse(raw);
+    const store = typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : {};
+    store[mapId] = cycle;
+    window.localStorage.setItem(UNIQUE_ALERT_DISMISSED_STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // localStorage may be unavailable; the dismissal simply will not persist.
+  }
+}
+
+type UniqueAlertSnapshot = {
+  dismissedCycle: string | null | undefined;
+  loaded: boolean;
+  now: number;
+};
+
+const SERVER_UNIQUE_ALERT_SNAPSHOT: UniqueAlertSnapshot = {
+  dismissedCycle: undefined,
+  loaded: false,
+  now: 0
+};
+
+const uniqueAlertSnapshots = new Map<string, UniqueAlertSnapshot>();
+const uniqueAlertListeners = new Set<() => void>();
+
+function subscribeToUniqueAlertSnapshot(listener: () => void): () => void {
+  uniqueAlertListeners.add(listener);
+
+  return () => {
+    uniqueAlertListeners.delete(listener);
+  };
+}
+
+function getUniqueAlertSnapshot(mapId: string | null): UniqueAlertSnapshot {
+  if (mapId === null || typeof window === "undefined") {
+    return SERVER_UNIQUE_ALERT_SNAPSHOT;
+  }
+
+  const cached = uniqueAlertSnapshots.get(mapId);
+
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  const snapshot: UniqueAlertSnapshot = {
+    dismissedCycle: readDismissedUniqueAlertCycle(mapId),
+    loaded: true,
+    now: Date.now()
+  };
+  uniqueAlertSnapshots.set(mapId, snapshot);
+  return snapshot;
+}
+
+function getServerUniqueAlertSnapshot(): UniqueAlertSnapshot {
+  return SERVER_UNIQUE_ALERT_SNAPSHOT;
+}
+
+function dismissUniqueAlertCycle(mapId: string, cycle: string | null): void {
+  writeDismissedUniqueAlertCycle(mapId, cycle);
+  uniqueAlertSnapshots.delete(mapId);
+
+  for (const listener of uniqueAlertListeners) {
+    listener();
+  }
+}
+
+function useUniqueAlertSnapshot(mapId: string | null): UniqueAlertSnapshot {
+  return useSyncExternalStore(
+    subscribeToUniqueAlertSnapshot,
+    () => getUniqueAlertSnapshot(mapId),
+    getServerUniqueAlertSnapshot
+  );
+}
+
+function getUniqueAliveAlertMessage(lastUniqueSlainAt: string | null, now: number): string {
+  if (lastUniqueSlainAt === null) {
+    return "Potentially a unique alive — no kill recorded";
+  }
+
+  const days = Math.floor((now - Date.parse(lastUniqueSlainAt)) / (24 * 60 * 60 * 1000));
+  return `Potentially a unique alive — last slain ${days} ${days === 1 ? "day" : "days"} ago`;
+}
+
+function UniqueAliveAlert({
+  lastUniqueSlainAt,
+  now,
+  onDismiss
+}: {
+  lastUniqueSlainAt: string | null;
+  now: number;
+  onDismiss(): void;
+}) {
+  return (
+    <div className="map-unique-alert" role="status">
+      <span className="map-unique-alert-message">{getUniqueAliveAlertMessage(lastUniqueSlainAt, now)}</span>
+      <button
+        aria-label="Dismiss unique alert"
+        className="map-unique-alert-dismiss"
+        onClick={onDismiss}
+        type="button"
+      >
+        ×
+      </button>
     </div>
   );
 }

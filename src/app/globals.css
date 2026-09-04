@@ -1120,6 +1120,47 @@ body {
   color: #cbd5e1;
 }
 
+.map-unique-alert {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  padding: 6px 8px 6px 12px;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e5e7eb;
+  font-size: 13px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(8px);
+}
+
+.map-unique-alert-dismiss {
+  border: none;
+  border-radius: 6px;
+  padding: 0 6px;
+  background: transparent;
+  color: #cbd5e1;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.map-unique-alert-dismiss:hover {
+  color: #ffffff;
+}
+
+.map-unique-alert-dismiss:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
 .map-selection-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

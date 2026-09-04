@@ -45,6 +45,25 @@ export async function upsertEvents(mapId: string, events: Array<{ message: strin
   ]);
 }
 
+export async function findLatestUniqueSlain(
+  mapId: string
+): Promise<{ message: string; timestamp: number } | null> {
+  return prisma.event.findFirst({
+    orderBy: { timestamp: "desc" },
+    select: {
+      message: true,
+      timestamp: true
+    },
+    where: {
+      mapId,
+      message: {
+        contains: "slain",
+        mode: "insensitive"
+      }
+    }
+  });
+}
+
 export async function listEventsForMap(mapId: string, limit = 30) {
   return prisma.event.findMany({
     orderBy: { timestamp: "desc" },

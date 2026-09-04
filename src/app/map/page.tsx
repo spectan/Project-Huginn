@@ -1,5 +1,6 @@
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
+import { findLatestUniqueSlain } from "@/lib/events/database";
 import { createUserMapSettingsDependencies, findUserFavoriteServerId } from "@/lib/map-settings/database";
 import { DEFAULT_USER_MAP_SETTINGS } from "@/lib/map-settings/map-settings";
 import { getUserMapSettings } from "@/lib/map-settings/map-settings-service";
@@ -31,6 +32,7 @@ export default async function MapPage({ searchParams }: MapPageProps) {
       initialMarkers={workspace?.markers ?? []}
       initialNoteCategories={workspace?.noteCategories ?? []}
       initialSettings={workspace?.settings}
+      lastUniqueSlainAt={workspace?.lastUniqueSlainAt ?? null}
       map={workspace?.map ?? null}
       selectedLayerId={params?.layer}
       servers={workspace?.servers ?? []}
@@ -69,9 +71,10 @@ export async function getWorkspaceData(
     return null;
   }
 
-  const [noteCategories, mapSettings] = await Promise.all([
+  const [noteCategories, mapSettings, latestUniqueSlain] = await Promise.all([
     listNoteCategories(map.id),
-    getReadableUserMapSettings(viewer, map.id)
+    getReadableUserMapSettings(viewer, map.id),
+    findLatestUniqueSlain(map.id)
   ]);
   const settings = {
     ...mapSettings,
@@ -82,6 +85,9 @@ export async function getWorkspaceData(
 
   return {
     ...result.value,
+    lastUniqueSlainAt: latestUniqueSlain === null
+      ? null
+      : new Date(latestUniqueSlain.timestamp * 1000).toISOString(),
     map: watermarkedMap,
     noteCategories,
     servers: readableServers,

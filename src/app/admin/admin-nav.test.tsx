@@ -18,8 +18,9 @@ describe("AdminNav", () => {
   it("renders all admin sections in alphabetical order", () => {
     render(React.createElement(AdminNav));
 
-    expect(screen.getByText("Huginn")).toBeTruthy();
-    const links = screen.getAllByRole("link");
+    const brandLink = screen.getByRole("link", { name: "Huginn" });
+    expect(brandLink.getAttribute("href")).toBe("/admin");
+    const links = screen.getAllByRole("link").filter((link) => link !== brandLink);
     expect(links.map((link) => link.textContent)).toEqual([
       "Accounts",
       "Dashboard",
