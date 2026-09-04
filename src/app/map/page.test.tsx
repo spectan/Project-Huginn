@@ -223,7 +223,7 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.2.1")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.3.0")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
