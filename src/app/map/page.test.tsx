@@ -3806,6 +3806,13 @@ describe("MapPage", () => {
     expect(layerControls.getByRole("slider", { name: "Rifts opacity" })).toHaveProperty("value", "12");
     expect(within(tileHighlightPanel).getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "87");
 
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    fireEvent.click(within(settings).getByRole("button", { name: "Default" }));
+    expect(window.confirm).toHaveBeenCalled();
+    expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", false);
+    expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#d946ef");
+
+    confirmSpy.mockReturnValue(true);
     fireEvent.click(within(settings).getByRole("button", { name: "Default" }));
 
     expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", true);
@@ -3825,6 +3832,7 @@ describe("MapPage", () => {
     expect(within(tileHighlightPanel).getByRole("combobox", { name: "Tile Highlighting" })).toHaveProperty("value", "");
     expect(tileHighlightPanel.className).not.toContain("is-positioned");
     expect(roadwayPanel.className).not.toContain("is-positioned");
+    confirmSpy.mockRestore();
   });
 
   it("saves user map settings when settings-only map controls change", async () => {

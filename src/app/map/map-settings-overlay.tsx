@@ -468,7 +468,15 @@ export function MapSettingsOverlay({
             </fieldset>
           </div>
           <div className="map-settings-actions">
-            <button className="map-settings-default" onClick={onResetSettings} type="button">
+            <button
+              className="map-settings-default"
+              onClick={() => {
+                if (window.confirm("Revert all map settings to their defaults?")) {
+                  onResetSettings();
+                }
+              }}
+              type="button"
+            >
               Default
             </button>
           </div>
