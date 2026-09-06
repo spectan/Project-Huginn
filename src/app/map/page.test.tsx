@@ -3252,6 +3252,27 @@ describe("MapPage", () => {
     expect(screen.getByRole("button", { name: "Note General - Scout note at 700, 800" }).style.opacity).toBe("1");
   });
 
+  it("closes the settings overlay when a marker dialog opens", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+
+    fireEvent.contextMenu(stage, { clientX: 125, clientY: 140 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tower" }));
+
+    expect(screen.getByRole("dialog", { name: "Add tower" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+  });
+
   it("can hide planned towers without hiding built towers", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [
@@ -3451,8 +3472,7 @@ describe("MapPage", () => {
       map: activeMap,
       viewer: approvedViewer
     }));
-    const confirmMock = vi.fn(() => true);
-    vi.stubGlobal("confirm", confirmMock);
+    const confirmSpy = vi.spyOn(window, "confirm");
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const categoryControls = expandNoteCategories();
@@ -3461,7 +3481,15 @@ describe("MapPage", () => {
     expect(deleteButton.textContent).toBe("×");
     fireEvent.click(deleteButton);
 
-    expect(confirmMock).toHaveBeenCalledWith("Delete the Landmarks note category? Notes in this category will move to General.");
+    const deleteDialog = screen.getByRole("alertdialog", { name: "Delete note category" });
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(within(deleteDialog).getByText(
+      "Delete the Landmarks note category? Notes in this category will move to General."
+    )).toBeTruthy();
+
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Delete" }));
+
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/maps/map-1/note-categories/category-landmarks",
       { method: "DELETE" }
@@ -3471,9 +3499,7 @@ describe("MapPage", () => {
 
   it("keeps note categories collapsed by default and cancels category deletion when not confirmed", () => {
     const fetchMock = vi.fn();
-    const confirmMock = vi.fn(() => false);
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
-    vi.stubGlobal("confirm", confirmMock);
 
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
@@ -3495,8 +3521,15 @@ describe("MapPage", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     fireEvent.click(categoryControls.getByRole("button", { name: "Delete Landmarks category" }));
 
-    expect(confirmMock).toHaveBeenCalledWith("Delete the Landmarks note category? Notes in this category will move to General.");
-    expect(fetchMock).not.toHaveBeenCalled();
+    const deleteDialog = screen.getByRole("alertdialog", { name: "Delete note category" });
+
+    fireEvent.click(within(deleteDialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/maps/map-1/note-categories/category-landmarks",
+      { method: "DELETE" }
+    );
   });
 
   it("prevents read-only users from changing note categories in settings", () => {
@@ -3806,14 +3839,22 @@ describe("MapPage", () => {
     expect(layerControls.getByRole("slider", { name: "Rifts opacity" })).toHaveProperty("value", "12");
     expect(within(tileHighlightPanel).getByRole("slider", { name: "Tile highlight opacity" })).toHaveProperty("value", "87");
 
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const confirmSpy = vi.spyOn(window, "confirm");
     fireEvent.click(within(settings).getByRole("button", { name: "Default" }));
-    expect(window.confirm).toHaveBeenCalled();
+
+    const revertDialog = screen.getByRole("alertdialog", { name: "Revert to defaults" });
+
+    expect(confirmSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(within(revertDialog).getByRole("button", { name: "Cancel" }));
+
     expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", false);
     expect(layerControls.getByLabelText("Bridges color")).toHaveProperty("value", "#d946ef");
 
-    confirmSpy.mockReturnValue(true);
     fireEvent.click(within(settings).getByRole("button", { name: "Default" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog", { name: "Revert to defaults" })).getByRole("button", { name: "Revert" })
+    );
 
     expect(layerControls.getByRole("checkbox", { name: "Bridges" })).toHaveProperty("checked", true);
     expect(layerControls.getByRole("checkbox", { name: "Camps" })).toHaveProperty("checked", true);

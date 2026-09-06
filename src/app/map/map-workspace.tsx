@@ -47,6 +47,7 @@ import {
 import {
   DEFAULT_USER_MAP_SETTINGS,
   MIN_EVENT_FEED_PANEL_SIZE,
+  parseUserMapSettings,
   type EventFeedPanelSize,
   type NoteCategoryColors,
   type NoteCategoryMarkerShapes,
@@ -696,6 +697,23 @@ export default function MapWorkspace({
     setTileHighlight(DEFAULT_USER_MAP_SETTINGS.tileHighlight);
     setTileHighlightPanelPosition(DEFAULT_USER_MAP_SETTINGS.tileHighlightPanelPosition);
   }, []);
+  const loadUserMapSettings = useCallback((settings: UserMapSettings) => {
+    const parsed = parseUserMapSettings(settings);
+    setAnnotations(parsed.annotations);
+    setEventFeedPanelSize(parsed.eventFeedPanelSize);
+    setFavoriteServerId(parsed.favoriteServerId);
+    setMarkerColors(parsed.markerColors);
+    setMarkerOpacities(parsed.markerOpacities);
+    setMarkerVisibility(parsed.markerVisibility);
+    setNoteCategoryColors(parsed.noteCategoryColors);
+    setNoteCategoryMarkerShapes(parsed.noteCategoryMarkerShapes);
+    setNoteCategoryPipSizes(parsed.noteCategoryPipSizes);
+    setRoadwayEditPanelPosition(parsed.roadwayEditPanelPosition);
+    setRoutePlannerSpeedKmh(parsed.routePlannerSpeedKmh);
+    setSearchLinesEnabled(parsed.searchLinesEnabled);
+    setTileHighlight(parsed.tileHighlight);
+    setTileHighlightPanelPosition(parsed.tileHighlightPanelPosition);
+  }, []);
   useLayoutEffect(() => {
     pathDraftRef.current = pathDraft;
   }, [pathDraft]);
@@ -867,6 +885,12 @@ export default function MapWorkspace({
 
     return true;
   }, [clearNoteCategoryPresentation, map, noteCategories, updateMarkers]);
+  const openDialog = useCallback((next: DialogState) => {
+    // Marker dialogs overlap the top-panel overlays; close them so only one
+    // panel is ever open at a time.
+    setTopPanel(null);
+    setDialog(next);
+  }, []);
   const startCreateMarker = useCallback((markerType: MarkerType, coordinate: MapCoordinate, creationView: ViewState = view) => {
     setFormError(null);
     setContextMenu(null);
@@ -885,13 +909,13 @@ export default function MapWorkspace({
       return;
     }
 
-    setDialog({
+    openDialog({
       markerType,
       mode: "create",
       x: coordinate.x,
       y: coordinate.y
     });
-  }, [view]);
+  }, [openDialog, view]);
   const startEditMarker = useCallback((marker: WorkspaceMarker) => {
     setFormError(null);
     setContextMenu(null);
@@ -910,8 +934,8 @@ export default function MapWorkspace({
       return;
     }
 
-    setDialog({ marker, mode: "edit" });
-  }, []);
+    openDialog({ marker, mode: "edit" });
+  }, [openDialog]);
   const handlePathPointPointerDown = useCallback((pointIndex: number, event: React.PointerEvent<HTMLButtonElement>) => {
     if (!isPrimaryPointerButton(event.button)) {
       return;
@@ -1652,7 +1676,7 @@ export default function MapWorkspace({
       const quickDeed = getQuickDeedDialogState(drag.start, drag.end);
       selectCoordinate(quickDeed.coordinate);
       setFormError(null);
-      setDialog({
+      openDialog({
         initialDeedDimensions: quickDeed.dimensions,
         markerType: "deed",
         mode: "create",
@@ -1670,7 +1694,7 @@ export default function MapWorkspace({
       window.removeEventListener("pointerup", endQuickDeedDrag);
       window.removeEventListener("pointercancel", endQuickDeedDrag);
     };
-  }, [selectCoordinate, visualMap]);
+  }, [openDialog, selectCoordinate, visualMap]);
 
   useEffect(() => {
     function handlePathPointDrag(event: PointerEvent) {
@@ -2169,9 +2193,10 @@ export default function MapWorkspace({
           servers={availableServers}
           viewer={viewer}
         />
-        {canViewMap ? (
+        {canViewMap && map !== null ? (
           <MapSettingsOverlay
             isOpen={topPanel === "settings"}
+            mapId={map.id}
             markerColors={markerColors}
             markerOpacities={markerOpacities}
             markerVisibility={markerVisibility}
@@ -2184,6 +2209,7 @@ export default function MapWorkspace({
             tileHighlight={tileHighlight}
             viewerCanWrite={canWriteMapMarkers}
             viewerIsAdmin={viewer?.isAdmin ?? false}
+            onLoadSettings={loadUserMapSettings}
             onMarkerColorsChange={setMarkerColors}
             onMarkerOpacitiesChange={setMarkerOpacities}
             onMarkerVisibilityChange={setMarkerVisibility}

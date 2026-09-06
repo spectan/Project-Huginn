@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
   DEFAULT_NOTE_CATEGORY_PIP_SIZE,
@@ -8,10 +8,12 @@ import {
   type NoteCategoryMarkerShape
 } from "@/lib/domain/note-categories";
 import { TILE_HIGHLIGHT_GROUPS } from "@/lib/domain/tile-highlighting";
-import type {
-  NoteCategoryColors,
-  NoteCategoryMarkerShapes,
-  NoteCategoryPipSizes
+import {
+  parseUserMapSettings,
+  type NoteCategoryColors,
+  type NoteCategoryMarkerShapes,
+  type NoteCategoryPipSizes,
+  type UserMapSettings
 } from "@/lib/map-settings/map-settings";
 import type {
   MarkerColors,
@@ -23,6 +25,7 @@ import type {
 
 type MapSettingsOverlayProps = {
   isOpen: boolean;
+  mapId: string;
   markerColors: MarkerColors;
   markerOpacities: MarkerOpacities;
   markerVisibility: MarkerVisibility;
@@ -35,6 +38,7 @@ type MapSettingsOverlayProps = {
   tileHighlight: TileHighlightSettings;
   viewerCanWrite: boolean;
   viewerIsAdmin: boolean;
+  onLoadSettings(settings: UserMapSettings): void;
   onMarkerColorsChange(colors: MarkerColors): void;
   onMarkerOpacitiesChange(opacities: MarkerOpacities): void;
   onMarkerVisibilityChange(visibility: MarkerVisibility): void;
@@ -59,6 +63,7 @@ type NoteCategoryFormInput = {
 
 export function MapSettingsOverlay({
   isOpen,
+  mapId,
   markerColors,
   markerOpacities,
   markerVisibility,
@@ -71,6 +76,7 @@ export function MapSettingsOverlay({
   tileHighlight,
   viewerCanWrite,
   viewerIsAdmin,
+  onLoadSettings,
   onMarkerColorsChange,
   onMarkerOpacitiesChange,
   onMarkerVisibilityChange,
@@ -87,6 +93,7 @@ export function MapSettingsOverlay({
   onTileHighlightChange
 }: MapSettingsOverlayProps) {
   const [expandedLayerCategories, setExpandedLayerCategories] = useState<Set<LayerCategoryId>>(() => new Set());
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
 
   const isLayerCategoryExpanded = (categoryId: LayerCategoryId) => expandedLayerCategories.has(categoryId);
   const toggleLayerCategory = (categoryId: LayerCategoryId) => {
@@ -467,19 +474,29 @@ export function MapSettingsOverlay({
               />
             </fieldset>
           </div>
+          <ProfileSettings mapId={mapId} onLoadSettings={onLoadSettings} />
           <div className="map-settings-actions">
             <button
               className="map-settings-default"
-              onClick={() => {
-                if (window.confirm("Revert all map settings to their defaults?")) {
-                  onResetSettings();
-                }
-              }}
+              onClick={() => setIsConfirmingReset(true)}
               type="button"
             >
               Default
             </button>
           </div>
+          {isConfirmingReset ? (
+            <MapConfirmDialog
+              confirmLabel="Revert"
+              danger
+              message="Revert all map settings to their defaults? Your current settings will be overwritten."
+              title="Revert to defaults"
+              onCancel={() => setIsConfirmingReset(false)}
+              onConfirm={() => {
+                setIsConfirmingReset(false);
+                onResetSettings();
+              }}
+            />
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -508,6 +525,302 @@ function LayerCategory({
         {isExpanded ? "v" : ">"}
       </span>
     </button>
+  );
+}
+
+type MapSettingsProfileSummary = {
+  name: string;
+  slot: number;
+  updatedAt: string;
+};
+
+const PROFILE_SLOTS = [0, 1, 2] as const;
+const MAX_PROFILE_NAME_LENGTH = 60;
+
+function MapConfirmDialog({
+  confirmLabel,
+  danger = false,
+  message,
+  title,
+  onCancel,
+  onConfirm
+}: {
+  confirmLabel: string;
+  danger?: boolean;
+  message: string;
+  title: string;
+  onCancel(): void;
+  onConfirm(): void;
+}) {
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    confirmButtonRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onCancel]);
+
+  return (
+    <div className="map-confirm-backdrop" onClick={onCancel}>
+      <section
+        aria-label={title}
+        className="map-confirm-dialog"
+        onClick={(event) => event.stopPropagation()}
+        role="alertdialog"
+      >
+        <strong className="map-confirm-title">{title}</strong>
+        <p className="map-confirm-message">{message}</p>
+        <div className="map-confirm-actions">
+          <button className="map-confirm-cancel" onClick={onCancel} type="button">
+            Cancel
+          </button>
+          <button
+            className={danger ? "map-confirm-confirm is-danger" : "map-confirm-confirm"}
+            onClick={onConfirm}
+            ref={confirmButtonRef}
+            type="button"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProfileSettings({
+  mapId,
+  onLoadSettings
+}: {
+  mapId: string;
+  onLoadSettings(settings: UserMapSettings): void;
+}) {
+  const [profiles, setProfiles] = useState<MapSettingsProfileSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [draftNames, setDraftNames] = useState<string[]>(["", "", ""]);
+  const [editingSlot, setEditingSlot] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const profilesUrl = `/api/maps/${encodeURIComponent(mapId)}/settings/profiles`;
+
+  const fetchProfiles = useCallback(async (): Promise<MapSettingsProfileSummary[]> => {
+    const response = await fetch(profilesUrl);
+
+    if (!response.ok) {
+      throw new Error("Profiles could not be loaded");
+    }
+
+    const body = (await response.json()) as { profiles?: MapSettingsProfileSummary[] };
+
+    return Array.isArray(body.profiles) ? body.profiles : [];
+  }, [profilesUrl]);
+
+  useEffect(() => {
+    let isCurrent = true;
+
+    fetchProfiles()
+      .then((loadedProfiles) => {
+        if (isCurrent) {
+          setProfiles(loadedProfiles);
+          setError(null);
+        }
+      })
+      .catch(() => {
+        if (isCurrent) {
+          setProfiles([]);
+          setError("Profiles could not be loaded");
+        }
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [fetchProfiles]);
+
+  const refreshProfiles = useCallback(async () => {
+    try {
+      const loadedProfiles = await fetchProfiles();
+      setProfiles(loadedProfiles);
+      setError(null);
+    } catch {
+      setProfiles([]);
+      setError("Profiles could not be loaded");
+    }
+  }, [fetchProfiles]);
+
+  const saveProfile = useCallback(async (slot: number, name: string) => {
+    const trimmedName = name.trim().slice(0, MAX_PROFILE_NAME_LENGTH);
+
+    try {
+      const response = await fetch(`${profilesUrl}/${slot}`, {
+        body: JSON.stringify(trimmedName.length > 0 ? { name: trimmedName } : {}),
+        headers: { "content-type": "application/json" },
+        method: "PUT"
+      });
+
+      if (!response.ok) {
+        setError("Profile could not be saved");
+        return;
+      }
+
+      setDraftNames((currentNames) => currentNames.map((currentName, index) => (index === slot ? "" : currentName)));
+      await refreshProfiles();
+    } catch {
+      setError("Profile could not be saved");
+    }
+  }, [profilesUrl, refreshProfiles]);
+
+  const renameProfile = useCallback(async (slot: number, name: string) => {
+    const trimmedName = name.trim().slice(0, MAX_PROFILE_NAME_LENGTH);
+
+    if (trimmedName.length === 0) {
+      setEditingSlot(null);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${profilesUrl}/${slot}`, {
+        body: JSON.stringify({ name: trimmedName }),
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      });
+
+      if (!response.ok) {
+        setError("Profile could not be renamed");
+        return;
+      }
+
+      setEditingSlot(null);
+      await refreshProfiles();
+    } catch {
+      setError("Profile could not be renamed");
+    }
+  }, [profilesUrl, refreshProfiles]);
+
+  const loadProfile = useCallback(async (slot: number) => {
+    try {
+      const response = await fetch(`${profilesUrl}/${slot}`);
+
+      if (!response.ok) {
+        setError("Profile could not be loaded");
+        return;
+      }
+
+      const body = (await response.json()) as { profile?: { settings?: unknown } };
+
+      if (body.profile === undefined) {
+        setError("Profile could not be loaded");
+        return;
+      }
+
+      onLoadSettings(parseUserMapSettings(body.profile.settings));
+      setError(null);
+    } catch {
+      setError("Profile could not be loaded");
+    }
+  }, [onLoadSettings, profilesUrl]);
+
+  const setDraftName = (slot: number, name: string) => {
+    setDraftNames((currentNames) => currentNames.map((currentName, index) => (index === slot ? name : currentName)));
+  };
+
+  return (
+    <fieldset className="map-layer-controls map-profile-controls">
+      <legend>Profiles</legend>
+      {profiles === null ? <p className="map-profile-loading">Loading profiles...</p> : null}
+      {PROFILE_SLOTS.map((slot) => {
+        const profile = profiles?.find((entry) => entry.slot === slot) ?? null;
+        const draftName = draftNames[slot] ?? "";
+
+        return (
+          <div className="map-profile-row" data-testid={`profile-slot-${slot}`} key={slot}>
+            {profile === null ? (
+              <>
+                <input
+                  aria-label={`Profile ${slot + 1} name`}
+                  maxLength={MAX_PROFILE_NAME_LENGTH}
+                  onChange={(event) => setDraftName(slot, event.target.value)}
+                  placeholder={`Profile ${slot + 1}`}
+                  value={draftName}
+                />
+                <button
+                  aria-label={`Save profile to slot ${slot + 1}`}
+                  className="map-profile-action"
+                  onClick={() => void saveProfile(slot, draftName)}
+                  type="button"
+                >
+                  Save
+                </button>
+              </>
+            ) : editingSlot === slot ? (
+              <form
+                className="map-profile-rename-form"
+                onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                  event.preventDefault();
+                  void renameProfile(slot, editingName);
+                }}
+              >
+                <input
+                  aria-label={`Profile ${slot + 1} name`}
+                  maxLength={MAX_PROFILE_NAME_LENGTH}
+                  onChange={(event) => setEditingName(event.target.value)}
+                  value={editingName}
+                />
+                <button
+                  aria-label={`Save profile ${slot + 1} name`}
+                  className="map-profile-icon-button"
+                  type="submit"
+                >
+                  ✓
+                </button>
+              </form>
+            ) : (
+              <>
+                <span className="map-profile-name">{profile.name}</span>
+                <button
+                  aria-label={`Rename ${profile.name}`}
+                  className="map-profile-icon-button"
+                  onClick={() => {
+                    setEditingSlot(slot);
+                    setEditingName(profile.name);
+                  }}
+                  type="button"
+                >
+                  ✎
+                </button>
+                <button
+                  aria-label={`Load ${profile.name}`}
+                  className="map-profile-action"
+                  onClick={() => void loadProfile(slot)}
+                  type="button"
+                >
+                  Load
+                </button>
+                <button
+                  aria-label={`Overwrite ${profile.name}`}
+                  className="map-profile-action"
+                  onClick={() => void saveProfile(slot, profile.name)}
+                  type="button"
+                >
+                  Save
+                </button>
+              </>
+            )}
+          </div>
+        );
+      })}
+      {error !== null ? <p className="map-profile-error" role="alert">{error}</p> : null}
+    </fieldset>
   );
 }
 
@@ -639,6 +952,7 @@ function NoteCategoryRow({
   onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
 }) {
   const [name, setName] = useState(category.name);
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const inheritsColor = noteCategoryColor === undefined;
   const color = noteCategoryColor ?? inheritedColor;
   const markerShape = noteCategoryMarkerShape ?? category.markerShape;
@@ -696,15 +1010,24 @@ function NoteCategoryRow({
           <button
             aria-label={`Delete ${category.name} category`}
             className="map-note-category-delete map-note-category-icon-button"
-            onClick={() => {
-              if (window.confirm(`Delete the ${category.name} note category? Notes in this category will move to General.`)) {
-                void onDelete(category.id);
-              }
-            }}
+            onClick={() => setIsConfirmingDelete(true)}
             type="button"
           >
             ×
           </button>
+        ) : null}
+        {isConfirmingDelete ? (
+          <MapConfirmDialog
+            confirmLabel="Delete"
+            danger
+            message={`Delete the ${category.name} note category? Notes in this category will move to General.`}
+            title="Delete note category"
+            onCancel={() => setIsConfirmingDelete(false)}
+            onConfirm={() => {
+              setIsConfirmingDelete(false);
+              void onDelete(category.id);
+            }}
+          />
         ) : null}
       </div>
       <div className="map-note-category-settings-options">
