@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import React from "react";
 import { usePathname } from "next/navigation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AdminNav, AdminTopbarTitle } from "./admin-nav";
+import { AdminBackToMapLink, AdminNav, AdminTopbarTitle } from "./admin-nav";
 
 vi.mock("next/navigation", () => ({
   usePathname: vi.fn()
@@ -56,5 +56,35 @@ describe("AdminTopbarTitle", () => {
     render(React.createElement(AdminTopbarTitle));
 
     expect(screen.getByText("History Log")).toBeTruthy();
+  });
+});
+
+describe("AdminBackToMapLink", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("links to the plain map route when no map was visited", () => {
+    render(React.createElement(AdminBackToMapLink));
+
+    const backLink = screen.getByRole("link", { name: "← Back to map" });
+    expect(backLink.getAttribute("href")).toBe("/map");
+    expect(backLink.className).toContain("admin-topbar-back");
+  });
+
+  it("links to the last-visited map stored in localStorage", () => {
+    window.localStorage.setItem("huginn:last-map", "map-3");
+
+    render(React.createElement(AdminBackToMapLink));
+
+    expect(screen.getByRole("link", { name: "← Back to map" }).getAttribute("href")).toBe("/map?server=3");
+  });
+
+  it("keeps map ids without a map- prefix as-is", () => {
+    window.localStorage.setItem("huginn:last-map", "celebration");
+
+    render(React.createElement(AdminBackToMapLink));
+
+    expect(screen.getByRole("link", { name: "← Back to map" }).getAttribute("href")).toBe("/map?server=celebration");
   });
 });

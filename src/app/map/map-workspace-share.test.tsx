@@ -63,6 +63,7 @@ function mockClipboardWrite() {
 describe("MapWorkspace share mode", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
     window.history.replaceState(null, "", "/share/share-token");
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -119,6 +120,18 @@ describe("MapWorkspace share mode", () => {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not persist the last-visited map in share mode", () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      shareToken: "share-token",
+      viewer: sharedViewer
+    }));
+
+    expect(screen.getByAltText("Wurm Online map")).toBeTruthy();
+    expect(window.localStorage.getItem("huginn:last-map")).toBeNull();
   });
 
   it("shows the share control for signed-in viewers outside share mode", () => {

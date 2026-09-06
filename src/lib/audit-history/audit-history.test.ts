@@ -8,7 +8,11 @@ vi.mock("@/lib/alerts/alert-service", () => ({
   triggerAlertDetection: mocks.triggerAlertDetection
 }));
 
-import { listAuditHistory, type AuditHistoryDependencies } from "./audit-history";
+import {
+  listAuditHistory,
+  listAuditHistoryFilterOptions,
+  type AuditHistoryDependencies
+} from "./audit-history";
 
 const adminActor = {
   accessLevel: "WRITE",
@@ -50,6 +54,8 @@ describe("listAuditHistory", () => {
           }
         ];
       },
+      listMaps: async () => [],
+      listUsers: async () => [],
       recordAudit: async () => undefined
     };
 
@@ -120,6 +126,8 @@ describe("listAuditHistory", () => {
           }
         ];
       },
+      listMaps: async () => [],
+      listUsers: async () => [],
       recordAudit: async () => undefined
     };
 
@@ -150,6 +158,8 @@ describe("listAuditHistory", () => {
     const auditEvents: unknown[] = [];
     const dependencies: AuditHistoryDependencies = {
       listEvents: async () => [],
+      listMaps: async () => [],
+      listUsers: async () => [],
       recordAudit: async (event) => {
         auditEvents.push(event);
       }
@@ -182,6 +192,8 @@ describe("audit history alert detection triggers", () => {
   it("triggers alert detection after a failed authorization", async () => {
     const dependencies: AuditHistoryDependencies = {
       listEvents: async () => [],
+      listMaps: async () => [],
+      listUsers: async () => [],
       recordAudit: async () => undefined
     };
 
@@ -194,6 +206,8 @@ describe("audit history alert detection triggers", () => {
   it("does not trigger alert detection for an authorized history view", async () => {
     const dependencies: AuditHistoryDependencies = {
       listEvents: async () => [],
+      listMaps: async () => [],
+      listUsers: async () => [],
       recordAudit: async () => undefined
     };
 
@@ -209,10 +223,164 @@ describe("audit history alert detection triggers", () => {
     });
     const dependencies: AuditHistoryDependencies = {
       listEvents: async () => [],
+      listMaps: async () => [],
+      listUsers: async () => [],
       recordAudit: async () => undefined
     };
 
     const result = await listAuditHistory({ actor: writerActor, limit: 25 }, dependencies);
+
+    expect(result).toEqual({ ok: false, error: "Admin access is required" });
+  });
+});
+
+describe("listAuditHistory filters", () => {
+  it("passes user, action group, map and order filters through to the dependency", async () => {
+    let requested: Record<string, unknown> = {};
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async (input) => {
+        requested = input as Record<string, unknown>;
+        return [];
+      },
+      listMaps: async () => [],
+      listUsers: async () => [],
+      recordAudit: async () => undefined
+    };
+
+    const result = await listAuditHistory({
+      actionGroup: "other",
+      actor: adminActor,
+      actorUserId: "user-7",
+      mapId: "map-3",
+      order: "asc"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(requested).toEqual({
+      actionGroup: "other",
+      actorUserId: "user-7",
+      before: null,
+      limit: 101,
+      mapId: "map-3",
+      order: "asc"
+    });
+  });
+
+  it("paginates in ascending order using the same cursor shape", async () => {
+    const cursors: Array<{ createdAt: Date; id: string } | null> = [];
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async ({ before, limit }) => {
+        cursors.push(before);
+
+        if (limit !== 2) {
+          return [];
+        }
+
+        return [
+          {
+            action: "LOGIN",
+            actor: { username: "Mako" },
+            actorUserId: "user-1",
+            createdAt: new Date("2026-05-10T03:00:00.000Z"),
+            id: "event-1",
+            map: null,
+            mapId: null,
+            metadata: {},
+            targetId: "session-1",
+            targetType: "SESSION"
+          },
+          {
+            action: "LOGOUT",
+            actor: { username: "Mako" },
+            actorUserId: "user-1",
+            createdAt: new Date("2026-05-10T04:00:00.000Z"),
+            id: "event-2",
+            map: null,
+            mapId: null,
+            metadata: {},
+            targetId: "session-1",
+            targetType: "SESSION"
+          }
+        ];
+      },
+      listMaps: async () => [],
+      listUsers: async () => [],
+      recordAudit: async () => undefined
+    };
+
+    const firstPage = await listAuditHistory(
+      { actor: adminActor, limit: 1, order: "asc" },
+      dependencies
+    );
+
+    expect(firstPage.ok).toBe(true);
+
+    if (!firstPage.ok) {
+      return;
+    }
+
+    expect(firstPage.value.events).toHaveLength(1);
+    expect(firstPage.value.events[0]?.createdAt).toBe("2026-05-10T03:00:00.000Z");
+    expect(firstPage.value.nextCursor).not.toBeNull();
+
+    await listAuditHistory({
+      actor: adminActor,
+      before: firstPage.value.nextCursor ?? undefined,
+      limit: 1,
+      order: "asc"
+    }, dependencies);
+
+    expect(cursors).toEqual([
+      null,
+      {
+        createdAt: new Date("2026-05-10T03:00:00.000Z"),
+        id: "event-1"
+      }
+    ]);
+  });
+});
+
+describe("listAuditHistoryFilterOptions", () => {
+  it("returns maps and users for the filter dropdowns", async () => {
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async () => [],
+      listMaps: async () => [
+        { id: "map-1", name: "Celebration" },
+        { id: "map-2", name: "Exodus" }
+      ],
+      listUsers: async () => [
+        { id: "user-1", username: "Admin" },
+        { id: "user-2", username: "Mako" }
+      ],
+      recordAudit: async () => undefined
+    };
+
+    const result = await listAuditHistoryFilterOptions({ actor: adminActor }, dependencies);
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        maps: [
+          { id: "map-1", name: "Celebration" },
+          { id: "map-2", name: "Exodus" }
+        ],
+        users: [
+          { id: "user-1", username: "Admin" },
+          { id: "user-2", username: "Mako" }
+        ]
+      }
+    });
+  });
+
+  it("rejects non-admin users", async () => {
+    const dependencies: AuditHistoryDependencies = {
+      listEvents: async () => [],
+      listMaps: async () => [],
+      listUsers: async () => [],
+      recordAudit: async () => undefined
+    };
+
+    const result = await listAuditHistoryFilterOptions({ actor: writerActor }, dependencies);
 
     expect(result).toEqual({ ok: false, error: "Admin access is required" });
   });

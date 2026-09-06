@@ -2,6 +2,33 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSyncExternalStore } from "react";
+
+const LAST_MAP_STORAGE_KEY = "huginn:last-map";
+const DEFAULT_BACK_HREF = "/map";
+
+function subscribeToLastMap() {
+  return () => {};
+}
+
+function getLastMapHref(): string {
+  try {
+    const lastMap = window.localStorage.getItem(LAST_MAP_STORAGE_KEY);
+
+    if (lastMap === null || lastMap === "") {
+      return DEFAULT_BACK_HREF;
+    }
+
+    const slug = lastMap.startsWith("map-") ? lastMap.slice(4) : lastMap;
+    return `${DEFAULT_BACK_HREF}?server=${encodeURIComponent(slug)}`;
+  } catch {
+    return DEFAULT_BACK_HREF;
+  }
+}
+
+function getServerBackHref(): string {
+  return DEFAULT_BACK_HREF;
+}
 
 const navItems = [
   { href: "/admin/accounts", label: "Accounts" },
@@ -56,5 +83,15 @@ export function AdminTopbarTitle() {
     <span className="admin-topbar-title">
       <span className="admin-topbar-crumb">Admin /</span> {activeItem?.label ?? "Dashboard"}
     </span>
+  );
+}
+
+export function AdminBackToMapLink() {
+  const href = useSyncExternalStore(subscribeToLastMap, getLastMapHref, getServerBackHref);
+
+  return (
+    <Link className="admin-btn admin-btn--ghost admin-btn--small admin-topbar-back" href={href}>
+      ← Back to map
+    </Link>
   );
 }

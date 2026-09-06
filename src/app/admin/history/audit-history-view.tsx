@@ -1,14 +1,21 @@
 import type { AuditHistoryEvent } from "@/lib/audit-history/audit-history";
+import { AuditHistoryFilters, type AuditHistoryFilterValues } from "./audit-history-filters";
+
+const METADATA_HINT_LENGTH = 40;
 
 type AuditHistoryViewProps = {
   events: AuditHistoryEvent[];
+  filters: AuditHistoryFilterValues;
+  maps: { id: string; name: string }[];
   nextCursor: string | null;
+  users: { id: string; username: string }[];
 };
 
-export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) {
+export function AuditHistoryView({ events, filters, maps, nextCursor, users }: AuditHistoryViewProps) {
   return (
     <>
       <h1 className="admin-page-title">History</h1>
+      <AuditHistoryFilters maps={maps} users={users} values={filters} />
       {events.length === 0 ? (
         <section className="admin-empty">No history events yet</section>
       ) : (
@@ -52,7 +59,10 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
                   <td>{formatPosition(event.x, event.y)}</td>
                   <td>{event.mapName.length > 0 ? event.mapName : "None"}</td>
                   <td>
-                    <code className="admin-code">{formatMetadata(event.metadata)}</code>
+                    <details className="admin-details">
+                      <summary>{formatMetadataHint(event.metadata)}</summary>
+                      <code className="admin-code">{formatMetadata(event.metadata)}</code>
+                    </details>
                   </td>
                 </tr>
               ))}
@@ -62,11 +72,37 @@ export function AuditHistoryView({ events, nextCursor }: AuditHistoryViewProps) 
       )}
       {nextCursor !== null ? (
         <nav className="admin-pagination" aria-label="History pages">
-          <a href={`/admin/history?before=${encodeURIComponent(nextCursor)}`}>Older</a>
+          <a href={buildPageHref(filters, nextCursor)}>
+            {filters.order === "asc" ? "Newer" : "Older"}
+          </a>
         </nav>
       ) : null}
     </>
   );
+}
+
+function buildPageHref(filters: AuditHistoryFilterValues, cursor: string): string {
+  const params = new URLSearchParams();
+
+  if (filters.actorUserId !== "") {
+    params.set("user", filters.actorUserId);
+  }
+
+  if (filters.actionGroup !== "") {
+    params.set("action", filters.actionGroup);
+  }
+
+  if (filters.mapId !== "") {
+    params.set("map", filters.mapId);
+  }
+
+  if (filters.order !== "desc") {
+    params.set("sort", filters.order);
+  }
+
+  params.set("before", cursor);
+
+  return `/admin/history?${params.toString()}`;
 }
 
 function getMapSlug(mapId: string): string {
@@ -110,4 +146,14 @@ function formatMetadata(metadata: Record<string, unknown>): string {
   }
 
   return JSON.stringify(metadata);
+}
+
+function formatMetadataHint(metadata: Record<string, unknown>): string {
+  const formatted = formatMetadata(metadata);
+
+  if (formatted.length <= METADATA_HINT_LENGTH) {
+    return "Metadata";
+  }
+
+  return `${formatted.slice(0, METADATA_HINT_LENGTH)}…`;
 }

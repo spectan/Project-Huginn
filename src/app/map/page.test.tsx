@@ -110,6 +110,7 @@ function expandNoteCategories() {
 describe("MapPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
     window.history.replaceState(null, "", "/map");
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -223,7 +224,7 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.3.5")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.3.8")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
@@ -1233,6 +1234,20 @@ describe("MapPage", () => {
     const coordinateCopyButton = screen.getByRole("menuitem", { name: "Copy link to 125, 140" });
     fireEvent.click(coordinateCopyButton);
     expect(clipboardWrite).toHaveBeenLastCalledWith(`${window.location.origin}/map?server=1&x=125&y=140`);
+  });
+
+  it("persists the active map id to localStorage for the admin back link", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    expect(window.localStorage.getItem("huginn:last-map")).toBe("map-1");
   });
 
   it("renders square marker overlays and tower centers", () => {

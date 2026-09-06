@@ -40,6 +40,10 @@ export type AuditHistoryAction =
   | "MAP_DATA_ACCESSED"
   | "SHARE_LINK_CREATED";
 
+export type AuditHistoryActionGroup = "add" | "edit" | "delete" | "other";
+
+export type AuditHistoryOrder = "asc" | "desc";
+
 export type AuditHistoryTargetType =
   | "USER"
   | "MAP"
@@ -78,9 +82,15 @@ type FailedAuthorizationAuditInput = {
 
 export type AuditHistoryDependencies = {
   listEvents(input: {
+    actionGroup?: AuditHistoryActionGroup;
+    actorUserId?: string;
     before: { createdAt: Date; id: string } | null;
     limit: number;
+    mapId?: string;
+    order?: AuditHistoryOrder;
   }): Promise<AuditHistoryRecord[]>;
+  listMaps(): Promise<{ id: string; name: string }[]>;
+  listUsers(): Promise<{ id: string; username: string }[]>;
   recordAudit(input: FailedAuthorizationAuditInput): Promise<void>;
 };
 
@@ -98,8 +108,15 @@ export type AuditHistoryEvent = {
   y: number | null;
 };
 
+export type AuditHistoryFilters = {
+  actionGroup?: AuditHistoryActionGroup;
+  actorUserId?: string;
+  mapId?: string;
+  order?: AuditHistoryOrder;
+};
+
 export async function listAuditHistory(
-  input: { actor: Actor; before?: string; limit?: number },
+  input: { actor: Actor; before?: string; limit?: number } & AuditHistoryFilters,
   dependencies: AuditHistoryDependencies
 ): Promise<Result<{
   events: AuditHistoryEvent[];
@@ -118,8 +135,12 @@ export async function listAuditHistory(
   }
 
   const records = await dependencies.listEvents({
+    actionGroup: input.actionGroup,
+    actorUserId: input.actorUserId,
     before: cursor.value,
-    limit: limit + 1
+    limit: limit + 1,
+    mapId: input.mapId,
+    order: input.order
   });
   const pageRecords = records.slice(0, limit);
   const lastRecord = pageRecords[pageRecords.length - 1] ?? null;
@@ -131,6 +152,25 @@ export async function listAuditHistory(
     events: pageRecords.map(serializeAuditEvent),
     nextCursor
   });
+}
+
+export async function listAuditHistoryFilterOptions(
+  input: { actor: Actor },
+  dependencies: AuditHistoryDependencies
+): Promise<Result<{
+  maps: { id: string; name: string }[];
+  users: { id: string; username: string }[];
+}>> {
+  if (!canViewAuditLog(input.actor)) {
+    return err("Admin access is required");
+  }
+
+  const [maps, users] = await Promise.all([
+    dependencies.listMaps(),
+    dependencies.listUsers()
+  ]);
+
+  return ok({ maps, users });
 }
 
 function getAuditHistoryLimit(limit: number | undefined): number {

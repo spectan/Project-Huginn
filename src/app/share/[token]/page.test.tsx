@@ -47,6 +47,10 @@ vi.mock("@/lib/share/share-service", () => ({
   resolveShareLink: mocks.resolveShareLink
 }));
 
+vi.mock("@/lib/events/database", () => ({
+  findLatestUniqueSlain: vi.fn(async () => null)
+}));
+
 vi.mock("@/app/map/map-workspace", () => ({
   default: (props: Record<string, unknown>) => {
     mocks.workspaceProps.push(props);

@@ -2813,6 +2813,10 @@ body {
  *   .admin-stat-grid          Dashboard tile grid. `<div className="admin-stat-grid">`
  *   .admin-stat               Single tile: `<div className="admin-stat"><span>Open alerts</span><strong>12</strong></div>`
  *   .admin-code               Monospace metadata cell. `<code className="admin-code">{json}</code>`
+ *   .admin-details            Collapsible wrapper (native <details>/<summary>, collapsed by default)
+ *                             for long cell content such as metadata; the summary shows a compact
+ *                             hint and expanding reveals the full `.admin-code` content.
+ *                             `<details className="admin-details"><summary>…</summary><code className="admin-code">…</code></details>`
  *   .admin-preview-img        Fitted pixelated preview image. `<img className="admin-preview-img" …>`
  *   .admin-watermark-grid     Two-pane watermark layout (upload dropzone | result; 1 column under 720px).
  *   .admin-dropzone           Large dashed drop/paste zone (min-height 180px, centered column);
@@ -3330,6 +3334,20 @@ body {
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.admin-details summary {
+  color: var(--admin-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.admin-details summary:hover {
+  color: var(--admin-text);
+}
+
+.admin-details[open] summary {
+  margin-bottom: 4px;
 }
 
 .admin-preview-img {

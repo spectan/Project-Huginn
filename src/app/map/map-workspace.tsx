@@ -95,6 +95,7 @@ const SHARE_LINK_MAX_HOURS = 24;
 const SHARE_LINK_DEFAULT_HOURS = 24;
 const UNIQUE_RESPAWN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const UNIQUE_ALERT_DISMISSED_STORAGE_KEY = "huginn:unique-alert-dismissed";
+const LAST_MAP_STORAGE_KEY = "huginn:last-map";
 const SECTOR_GRID_COLUMNS = Array.from({ length: 20 }, (_, index) => String(index + 7));
 const SECTOR_GRID_ROWS = Array.from({ length: 20 }, (_, index) => String.fromCharCode("B".charCodeAt(0) + index));
 const TILE_SIZE_METERS = 4;
@@ -1868,6 +1869,12 @@ export default function MapWorkspace({
     if (currentServer !== expectedSlug) {
       url.searchParams.set("server", expectedSlug);
       window.history.replaceState(null, "", url);
+    }
+
+    try {
+      window.localStorage.setItem(LAST_MAP_STORAGE_KEY, map.id);
+    } catch {
+      // localStorage may be unavailable; the admin back link falls back to /map.
     }
   }, [canViewMap, isShareMode, map]);
 
