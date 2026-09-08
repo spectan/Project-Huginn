@@ -326,10 +326,9 @@ async function detectNewIpLogins(
     const alert = actor.isAdmin
       ? await createAlert({
           actorUserId: event.actorUserId,
-          description: `Admin ${actor.username} logged in from a new IP address (${clientIp})`,
+          description: `Admin ${actor.username} logged in from a new IP address`,
           mapId: event.mapId ?? null,
           metadata: {
-            clientIp,
             username: actor.username
           },
           rule: "NEW_ADMIN_IP",
@@ -338,10 +337,10 @@ async function detectNewIpLogins(
         })
       : await createAlert({
           actorUserId: event.actorUserId,
-          description: `${actor.username} logged in from a new IP address (${clientIp})`,
+          description: `${actor.username} logged in from a new IP address`,
           mapId: event.mapId ?? null,
           metadata: {
-            clientIp
+            username: actor.username
           },
           rule: "NEW_IP_LOGIN",
           severity: "LOW",

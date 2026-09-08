@@ -416,7 +416,6 @@ describe("detectAlerts", () => {
       expect(alerts[0]?.severity).toBe("HIGH");
       expect(alerts[0]?.title).toBe("New admin login IP for root");
       expect(alerts[0]?.metadata).toEqual({
-        clientIp: "198.51.100.7",
         username: "root"
       });
     });
@@ -498,7 +497,7 @@ describe("detectAlerts", () => {
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("LOW");
       expect(alerts[0]?.title).toBe("New IP login for alice");
-      expect(alerts[0]?.metadata).toEqual({ clientIp: "198.51.100.8" });
+      expect(alerts[0]?.metadata).toEqual({ username: "alice" });
     });
 
     it("ignores a login from a previously seen IP", async () => {
