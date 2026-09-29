@@ -1086,6 +1086,24 @@ body {
   backdrop-filter: blur(8px);
 }
 
+.map-settings-save-error {
+  position: fixed;
+  top: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  border-radius: 8px;
+  padding: 6px 8px 6px 12px;
+  background: rgba(69, 10, 10, 0.86);
+  color: #fecaca;
+  font-size: 13px;
+}
+
 .map-unique-alert-dismiss {
   border: none;
   border-radius: 6px;

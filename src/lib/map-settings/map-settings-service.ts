@@ -1,8 +1,10 @@
 import { canReadMap, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
 import {
+  checkUserMapSettingsCaps,
   mergeUserMapSettingsInput,
   parseUserMapSettings,
+  pruneNoteCategoryStyles,
   type UserMapSettings
 } from "./map-settings";
 
@@ -55,6 +57,8 @@ type UserMapSettingsStore = Pick<UserMapSettingsDependencies, "findSettings" | "
  * holding a lock on that pair, handing it a store bound to the transaction.
  */
 export type SaveUserMapSettingsDependencies = UserMapSettingsDependencies & {
+  /** Ids of the map's note categories (the keys of the per-category style maps). */
+  findNoteCategoryIds(mapId: string): Promise<string[]>;
   withSettingsLock<T>(
     input: { mapId: string; userId: string },
     work: (store: UserMapSettingsStore) => Promise<T>
@@ -114,24 +118,40 @@ export async function saveUserMapSettings(
     return err("Map was not found");
   }
 
+  const categoryIds = new Set(await dependencies.findNoteCategoryIds(map.id));
+
   const saved = await dependencies.withSettingsLock(
     { mapId: map.id, userId: input.actor.id },
-    async (store) => {
-      const current = await store.findSettings(input.actor.id, map.id);
-      const mergedSettings = mergeUserMapSettingsInput(
-        parseUserMapSettings(current?.settings ?? null),
-        input.input
+    async (store): Promise<Result<UserMapSettingsRecord>> => {
+      const stored = await store.findSettings(input.actor.id, map.id);
+      // Style entries for deleted note categories are dropped on every save.
+      const current = pruneNoteCategoryStyles(
+        parseUserMapSettings(stored?.settings ?? null),
+        categoryIds
       );
+      const mergedSettings = pruneNoteCategoryStyles(
+        mergeUserMapSettingsInput(current, input.input),
+        categoryIds
+      );
+      const capError = checkUserMapSettingsCaps(mergedSettings, current);
 
-      return store.upsertSettings({
+      if (capError !== null) {
+        return err(capError);
+      }
+
+      return ok(await store.upsertSettings({
         mapId: map.id,
         settings: mergedSettings,
         userId: input.actor.id
-      });
+      }));
     }
   );
 
-  return ok(parseUserMapSettings(saved.settings));
+  if (!saved.ok) {
+    return saved;
+  }
+
+  return ok(parseUserMapSettings(saved.value.settings));
 }
 
 export async function listSettingsProfiles(

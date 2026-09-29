@@ -29,7 +29,7 @@ const OFFICIAL_EVENT_FEED_URLS = {
 };
 
 const MAX_EVENTS_PER_SERVER = 100;
-// Keep in sync with ABANDONED_DEED_CATEGORY_NAME in src/lib/markers/marker-service.ts.
+// Keep in sync with ABANDONED_DEED_CATEGORY_NAME in src/lib/domain/note-categories.ts.
 const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
 // Keep in sync with DELETED_MARKER_RETENTION_HOURS in src/lib/domain/constants.ts.
 const DELETED_MARKER_RETENTION_HOURS = 72;
@@ -221,12 +221,31 @@ function parseEventFeedXml(xml) {
   return events.sort((a, b) => b.timestamp - a.timestamp);
 }
 
-async function trimEvents(mapId) {
+// An event is new only if it is not stored yet and is no older than the newest
+// stored event, so feed entries that were trimmed away are never replayed
+// (which would re-run their rename/disband side effects).
+function selectNewEvents(feedEvents, storedEvents) {
+  if (storedEvents.length === 0) {
+    return feedEvents;
+  }
+
+  const storedKeys = new Set(storedEvents.map((e) => `${e.timestamp}:${e.message}`));
+  const newestStoredTimestamp = storedEvents.reduce(
+    (newest, e) => Math.max(newest, e.timestamp),
+    Number.NEGATIVE_INFINITY
+  );
+
+  return feedEvents.filter((e) => (
+    e.timestamp >= newestStoredTimestamp && !storedKeys.has(`${e.timestamp}:${e.message}`)
+  ));
+}
+
+async function trimEvents(mapId, keep) {
   await prisma.$transaction(async (transaction) => {
     const newest = await transaction.event.findMany({
       orderBy: [{ timestamp: "desc" }, { id: "desc" }],
       select: { id: true },
-      take: MAX_EVENTS_PER_SERVER,
+      take: keep,
       where: { mapId }
     });
 
@@ -281,9 +300,7 @@ async function syncAllEvents() {
           select: { message: true, timestamp: true },
           where: { mapId }
         });
-
-        const existingSet = new Set(existingEvents.map((e) => `${e.timestamp}:${e.message}`));
-        const newEvents = events.filter((e) => !existingSet.has(`${e.timestamp}:${e.message}`));
+        const newEvents = selectNewEvents(events, existingEvents);
 
         if (newEvents.length > 0) {
           await prisma.event.createMany({
@@ -298,7 +315,9 @@ async function syncAllEvents() {
           await handleDisbandEvents(mapId, newEvents);
         }
 
-        await trimEvents(mapId);
+        // Keep at least the whole feed stored so its older entries are never
+        // trimmed and later mistaken for new ones.
+        await trimEvents(mapId, Math.max(MAX_EVENTS_PER_SERVER, events.length));
 
         console.log(`  ${serverName}: ${events.length} events (${newEvents.length} new)`);
         synced++;

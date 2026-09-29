@@ -44,11 +44,14 @@ export type AuthServiceDependencies = {
   createSession(userId: string): Promise<SessionCreation>;
   /** Returns null when the username (case-insensitively) is already taken. */
   createUser(data: { passwordHash: string; username: string }): Promise<UserWithPassword | null>;
+  /** Counts login attempts per client IP and password changes per user. */
   failureRateLimiter: FailureRateLimiter;
   findUserById(userId: string): Promise<UserWithPassword | null>;
   findUserByUsername(username: string): Promise<UserWithPassword | null>;
   hashPassword(password: string): Promise<string>;
   recordAudit(input: AuditRecordInput): Promise<void>;
+  /** Counts every registration attempt per client IP. */
+  registrationRateLimiter: FailureRateLimiter;
   updateUserPassword(input: {
     currentSessionTokenHash: string | null;
     passwordHash: string;
@@ -71,8 +74,16 @@ type OwnPasswordChangeInput = {
 
 export async function registerUser(
   input: unknown,
-  dependencies: AuthServiceDependencies
+  dependencies: AuthServiceDependencies,
+  context: { clientIp?: string } = {}
 ): Promise<Result<AuthResult>> {
+  // Without a trusted client IP there is nothing safe to key on, so the
+  // limiter is skipped rather than throttling every visitor together.
+  if (hasClientIp(context.clientIp) &&
+    !dependencies.registrationRateLimiter.tryAcquire(`register-ip:${context.clientIp}`)) {
+    return err(TOO_MANY_ATTEMPTS_MESSAGE);
+  }
+
   const credentials = parseAuthCredentials(input);
 
   if (!credentials.ok) {
@@ -124,12 +135,13 @@ export async function loginUser(
     return err(credentials.error);
   }
 
-  // Without a trusted client IP, fall back to throttling per username.
-  const rateLimitKey = context.clientIp !== undefined && context.clientIp.length > 0
-    ? `login-ip:${context.clientIp}`
-    : `login-username:${credentials.value.username.toLowerCase()}`;
+  // Keyed per client IP only: a per-username fallback would let anyone lock a
+  // victim out, so without a trusted client IP the limiter is skipped. The
+  // attempt is counted before the (slow) password check so concurrent
+  // requests cannot all pass the check before any failure is recorded.
+  const rateLimitKey = hasClientIp(context.clientIp) ? `login-ip:${context.clientIp}` : null;
 
-  if (dependencies.failureRateLimiter.isLimited(rateLimitKey)) {
+  if (rateLimitKey !== null && !dependencies.failureRateLimiter.tryAcquire(rateLimitKey)) {
     return err(TOO_MANY_ATTEMPTS_MESSAGE);
   }
 
@@ -140,7 +152,6 @@ export async function loginUser(
   );
 
   if (user === null || !passwordValid) {
-    dependencies.failureRateLimiter.recordFailure(rateLimitKey);
     await recordAudit(dependencies, {
       action: "FAILED_LOGIN",
       actorUserId: null,
@@ -150,6 +161,13 @@ export async function loginUser(
     });
     triggerAlertsSafely();
     return err("Invalid username or password");
+  }
+
+  // A successful login does not count as a failure. Only this attempt is
+  // refunded: clearing the key would let an attacker with a valid account
+  // reset the counter between guesses.
+  if (rateLimitKey !== null) {
+    dependencies.failureRateLimiter.release(rateLimitKey);
   }
 
   const session = await dependencies.createSession(user.id);
@@ -186,7 +204,7 @@ export async function changeOwnPassword(
 
   const rateLimitKey = `password-change-user:${input.actor.id}`;
 
-  if (dependencies.failureRateLimiter.isLimited(rateLimitKey)) {
+  if (!dependencies.failureRateLimiter.tryAcquire(rateLimitKey)) {
     return err(TOO_MANY_ATTEMPTS_MESSAGE);
   }
 
@@ -197,7 +215,6 @@ export async function changeOwnPassword(
   }
 
   if (!(await dependencies.verifyPassword(user.passwordHash, passwordInput.value.currentPassword))) {
-    dependencies.failureRateLimiter.recordFailure(rateLimitKey);
     await recordAudit(dependencies, {
       action: "FAILED_LOGIN",
       actorUserId: user.id,
@@ -211,6 +228,8 @@ export async function changeOwnPassword(
     triggerAlertsSafely();
     return err("Current password is incorrect");
   }
+
+  dependencies.failureRateLimiter.release(rateLimitKey);
 
   const passwordHash = await dependencies.hashPassword(passwordInput.value.newPassword);
   const updatedUser = await dependencies.updateUserPassword({
@@ -263,6 +282,10 @@ function parseOwnPasswordChangeInput(input: unknown): Result<OwnPasswordChangeIn
     currentPassword,
     newPassword
   });
+}
+
+function hasClientIp(clientIp: string | undefined): clientIp is string {
+  return clientIp !== undefined && clientIp.length > 0;
 }
 
 function getString(input: object, key: string): string {

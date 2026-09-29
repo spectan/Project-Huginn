@@ -176,6 +176,34 @@ describe("POST /api/admin/alerts", () => {
     expect(input.until).toBeUndefined();
   });
 
+  it("clamps since relative to an explicit until, not to now", async () => {
+    const response = await POST(new Request("http://localhost/api/admin/alerts", {
+      body: JSON.stringify({
+        since: "2025-01-01T00:00:00.000Z",
+        until: "2025-03-01T00:00:00.000Z"
+      }),
+      method: "POST"
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.detectAlerts).toHaveBeenCalledWith({
+      since: new Date("2025-02-22T00:00:00.000Z"),
+      until: new Date("2025-03-01T00:00:00.000Z")
+    });
+  });
+
+  it("leaves since unchanged when the range is within 7 days of until", async () => {
+    const since = "2025-02-25T00:00:00.000Z";
+    const until = "2025-03-01T00:00:00.000Z";
+    const response = await POST(new Request("http://localhost/api/admin/alerts", {
+      body: JSON.stringify({ since, until }),
+      method: "POST"
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.detectAlerts).toHaveBeenCalledWith({ since: new Date(since), until: new Date(until) });
+  });
+
   it("runs detection with defaults when the body is empty", async () => {
     const response = await POST(new Request("http://localhost/api/admin/alerts", { method: "POST" }));
 

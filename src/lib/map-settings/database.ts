@@ -64,6 +64,18 @@ export function createUserMapSettingsDependencies(): SaveUserMapSettingsDependen
         isActive: true
       }
     }),
+    findNoteCategoryIds: async (mapId) => {
+      const categories = await prisma.noteCategory.findMany({
+        select: {
+          id: true
+        },
+        where: {
+          mapId
+        }
+      });
+
+      return categories.map((category) => category.id);
+    },
     ...createSettingsStore(prisma),
     // An advisory lock (rather than SELECT ... FOR UPDATE) also serializes the
     // first save, when no row exists yet to lock.

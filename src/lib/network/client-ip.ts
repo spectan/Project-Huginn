@@ -6,8 +6,10 @@ const DEFAULT_TRUSTED_PROXY_HOPS = 1;
  * Each proxy appends the address it received the request from to the right of
  * X-Forwarded-For, so everything left of the entries added by our own proxies is
  * client-controlled. With TRUSTED_PROXY_HOPS=N we take the Nth entry from the
- * right (the one appended by the outermost trusted proxy). With N=0 the app is
- * reached directly and forwarding headers are ignored entirely.
+ * right (the one appended by the outermost trusted proxy). A chain shorter than
+ * N did not pass through all of our proxies, so it is treated as untrusted and
+ * only X-Real-IP is consulted. With N=0 the app is reached directly and
+ * forwarding headers are ignored entirely.
  */
 export function getClientIp(
   request: Request,
@@ -24,8 +26,8 @@ export function getClientIp(
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
 
-    if (entries.length > 0) {
-      return entries[Math.max(0, entries.length - trustedProxyHops)];
+    if (entries.length >= trustedProxyHops) {
+      return entries[entries.length - trustedProxyHops];
     }
   }
 

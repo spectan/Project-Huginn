@@ -9,8 +9,12 @@ import { createFailureRateLimiter } from "./failure-rate-limiter";
 // watermark number allocation cannot race. Arbitrary fixed key.
 const USER_CREATION_LOCK_KEY = 7_140_231;
 
-// Shared across requests so failures accumulate per process.
+// Shared across requests so attempts accumulate per process.
 const failureRateLimiter = createFailureRateLimiter();
+const registrationRateLimiter = createFailureRateLimiter({
+  maxAttempts: 5,
+  windowMs: 60 * 60 * 1000
+});
 
 export function createAuthDependencies(clientIp?: string): AuthServiceDependencies {
   return {
@@ -94,6 +98,7 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
         }
       });
     },
+    registrationRateLimiter,
     updateUserPassword: async ({ currentSessionTokenHash, passwordHash, userId }) => {
       return prisma.$transaction(async (tx) => {
         const existingUser = await tx.user.findUnique({

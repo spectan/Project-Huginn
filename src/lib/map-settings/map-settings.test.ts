@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkUserMapSettingsCaps,
   DEFAULT_USER_MAP_SETTINGS,
   getFavoriteServerIdFromSettingsRows,
   mergeUserMapSettingsInput,
-  parseUserMapSettings
+  parseUserMapSettings,
+  pruneNoteCategoryStyles
 } from "./map-settings";
 
 describe("user map settings", () => {
@@ -478,7 +480,7 @@ describe("user map settings", () => {
     });
   });
 
-  it("caps stored annotations at 500", () => {
+  it("never truncates stored annotations when reading settings", () => {
     const annotations = Array.from({ length: 600 }, (_, index) => ({
       id: `a-${index}`,
       text: "",
@@ -487,48 +489,75 @@ describe("user map settings", () => {
       y: index
     }));
 
-    const settings = parseUserMapSettings({ annotations });
-
-    expect(settings.annotations).toHaveLength(500);
-    expect(settings.annotations[499]?.id).toBe("a-499");
+    expect(parseUserMapSettings({ annotations }).annotations).toHaveLength(600);
   });
 
-  it("drops note category keys that are too long or exceed the per-map cap", () => {
-    const colors: Record<string, string> = { ["k".repeat(81)]: "#123456" };
-    const shapes: Record<string, string> = {};
-    const pipSizes: Record<string, number> = {};
-
-    for (let index = 0; index < 250; index += 1) {
-      colors[`cat-${index}`] = "#abcdef";
-      shapes[`cat-${index}`] = "circle";
-      pipSizes[`cat-${index}`] = 8;
-    }
-
+  it("drops note category keys that are empty or too long", () => {
     const settings = parseUserMapSettings({
-      noteCategoryColors: colors,
-      noteCategoryMarkerShapes: shapes,
-      noteCategoryPipSizes: pipSizes
+      noteCategoryColors: { "": "#123456", ["k".repeat(81)]: "#123456", "cat-1": "#abcdef" }
     });
 
-    expect(Object.keys(settings.noteCategoryColors)).toHaveLength(200);
-    expect(settings.noteCategoryColors["k".repeat(81)]).toBeUndefined();
-    expect(Object.keys(settings.noteCategoryMarkerShapes)).toHaveLength(200);
-    expect(Object.keys(settings.noteCategoryPipSizes)).toHaveLength(200);
+    expect(settings.noteCategoryColors).toEqual({ "cat-1": "#abcdef" });
   });
 
-  it("still updates existing note category keys when the map is at the cap", () => {
-    const full: Record<string, string> = {};
+  describe("pruneNoteCategoryStyles", () => {
+    it("keeps only style entries for existing note categories", () => {
+      const settings = parseUserMapSettings({
+        noteCategoryColors: { gone: "#000000", kept: "#ffffff" },
+        noteCategoryMarkerShapes: { gone: "circle", kept: "circle" },
+        noteCategoryPipSizes: { gone: 4, kept: 5 }
+      });
 
-    for (let index = 0; index < 200; index += 1) {
-      full[`cat-${index}`] = "#000000";
+      const pruned = pruneNoteCategoryStyles(settings, new Set(["kept"]));
+
+      expect(pruned.noteCategoryColors).toEqual({ kept: "#ffffff" });
+      expect(pruned.noteCategoryMarkerShapes).toEqual({ kept: "circle" });
+      expect(pruned.noteCategoryPipSizes).toEqual({ kept: 5 });
+    });
+  });
+
+  describe("checkUserMapSettingsCaps", () => {
+    function annotations(count: number) {
+      return Array.from({ length: count }, (_, index) => ({
+        id: `a-${index}`,
+        text: "",
+        title: `Note ${index}`,
+        x: index,
+        y: index
+      }));
     }
 
-    const current = parseUserMapSettings({ noteCategoryColors: full });
-    const merged = mergeUserMapSettingsInput(current, {
-      noteCategoryColors: { "cat-5": "#ffffff", "cat-new": "#ffffff" }
+    function colors(count: number): Record<string, string> {
+      return Object.fromEntries(Array.from({ length: count }, (_, index) => [`cat-${index}`, "#abcdef"]));
+    }
+
+    it("accepts settings at the caps", () => {
+      const merged = parseUserMapSettings({ annotations: annotations(500), noteCategoryColors: colors(200) });
+
+      expect(checkUserMapSettingsCaps(merged, DEFAULT_USER_MAP_SETTINGS)).toBeNull();
     });
 
-    expect(merged.noteCategoryColors["cat-5"]).toBe("#ffffff");
-    expect(merged.noteCategoryColors["cat-new"]).toBeUndefined();
+    it("rejects more than 500 annotations", () => {
+      const merged = parseUserMapSettings({ annotations: annotations(501) });
+
+      expect(checkUserMapSettingsCaps(merged, DEFAULT_USER_MAP_SETTINGS)).toMatch(/500 annotations/);
+    });
+
+    it("rejects more than 200 note category style entries", () => {
+      const merged = parseUserMapSettings({ noteCategoryPipSizes: Object.fromEntries(
+        Array.from({ length: 201 }, (_, index) => [`cat-${index}`, 5])
+      ) });
+
+      expect(checkUserMapSettingsCaps(merged, DEFAULT_USER_MAP_SETTINGS)).toMatch(/200 note categories/);
+    });
+
+    it("grandfathers stored collections already over a cap as long as they do not grow", () => {
+      const current = parseUserMapSettings({ annotations: annotations(600) });
+
+      expect(checkUserMapSettingsCaps(current, current)).toBeNull();
+      expect(checkUserMapSettingsCaps(parseUserMapSettings({ annotations: annotations(550) }), current)).toBeNull();
+      expect(checkUserMapSettingsCaps(parseUserMapSettings({ annotations: annotations(601) }), current))
+        .toMatch(/500 annotations/);
+    });
   });
 });

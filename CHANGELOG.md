@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.4.1
+
+**Security**
+- Login rate limit can no longer be bypassed with many parallel requests
+- Attackers can no longer lock out an account (e.g. admin) by spamming bad passwords
+- Registration is now rate-limited
+- Spoofed forwarding headers are ignored when they don't match the proxy setup
+
+**Fixes**
+- Initial admin seed no longer reports success if someone already registered the admin name
+- Operators editing a user no longer wipe that user's access to inactive maps
+- Two admins editing the same user at once no longer overwrite each other
+- Settings over the annotation/category limits are rejected with a clear error instead of being silently trimmed
+- Deleted alerts no longer immediately reappear
+- Restoring a deed only removes its "Abandoned Deed" note if nobody has repurposed it
+- Old disband events are no longer replayed by the sync worker
+- Notes whose category was removed can still be edited
+- Event list shows a consistent 30 entries
+- Map: smoother hover with many markers, reliable settings saving, clearer note category errors, better trackpad zoom, no stale wilderness overlay
+
+**Admin / deploy notes**
+- Update steps now also restart the `sync` worker (see README)
+- Smaller Docker image (map images no longer bundled twice)
+
 ## v1.4.0
 
 **Security**

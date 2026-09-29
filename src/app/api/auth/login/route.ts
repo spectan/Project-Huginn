@@ -10,10 +10,13 @@ export async function POST(request: Request) {
   const result = await loginUser(body, createAuthDependencies(clientIp), { clientIp });
 
   if (!result.ok) {
-    const response = NextResponse.json(
-      { error: result.error },
-      { status: result.error === TOO_MANY_ATTEMPTS_MESSAGE ? 429 : 401 }
-    );
+    if (result.error === TOO_MANY_ATTEMPTS_MESSAGE) {
+      // Throttled requests never reached the credential check, so an existing
+      // session is left alone.
+      return NextResponse.json({ error: result.error }, { status: 429 });
+    }
+
+    const response = NextResponse.json({ error: result.error }, { status: 401 });
     clearSessionCookie(response);
     return response;
   }

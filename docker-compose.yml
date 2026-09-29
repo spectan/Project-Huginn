@@ -36,7 +36,8 @@ services:
   # One-off admin/map seeding. The initial admin password is only passed
   # here, never to the long-running app container. It is optional at the
   # compose level (so `docker compose up` works without it once seeded);
-  # seed-admin.mjs itself rejects a missing or weak password:
+  # seed-admin.mjs rejects a missing or weak password when it has to create
+  # the admin, and needs none once that admin exists:
   #   docker compose run --rm seed
   seed:
     command: ["node", "scripts/seed-admin.mjs"]

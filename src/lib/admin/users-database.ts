@@ -1,6 +1,7 @@
 import argon2 from "argon2";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { ok } from "@/lib/domain/result";
 import type { AdminUserDependencies } from "./users";
 
 const USER_SELECT = {
@@ -34,10 +35,6 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
         }
       });
     },
-    findUser: async (userId) => prisma.user.findUnique({
-      select: USER_SELECT,
-      where: { id: userId }
-    }),
     hashPassword: async (password) => argon2.hash(password),
     listMaps: async () => prisma.map.findMany({
       orderBy: { name: "asc" },
@@ -97,21 +94,44 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
 
       return updatedUser;
     }),
-    updateUserPrivileges: async ({ approvedByUserId, isAdmin, mapPermissions, userId }) => nullIfRecordNotFound(async () => (
+    updateUserPrivileges: async ({ approvedByUserId, plan, userId }) => nullIfRecordNotFound(async () => (
       prisma.$transaction(async (transaction) => {
-        // Update the user row first so a concurrently deleted user fails with
-        // P2025 before any permission rows are touched.
+        // Row lock: concurrent privilege edits of the same user serialize here,
+        // so each one merges onto the permissions the previous one wrote.
+        const locked = await transaction.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "users" WHERE "id" = ${userId} FOR UPDATE
+        `;
+
+        if (locked.length === 0) {
+          return null;
+        }
+
+        const existingUser = await transaction.user.findUniqueOrThrow({
+          select: USER_SELECT,
+          where: { id: userId }
+        });
+        const change = plan(existingUser);
+
+        if (!change.ok) {
+          return change;
+        }
+
+        const { count: approvedCount } = await transaction.user.updateMany({
+          data: {
+            approvalStatus: "APPROVED",
+            approvedAt: new Date(),
+            approvedByUserId
+          },
+          where: {
+            approvalStatus: { not: "APPROVED" },
+            id: userId
+          }
+        });
+
         await transaction.user.update({
           data: {
             accessLevel: "NONE",
-            isAdmin,
-            ...(approvedByUserId === null
-              ? {}
-              : {
-                  approvalStatus: "APPROVED" as const,
-                  approvedAt: new Date(),
-                  approvedByUserId
-                })
+            isAdmin: change.value.isAdmin
           },
           select: { id: true },
           where: { id: userId }
@@ -121,12 +141,12 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
           where: {
             userId,
             mapId: {
-              notIn: mapPermissions.map((permission) => permission.mapId)
+              notIn: change.value.mapPermissions.map((permission) => permission.mapId)
             }
           }
         });
 
-        for (const permission of mapPermissions) {
+        for (const permission of change.value.mapPermissions) {
           await transaction.userMapPermission.upsert({
             create: {
               accessLevel: permission.accessLevel,
@@ -147,10 +167,12 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
           });
         }
 
-        return transaction.user.findUniqueOrThrow({
+        const user = await transaction.user.findUniqueOrThrow({
           select: USER_SELECT,
           where: { id: userId }
         });
+
+        return ok({ approved: approvedCount > 0, user });
       })
     ))
   };

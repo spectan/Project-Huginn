@@ -9,6 +9,8 @@ export const DEFAULT_NOTE_CATEGORY_PIP_SIZE = 3;
 export const MIN_NOTE_CATEGORY_PIP_SIZE = 1;
 export const MAX_NOTE_CATEGORY_PIP_SIZE = 10;
 export const DEFAULT_NOTE_CATEGORY_NAME = "General";
+// Category of the note a disbanded deed is converted into.
+export const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
 
 type NoteCategoryInput = {
   name: string;
@@ -19,23 +21,18 @@ export function validateNoteCategoryInput(input: unknown): Result<NoteCategoryIn
     return err("Category input is required");
   }
 
-  const name = normalizeCategoryName((input as Record<string, unknown>).name);
+  const rawName = (input as Record<string, unknown>).name;
+  const name = typeof rawName === "string" ? rawName.trim() : "";
 
-  if (name === null) {
+  if (name.length === 0) {
     return err("Category name is required");
+  }
+
+  if (name.length > MAX_NAME_LENGTH) {
+    return err(`Category name must be ${MAX_NAME_LENGTH} characters or fewer`);
   }
 
   return ok({
     name
   });
-}
-
-function normalizeCategoryName(input: unknown): string | null {
-  if (typeof input !== "string") {
-    return null;
-  }
-
-  const trimmed = input.trim();
-
-  return trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH ? null : trimmed;
 }

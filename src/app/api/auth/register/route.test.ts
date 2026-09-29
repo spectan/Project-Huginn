@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   clearSessionCookie: vi.fn(),
   dependencies: {},
-  loginUser: vi.fn()
+  registerUser: vi.fn()
 }));
 
 vi.mock("@/lib/auth/cookies", () => ({
@@ -16,45 +16,43 @@ vi.mock("@/lib/auth/database", () => ({
 }));
 
 vi.mock("@/lib/auth/auth-service", () => ({
-  loginUser: mocks.loginUser,
+  registerUser: mocks.registerUser,
   TOO_MANY_ATTEMPTS_MESSAGE: "Too many failed attempts. Try again later."
 }));
 
 import { POST } from "./route";
 
-describe("POST /api/auth/login", () => {
+describe("POST /api/auth/register", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv("TRUSTED_PROXY_HOPS", "1");
   });
 
-  it("passes the client IP to the login service for rate limiting", async () => {
-    mocks.loginUser.mockResolvedValue({ ok: false, error: "Invalid username or password" });
+  it("passes the client IP to the registration service", async () => {
+    mocks.registerUser.mockResolvedValue({ ok: false, error: "Username is already registered" });
 
-    const response = await POST(createLoginRequest({ "x-forwarded-for": "203.0.113.9" }));
+    const response = await POST(createRegisterRequest({ "x-forwarded-for": "203.0.113.9" }));
 
-    expect(response.status).toBe(401);
-    expect(mocks.clearSessionCookie).toHaveBeenCalledTimes(1);
-    expect(mocks.loginUser).toHaveBeenCalledWith(
+    expect(response.status).toBe(400);
+    expect(mocks.registerUser).toHaveBeenCalledWith(
       { password: "pw", username: "Mako" },
       mocks.dependencies,
       { clientIp: "203.0.113.9" }
     );
   });
 
-  it("returns 429 when login attempts are rate limited", async () => {
-    mocks.loginUser.mockResolvedValue({ ok: false, error: "Too many failed attempts. Try again later." });
+  it("returns 429 without touching the session cookie when throttled", async () => {
+    mocks.registerUser.mockResolvedValue({ ok: false, error: "Too many failed attempts. Try again later." });
 
-    const response = await POST(createLoginRequest());
+    const response = await POST(createRegisterRequest());
 
-    await expect(response.json()).resolves.toEqual({ error: "Too many failed attempts. Try again later." });
     expect(response.status).toBe(429);
     expect(mocks.clearSessionCookie).not.toHaveBeenCalled();
   });
 });
 
-function createLoginRequest(headers: Record<string, string> = {}): Request {
-  return new Request("http://localhost/api/auth/login", {
+function createRegisterRequest(headers: Record<string, string> = {}): Request {
+  return new Request("http://localhost/api/auth/register", {
     body: JSON.stringify({ password: "pw", username: "Mako" }),
     headers: { "content-type": "application/json", ...headers },
     method: "POST"
