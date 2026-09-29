@@ -73,8 +73,8 @@ describe("map overlay styles", () => {
   });
 
   it("styles marker modifier text like marker metadata text", () => {
-    const metaBlock = getStandaloneCssBlock(".map-context-marker-meta");
-    const modifierBlock = getStandaloneCssBlock(".map-context-marker-modifier");
+    const metaBlock = getCssRulesFor(".map-context-marker-meta");
+    const modifierBlock = getCssRulesFor(".map-context-marker-modifier");
 
     expect(metaBlock).toContain("color: #94a3b8");
     expect(modifierBlock).toContain("color: #94a3b8");
@@ -260,7 +260,7 @@ describe("map overlay styles", () => {
   });
 
   it("keeps locate soul overlays non-interactive so the 3 by 3 pip owns right-click actions", () => {
-    const svgBlock = getStandaloneCssBlock(".map-locate-soul-overlay-svg");
+    const svgBlock = getCssRulesFor(".map-locate-soul-overlay-svg");
     const overlayBlock = getStandaloneCssBlock(".map-locate-soul-overlay");
 
     expect(svgBlock).toContain("pointer-events: none");
@@ -432,6 +432,19 @@ function getKeyframesBlock(name: string): string {
   }
 
   return match[1];
+}
+
+// Declarations from every rule whose selector list includes `selector`, standalone or grouped.
+function getCssRulesFor(selector: string): string {
+  const declarations = [...globalsCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .filter((match) => (match[1] ?? "").split(",").some((part) => part.trim() === selector))
+    .map((match) => match[2] ?? "");
+
+  if (declarations.length === 0) {
+    throw new Error(`Missing CSS rule for ${selector}`);
+  }
+
+  return declarations.join("\n");
 }
 
 function getStandaloneCssBlock(selector: string): string {

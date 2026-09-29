@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { createAuditRecorder } from "@/lib/db/audit-recorder";
 import { prisma } from "@/lib/db/prisma";
 import { createUserMapSettingsDependencies } from "@/lib/map-settings/database";
 import type { ShareDependencies } from "./share-service";
@@ -85,18 +86,7 @@ export function createShareDependencies(): ShareDependencies {
 
       return layer !== null;
     },
-    recordAudit: async (input) => {
-      await prisma.auditEvent.create({
-        data: {
-          action: input.action,
-          actorUserId: input.actorUserId,
-          mapId: input.mapId,
-          metadata: input.metadata as Prisma.InputJsonValue,
-          targetId: input.targetId,
-          targetType: input.targetType
-        }
-      });
-    },
+    recordAudit: createAuditRecorder(),
     settings: createUserMapSettingsDependencies()
   };
 }

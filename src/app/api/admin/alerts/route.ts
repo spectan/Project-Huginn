@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canViewAuditLog } from "@/lib/domain/permissions";
 import { detectAlerts, listAlerts } from "@/lib/alerts/alert-service";
+import { readJson } from "@/lib/http/read-json";
 
 const querySchema = z.object({
   limit: z.coerce.number().int().min(1).max(500).optional(),
@@ -61,13 +62,7 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: unknown = null;
-
-  try {
-    body = await request.json();
-  } catch {
-    body = null;
-  }
+  const body = await readJson(request);
 
   const parsed = bodySchema.safeParse(body ?? {});
 

@@ -63,31 +63,18 @@ describe("AdminSecurityPage", () => {
     expect(screen.getByText("No match")).toBeTruthy();
   });
 
-  it("renders access denied for anonymous viewers", async () => {
-    mocks.viewer = null;
+  it.each([
+    ["anonymous viewers", null],
+    ["unapproved admins", { approvalStatus: "PENDING", isAdmin: true }],
+    ["non-admin viewers", { approvalStatus: "APPROVED", isAdmin: false }]
+  ] as const)("renders access denied for %s", async (_label, viewer) => {
+    mocks.viewer = viewer;
 
     render(await AdminSecurityPage());
 
     expect(screen.getByRole("heading", { name: "Security" })).toBeTruthy();
     expect(screen.getByText("Admin access is required")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Watermark" })).toBeNull();
-  });
-
-  it("renders access denied for unapproved admins", async () => {
-    mocks.viewer = { approvalStatus: "PENDING", isAdmin: true };
-
-    render(await AdminSecurityPage());
-
-    expect(screen.getByText("Admin access is required")).toBeTruthy();
     expect(mocks.userFindMany).not.toHaveBeenCalled();
-  });
-
-  it("renders access denied for non-admin viewers", async () => {
-    mocks.viewer = { approvalStatus: "APPROVED", isAdmin: false };
-
-    render(await AdminSecurityPage());
-
-    expect(screen.getByText("Admin access is required")).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Watermark" })).toBeNull();
   });
 });

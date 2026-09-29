@@ -3,6 +3,7 @@ import { registerUser, TOO_MANY_ATTEMPTS_MESSAGE } from "@/lib/auth/auth-service
 import { clearSessionCookie, setSessionCookie } from "@/lib/auth/cookies";
 import { createAuthDependencies } from "@/lib/auth/database";
 import { getClientIp } from "@/lib/network/client-ip";
+import { readJson } from "@/lib/http/read-json";
 
 export async function POST(request: Request) {
   const body = await readJson(request);
@@ -22,12 +23,4 @@ export async function POST(request: Request) {
   const response = NextResponse.json({ viewer: result.value.viewer }, { status: 201 });
   setSessionCookie(response, result.value.sessionToken, result.value.sessionExpiresAt);
   return response;
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }

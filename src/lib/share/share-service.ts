@@ -1,8 +1,4 @@
-import { createDiscordDependencies } from "@/lib/discord/database";
-import {
-  dispatchDiscordNotification,
-  type DiscordNotificationMessage
-} from "@/lib/discord/discord-service";
+import { dispatchDiscordSafely } from "@/lib/discord/dispatch-safely";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { canReadMap, type MapPermission, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -244,14 +240,6 @@ async function resolveMapName(mapId: string, dependencies: ShareDependencies): P
   } catch {
     // Fall back to the map id when the lookup fails.
     return mapId;
-  }
-}
-
-function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
-  try {
-    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
-  } catch {
-    // Discord notifications are fire-and-forget; failures must not block share link creation.
   }
 }
 

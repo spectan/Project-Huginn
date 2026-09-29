@@ -336,6 +336,17 @@ function seededAlert(overrides: Partial<TestAlert>): TestAlert {
   };
 }
 
+async function detectOk(input?: Parameters<typeof detectAlerts>[0]) {
+  const result = await detectAlerts(input);
+  expect(result.ok).toBe(true);
+
+  if (!result.ok) {
+    throw new Error(result.error);
+  }
+
+  return result.value;
+}
+
 async function flushMicrotasks(): Promise<void> {
   await new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -354,105 +365,52 @@ describe("detectAlerts", () => {
     ]);
   });
 
-  describe("DELETE_SPIKE", () => {
-    it("creates a MEDIUM alert at the 20 deletion threshold", async () => {
-      addEvents(20, { action: "MARKER_DELETED" });
+  type SpikeCase = {
+    event: Parameters<typeof addEvent>[0];
+    metadata: Record<string, unknown>;
+    rule: string;
+    thresholds: [count: number, severity: string | null][];
+    title: string;
+  };
+  const spikeCases: SpikeCase[] = [
+    {
+      event: { action: "MARKER_DELETED" },
+      metadata: { windowMinutes: 15 },
+      rule: "DELETE_SPIKE",
+      thresholds: [[19, null], [20, "MEDIUM"], [50, "HIGH"]],
+      title: "High marker deletion rate for alice"
+    },
+    {
+      event: { action: "MAP_DATA_ACCESSED" },
+      metadata: { windowMinutes: 10 },
+      rule: "MAP_DATA_ACCESS_SPIKE",
+      thresholds: [[4, null], [5, "MEDIUM"], [15, "HIGH"]],
+      title: "Bulk map data access for alice"
+    },
+    {
+      event: { action: "REGISTRATION", metadata: { clientIp: "203.0.113.20" } },
+      metadata: { clientIp: "203.0.113.20", windowMinutes: 60 },
+      rule: "REGISTRATION_SPIKE",
+      thresholds: [[2, null], [3, "MEDIUM"]],
+      title: "Multiple registrations from 203.0.113.20"
+    },
+    {
+      event: { action: "FAILED_LOGIN", actor: null, mapId: null, metadata: { clientIp: "203.0.113.9" } },
+      metadata: { clientIp: "203.0.113.9", windowMinutes: 5 },
+      rule: "REPEATED_AUTH_FAILURES",
+      thresholds: [[4, null], [5, "MEDIUM"], [15, "HIGH"]],
+      title: "Repeated authentication failures from 203.0.113.9"
+    }
+  ];
 
-      const result = await detectAlerts();
+  it.each(spikeCases.flatMap(({ thresholds, ...spikeCase }) => (
+    thresholds.map(([count, severity]) => ({ ...spikeCase, count, severity }))
+  )))("$rule at $count events creates severity $severity", async ({ count, event, metadata, rule, severity, title }) => {
+    addEvents(count, event);
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("MEDIUM");
-      expect(alerts[0]?.title).toBe("High marker deletion rate for alice");
-      expect(alerts[0]?.metadata).toEqual({ count: 20, windowMinutes: 15 });
-    });
-
-    it("creates a HIGH alert at the 50 deletion threshold", async () => {
-      addEvents(50, { action: "MARKER_DELETED" });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("HIGH");
-    });
-
-    it("does not alert below the deletion threshold", async () => {
-      addEvents(19, { action: "MARKER_DELETED" });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(0);
-    });
-  });
-
-  describe("MAP_DATA_ACCESS_SPIKE", () => {
-    it("creates a MEDIUM alert at the 5 access threshold", async () => {
-      addEvents(5, { action: "MAP_DATA_ACCESSED" });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "MAP_DATA_ACCESS_SPIKE");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("MEDIUM");
-      expect(alerts[0]?.title).toBe("Bulk map data access for alice");
-      expect(alerts[0]?.metadata).toEqual({ count: 5, windowMinutes: 10 });
-    });
-
-    it("creates a HIGH alert at the 15 access threshold", async () => {
-      addEvents(15, { action: "MAP_DATA_ACCESSED" });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "MAP_DATA_ACCESS_SPIKE");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("HIGH");
-      expect(alerts[0]?.metadata).toEqual({ count: 15, windowMinutes: 10 });
-    });
-
-    it("does not alert below the access threshold", async () => {
-      addEvents(4, { action: "MAP_DATA_ACCESSED" });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "MAP_DATA_ACCESS_SPIKE")).toHaveLength(0);
-    });
+    const alerts = (await detectOk()).alerts.filter((alert) => alert.rule === rule);
+    expect(alerts.map((alert) => ({ metadata: alert.metadata, severity: alert.severity, title: alert.title })))
+      .toEqual(severity === null ? [] : [{ metadata: { ...metadata, count }, severity, title }]);
   });
 
   describe("NEW_ADMIN_IP", () => {
@@ -463,15 +421,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "198.51.100.7" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP");
+      const alerts = value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP");
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("HIGH");
       expect(alerts[0]?.title).toBe("New admin login IP for root");
@@ -493,15 +445,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "198.51.100.7" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(0);
     });
 
     it("ignores logins from non-admin users", async () => {
@@ -511,29 +457,17 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "198.51.100.8" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(0);
     });
 
     it("ignores admin logins without a client IP", async () => {
       addEvent({ action: "LOGIN", actor: adminActor });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(0);
     });
   });
 
@@ -545,15 +479,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "198.51.100.8" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN");
+      const alerts = value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN");
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("LOW");
       expect(alerts[0]?.title).toBe("New IP login for alice");
@@ -573,15 +501,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "198.51.100.8" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN")).toHaveLength(0);
     });
 
     it("does not flag admin logins, which produce NEW_ADMIN_IP instead", async () => {
@@ -591,30 +513,18 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "198.51.100.7" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN")).toHaveLength(0);
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(1);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_ADMIN_IP")).toHaveLength(1);
     });
 
     it("ignores logins without a client IP", async () => {
       addEvent({ action: "LOGIN", actor: userActor });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "NEW_IP_LOGIN")).toHaveLength(0);
     });
   });
 
@@ -627,18 +537,12 @@ describe("detectAlerts", () => {
         createdAt: dateAtUtcHour(3, until)
       });
 
-      const result = await detectAlerts({
+      const value = await detectOk({
         since: new Date(until.getTime() - 24 * 60 * 60 * 1000),
         until
       });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY");
+      const alerts = value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY");
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("LOW");
       expect(alerts[0]?.title).toBe("Off-hours admin activity by root");
@@ -660,18 +564,12 @@ describe("detectAlerts", () => {
         });
       }
 
-      const result = await detectAlerts({
+      const value = await detectOk({
         since: new Date(until.getTime() - 24 * 60 * 60 * 1000),
         until
       });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY");
+      const alerts = value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY");
       expect(alerts).toHaveLength(4);
     });
 
@@ -683,18 +581,12 @@ describe("detectAlerts", () => {
         createdAt: dateAtUtcHour(12, until)
       });
 
-      const result = await detectAlerts({
+      const value = await detectOk({
         since: new Date(until.getTime() - 24 * 60 * 60 * 1000),
         until
       });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY")).toHaveLength(0);
     });
 
     it("ignores off-hours activity from non-admin users", async () => {
@@ -705,60 +597,16 @@ describe("detectAlerts", () => {
         createdAt: dateAtUtcHour(3, until)
       });
 
-      const result = await detectAlerts({
+      const value = await detectOk({
         since: new Date(until.getTime() - 24 * 60 * 60 * 1000),
         until
       });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "OFF_HOURS_ADMIN_ACTIVITY")).toHaveLength(0);
     });
   });
 
   describe("REGISTRATION_SPIKE", () => {
-    it("creates a MEDIUM alert at 3 registrations from one IP", async () => {
-      addEvents(3, {
-        action: "REGISTRATION",
-        metadata: { clientIp: "203.0.113.20" }
-      });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("MEDIUM");
-      expect(alerts[0]?.title).toBe("Multiple registrations from 203.0.113.20");
-      expect(alerts[0]?.metadata).toEqual({ clientIp: "203.0.113.20", count: 3, windowMinutes: 60 });
-    });
-
-    it("does not alert below the 3 registration threshold", async () => {
-      addEvents(2, {
-        action: "REGISTRATION",
-        metadata: { clientIp: "203.0.113.20" }
-      });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
-    });
-
     it("ignores registrations without a client IP and splits counts per IP", async () => {
       addEvents(3, { action: "REGISTRATION" });
       addEvents(2, {
@@ -770,15 +618,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "203.0.113.22" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
     });
 
     it("deduplicates repeat detections for the same IP within one hour", async () => {
@@ -787,17 +629,11 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "203.0.113.20" }
       });
 
-      const first = await detectAlerts();
-      const second = await detectAlerts();
+      const first = await detectOk();
+      const second = await detectOk();
 
-      expect(first.ok && second.ok).toBe(true);
-
-      if (!first.ok || !second.ok) {
-        return;
-      }
-
-      expect(first.value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(1);
-      expect(second.value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
+      expect(first.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(1);
+      expect(second.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
       expect(mocks.state.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(1);
     });
 
@@ -810,67 +646,13 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "203.0.113.20" }
       });
 
-      const result = await detectAlerts({ since, until });
+      const value = await detectOk({ since, until });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "REGISTRATION_SPIKE")).toHaveLength(0);
     });
   });
 
   describe("REPEATED_AUTH_FAILURES", () => {
-    it("creates a MEDIUM alert at 5 failures from one IP", async () => {
-      addEvents(5, {
-        action: "FAILED_LOGIN",
-        actor: null,
-        mapId: null,
-        metadata: { clientIp: "203.0.113.9" }
-      });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("MEDIUM");
-      expect(alerts[0]?.title).toBe("Repeated authentication failures from 203.0.113.9");
-      expect(alerts[0]?.metadata).toEqual({
-        clientIp: "203.0.113.9",
-        count: 5,
-        windowMinutes: 5
-      });
-    });
-
-    it("creates a HIGH alert at 15 failures from one IP", async () => {
-      addEvents(15, {
-        action: "FAILED_LOGIN",
-        actor: null,
-        mapId: null,
-        metadata: { clientIp: "203.0.113.9" }
-      });
-
-      const result = await detectAlerts();
-
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES");
-      expect(alerts).toHaveLength(1);
-      expect(alerts[0]?.severity).toBe("HIGH");
-    });
-
     it("counts FAILED_AUTHORIZATION events that carry a clientIp", async () => {
       addEvents(5, {
         action: "FAILED_AUTHORIZATION",
@@ -878,15 +660,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "203.0.113.11" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES");
+      const alerts = value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES");
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("MEDIUM");
     });
@@ -906,15 +682,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "203.0.113.13" }
       });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES")).toHaveLength(0);
     });
   });
 
@@ -922,17 +692,11 @@ describe("detectAlerts", () => {
     it("suppresses duplicate alerts for the same rule and actor within one hour", async () => {
       addEvents(20, { action: "MARKER_DELETED" });
 
-      const first = await detectAlerts();
-      const second = await detectAlerts();
+      const first = await detectOk();
+      const second = await detectOk();
 
-      expect(first.ok && second.ok).toBe(true);
-
-      if (!first.ok || !second.ok) {
-        return;
-      }
-
-      expect(first.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(1);
-      expect(second.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(0);
+      expect(first.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(1);
+      expect(second.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(0);
       expect(mocks.state.alerts).toHaveLength(1);
     });
 
@@ -951,15 +715,9 @@ describe("detectAlerts", () => {
         mapId: null,
         metadata: { clientIp: "203.0.113.31" }
       });
-      const second = await detectAlerts();
+      const second = await detectOk();
 
-      expect(second.ok).toBe(true);
-
-      if (!second.ok) {
-        return;
-      }
-
-      expect(second.value.alerts.map((alert) => alert.title)).toEqual([
+      expect(second.alerts.map((alert) => alert.title)).toEqual([
         "Repeated authentication failures from 203.0.113.31"
       ]);
       expect(mocks.state.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES")).toHaveLength(2);
@@ -993,18 +751,12 @@ describe("detectAlerts", () => {
         expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
 
         addEvents(30, { action: "MARKER_DELETED" });
-        const second = await detectAlerts();
-
-        expect(second.ok).toBe(true);
-
-        if (!second.ok) {
-          return;
-        }
+        const second = await detectOk();
 
         expect(mocks.state.alerts).toHaveLength(1);
         expect(mocks.state.alerts[0]?.severity).toBe("HIGH");
         expect(mocks.state.alerts[0]?.description).toBe("50 markers deleted in the last 15 minutes");
-        expect(second.value.alerts.map((alert) => alert.severity)).toEqual(["HIGH"]);
+        expect(second.alerts.map((alert) => alert.severity)).toEqual(["HIGH"]);
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(2);
 
@@ -1021,9 +773,7 @@ describe("detectAlerts", () => {
       mocks.state.alerts.push(seededAlert({ severity: "HIGH" }));
       addEvents(20, { action: "MARKER_DELETED" });
 
-      const result = await detectAlerts();
-
-      expect(result.ok && result.value.alerts).toEqual([]);
+      expect((await detectOk()).alerts).toEqual([]);
       expect(mocks.state.alerts[0]?.severity).toBe("HIGH");
       expect(mocks.alertUpdate).not.toHaveBeenCalled();
     });
@@ -1034,15 +784,9 @@ describe("detectAlerts", () => {
       }));
       addEvents(20, { action: "MARKER_DELETED" });
 
-      const result = await detectAlerts();
+      const value = await detectOk();
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(1);
+      expect(value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(1);
       expect(mocks.state.alerts).toHaveLength(2);
     });
   });
@@ -1056,15 +800,9 @@ describe("detectAlerts", () => {
         createdAt: new Date(until.getTime() - 5 * 60 * 1000)
       });
 
-      const result = await detectAlerts({ since, until });
+      const value = await detectOk({ since, until });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE");
+      const alerts = value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE");
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("MEDIUM");
     });
@@ -1080,15 +818,9 @@ describe("detectAlerts", () => {
         metadata: { clientIp: "203.0.113.10" }
       });
 
-      const result = await detectAlerts({ since, until });
+      const value = await detectOk({ since, until });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      const alerts = result.value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES");
+      const alerts = value.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES");
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("MEDIUM");
     });
@@ -1101,15 +833,9 @@ describe("detectAlerts", () => {
         createdAt: new Date(until.getTime() - 30 * 60 * 1000)
       });
 
-      const result = await detectAlerts({ since, until });
+      const value = await detectOk({ since, until });
 
-      expect(result.ok).toBe(true);
-
-      if (!result.ok) {
-        return;
-      }
-
-      expect(result.value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(0);
+      expect(value.alerts.filter((alert) => alert.rule === "DELETE_SPIKE")).toHaveLength(0);
     });
   });
 
@@ -1161,9 +887,7 @@ describe("detectAlerts", () => {
       fetchMock.mockImplementationOnce(() => new Promise<Response>(() => undefined));
       addEvents(50, { action: "MARKER_DELETED" });
 
-      const result = await detectAlerts();
-
-      expect(result.ok && result.value.created).toBe(1);
+      expect((await detectOk()).created).toBe(1);
 
       fetchMock.mockRejectedValueOnce(new Error("network down"));
       const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
@@ -1247,13 +971,7 @@ describe("discord dispatch", () => {
     });
     addEvents(20, { action: "MARKER_DELETED" });
 
-    const result = await detectAlerts();
-
-    expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      expect(result.value.created).toBe(1);
-    }
+    expect((await detectOk()).created).toBe(1);
 
     expect(mocks.state.alerts).toHaveLength(1);
   });
@@ -1262,13 +980,7 @@ describe("discord dispatch", () => {
     discordMocks.dispatchDiscordNotification.mockRejectedValueOnce(new Error("network down"));
     addEvents(20, { action: "MARKER_DELETED" });
 
-    const result = await detectAlerts();
-
-    expect(result.ok).toBe(true);
-
-    if (result.ok) {
-      expect(result.value.created).toBe(1);
-    }
+    expect((await detectOk()).created).toBe(1);
   });
 });
 
@@ -1413,9 +1125,7 @@ describe("deleted alerts and dedup", () => {
     expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
 
     await deleteAlert(mocks.state.alerts[0]?.id ?? "", "admin-1");
-    const result = await detectAlerts();
-
-    expect(result.ok && result.value.alerts).toEqual([]);
+    expect((await detectOk()).alerts).toEqual([]);
     expect(mocks.state.alerts).toHaveLength(0);
     expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
   });

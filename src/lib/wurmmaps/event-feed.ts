@@ -1,4 +1,4 @@
-export type WurmMapsEventKind =
+type WurmMapsEventKind =
   | "deed"
   | "event"
   | "holySite"
@@ -18,7 +18,7 @@ export type WurmMapsEvent = {
   timestamp: number;
 };
 
-export type WurmMapsServerStatus = {
+type WurmMapsServerStatus = {
   status: "offline" | "online" | "unknown";
   uptimeSeconds: number | null;
   weather: string | null;

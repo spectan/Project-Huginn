@@ -39,7 +39,7 @@ describe("createDeletedMarkerDependencies restoreDeed", () => {
     mocks.transaction.note.updateMany.mockResolvedValue({ count: 1 });
     mocks.transaction.note.findUnique.mockResolvedValue({ id: "note-1", x: 1, y: 2 });
 
-    const restored = await createDeletedMarkerDependencies().restoreDeed("deed-1", {
+    const restored = await createDeletedMarkerDependencies().markers.deed.restore("deed-1", {
       now,
       updatedByUserId: "admin"
     });
@@ -59,7 +59,7 @@ describe("createDeletedMarkerDependencies restoreDeed", () => {
   it("keeps a disband note that was recategorized or deleted", async () => {
     mocks.transaction.note.updateMany.mockResolvedValue({ count: 0 });
 
-    const restored = await createDeletedMarkerDependencies().restoreDeed("deed-1", {
+    const restored = await createDeletedMarkerDependencies().markers.deed.restore("deed-1", {
       now,
       updatedByUserId: "admin"
     });

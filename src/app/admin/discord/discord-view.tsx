@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { requestJson } from "@/lib/client/request-json";
 
 type DiscordConfig = {
   webhookUrl: string;
@@ -81,42 +82,28 @@ export function DiscordView() {
     if (config === null) return;
     setSaving(true);
     setSaveFeedback(null);
-    try {
-      const response = await fetch("/api/admin/discord", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config)
-      });
-      if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        setSaveFeedback({ kind: "error", message: body.error ?? "Failed to save settings" });
-        return;
-      }
-      setConfig(((await response.json()) as { config: DiscordConfig }).config);
+    const result = await requestJson<{ config: DiscordConfig }>(
+      "/api/admin/discord",
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) },
+      "Failed to save settings"
+    );
+    if (result.ok) {
+      setConfig(result.body.config);
       setSaveFeedback({ kind: "success", message: "Saved ✓" });
-    } catch (e) {
-      setSaveFeedback({ kind: "error", message: e instanceof Error ? e.message : "Unknown error" });
-    } finally {
-      setSaving(false);
+    } else {
+      setSaveFeedback({ kind: "error", message: result.error });
     }
+    setSaving(false);
   };
 
   const sendTest = async () => {
     setSendingTest(true);
     setTestFeedback(null);
-    try {
-      const response = await fetch("/api/admin/discord/test", { method: "POST" });
-      if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        setTestFeedback({ kind: "error", message: body.error ?? "Failed to send test message" });
-        return;
-      }
-      setTestFeedback({ kind: "success", message: "Test message sent" });
-    } catch (e) {
-      setTestFeedback({ kind: "error", message: e instanceof Error ? e.message : "Unknown error" });
-    } finally {
-      setSendingTest(false);
-    }
+    const result = await requestJson("/api/admin/discord/test", { method: "POST" }, "Failed to send test message");
+    setTestFeedback(
+      result.ok ? { kind: "success", message: "Test message sent" } : { kind: "error", message: result.error }
+    );
+    setSendingTest(false);
   };
 
   return (

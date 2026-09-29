@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { createAuditRecorder } from "@/lib/db/audit-recorder";
 import { prisma } from "@/lib/db/prisma";
 import type { AuditHistoryActionGroup, AuditHistoryDependencies } from "./audit-history";
 
@@ -98,20 +99,6 @@ export function createAuditHistoryDependencies(clientIp?: string): AuditHistoryD
         username: true
       }
     }),
-    recordAudit: async (input) => {
-      const metadata = clientIp !== undefined && clientIp.length > 0
-        ? { ...input.metadata, clientIp }
-        : input.metadata;
-      await prisma.auditEvent.create({
-        data: {
-          action: input.action,
-          actorUserId: input.actorUserId,
-          mapId: input.mapId,
-          metadata: metadata as Prisma.InputJsonValue,
-          targetId: input.targetId,
-          targetType: input.targetType
-        }
-      });
-    }
+    recordAudit: createAuditRecorder(clientIp)
   };
 }

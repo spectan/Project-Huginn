@@ -60,6 +60,9 @@ const scopedWriter = {
   username: "Scoped Writer"
 } as const;
 
+type MarkerStores = MarkerServiceDependencies["markers"];
+type CreateData<K extends keyof MarkerStores> = Parameters<MarkerStores[K]["create"]>[0];
+
 function createDependencies(): MarkerServiceDependencies & { auditEvents: unknown[] } {
   type ModifierFields = {
     createdBy?: { username: string } | null;
@@ -108,27 +111,53 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     name: "Celebration",
     widthPx: 2048
   });
-  const towers = new Map<string, ModifierFields & {
-    damageHundredths: number | null;
-    id: string;
-    makerName: string;
-    makerNumber: string;
-    mapId: string;
-    planned: boolean;
-    qlHundredths: number | null;
-    towerType: "Freedom Isles" | "Horde of the Summoned" | "Jenn-Kellon" | "Mol-Rehan";
-    x: number;
-    y: number;
-  }>();
-  const notes = new Map<string, ModifierFields & {
-    category: string;
-    id: string;
-    mapId: string;
-    text: string;
-    title: string;
-    x: number;
-    y: number;
-  }>();
+  // In-memory store for one marker table; ids are `${prefix}-${n}`.
+  const createStore = <D extends ModifierFields & { mapId: string }>(prefix: string) => {
+    type StoredRecord = D & ModifierFields & { id: string };
+    const records = new Map<string, StoredRecord>();
+    let count = 0;
+
+    return {
+      create: async (data: D): Promise<StoredRecord> => {
+        count += 1;
+        const record = withModifierUsers({ ...data, id: `${prefix}-${count}` });
+        records.set(record.id, record);
+        return record;
+      },
+      find: async (id: string) => {
+        const record = records.get(id);
+        return record === undefined ? null : { ...record, map: createMapRecord(record.mapId) };
+      },
+      listActive: async (mapId: string) => Array.from(records.values()).filter((record) => record.mapId === mapId),
+      records,
+      softDelete: async (id: string) => {
+        const record = records.get(id);
+        records.delete(id);
+        return record ?? null;
+      },
+      update: async (id: string, data: Partial<D>) => {
+        const existing = records.get(id);
+
+        if (existing === undefined) {
+          return null;
+        }
+
+        const updated = withModifierUsers({ ...existing, ...data });
+        records.set(id, updated);
+        return updated;
+      }
+    };
+  };
+  const markers = {
+    camp: createStore<CreateData<"camp">>("camp"),
+    deed: createStore<CreateData<"deed">>("deed"),
+    locateSoul: createStore<CreateData<"locateSoul">>("locate-soul"),
+    minedoor: createStore<CreateData<"minedoor">>("minedoor"),
+    note: createStore<CreateData<"note">>("note"),
+    path: createStore<CreateData<"path">>("path"),
+    rift: createStore<CreateData<"rift">>("rift"),
+    tower: createStore<CreateData<"tower">>("tower")
+  };
   const noteCategories = new Map<string, {
     color: string | null;
     id: string;
@@ -137,67 +166,6 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     name: string;
     pipSize: number;
   }>();
-  const rifts = new Map<string, ModifierFields & {
-    arrivalDate: Date | null;
-    estimatedRiftTime: Date | null;
-    id: string;
-    mapId: string;
-    notes: string;
-    x: number;
-    y: number;
-  }>();
-  const camps = new Map<string, ModifierFields & {
-    campType: "Rift" | "Goblin";
-    id: string;
-    mapId: string;
-    notes: string;
-    x: number;
-    y: number;
-  }>();
-  const minedoors = new Map<string, ModifierFields & {
-    id: string;
-    mapId: string;
-    notes: string;
-    strength: string;
-    x: number;
-    y: number;
-  }>();
-  const locateSouls = new Map<string, ModifierFields & {
-    casterFacing: "north" | "northeast" | "east" | "southeast" | "south" | "southwest" | "west" | "northwest";
-    direction: "ahead" | "aheadRight" | "right" | "behindRight" | "behind" | "behindLeft" | "left" | "aheadLeft";
-    distanceBand: "0" | "1-3" | "4-5" | "6-9" | "10-19" | "20-49" | "50-199" | "200-499" | "500-999" | "1000+" | "2000+";
-    id: string;
-    mapId: string;
-    notes: string;
-    targetName: string;
-    x: number;
-    y: number;
-  }>();
-  const paths = new Map<string, ModifierFields & {
-    id: string;
-    mapId: string;
-    name: string;
-    notes: string;
-    pathType: "bridge" | "canal" | "highway" | "tunnel";
-    points: Array<{ x: number; y: number }>;
-    width: number;
-    x: number;
-    y: number;
-  }>();
-  const deeds = new Map<string, ModifierFields & {
-    east: number;
-    foundingDate: Date | null;
-    founder: string;
-    id: string;
-    mapId: string;
-    name: string;
-    north: number;
-    perimeter: number;
-    south: number;
-    west: number;
-    x: number;
-    y: number;
-  }>();
   const canaries = new Map<string, {
     id: string;
     mapId: string;
@@ -205,85 +173,25 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
     slot: number;
     userId: string;
   }>();
-  let towerCount = 0;
-  let noteCount = 0;
-  let noteCategoryCount = 0;
-  let deedCount = 0;
-  let riftCount = 0;
-  let campCount = 0;
-  let minedoorCount = 0;
-  let locateSoulCount = 0;
-  let pathCount = 0;
   let canaryCount = 0;
   const auditEvents: unknown[] = [];
 
   return {
     auditEvents,
-    createLocateSoul: async (data) => {
-      locateSoulCount += 1;
-      const locateSoul = withModifierUsers({ ...data, id: `locate-soul-${locateSoulCount}` });
-      locateSouls.set(locateSoul.id, locateSoul);
-      return locateSoul;
-    },
-    createPath: async (data) => {
-      pathCount += 1;
-      const path = withModifierUsers({ ...data, id: `path-${pathCount}` });
-      paths.set(path.id, path);
-      return path;
-    },
-    createCamp: async (data) => {
-      campCount += 1;
-      const camp = withModifierUsers({ ...data, id: `camp-${campCount}` });
-      camps.set(camp.id, camp);
-      return camp;
-    },
-    createCanaryMarkers: async ({ mapId, markers, userId }) => {
-      const created = markers.map((marker) => {
-        canaryCount += 1;
-        const record = {
-          id: `canary-${canaryCount}`,
-          mapId,
-          payload: marker.payload,
-          slot: marker.slot,
-          userId
-        };
-        canaries.set(record.id, record);
-        return record;
-      });
-      return created;
-    },
-    createDeed: async (data) => {
-      deedCount += 1;
-      const deed = withModifierUsers({ ...data, id: `deed-${deedCount}` });
-      deeds.set(deed.id, deed);
-      return deed;
-    },
-    createNote: async (data) => {
-      noteCount += 1;
-      const note = withModifierUsers({ ...data, id: `note-${noteCount}` });
-      notes.set(note.id, note);
-      return note;
-    },
-    createMinedoor: async (data) => {
-      minedoorCount += 1;
-      const minedoor = withModifierUsers({ ...data, id: `minedoor-${minedoorCount}` });
-      minedoors.set(minedoor.id, minedoor);
-      return minedoor;
-    },
-    createRift: async (data) => {
-      riftCount += 1;
-      const rift = withModifierUsers({ ...data, id: `rift-${riftCount}` });
-      rifts.set(rift.id, rift);
-      return rift;
-    },
-    createTower: async (data) => {
-      towerCount += 1;
-      const tower = withModifierUsers({ ...data, id: `tower-${towerCount}` });
-      towers.set(tower.id, tower);
-      return tower;
-    },
+    createCanaryMarkers: async ({ mapId, markers: canaryMarkers, userId }) => canaryMarkers.map((marker) => {
+      canaryCount += 1;
+      const record = {
+        id: `canary-${canaryCount}`,
+        mapId,
+        payload: marker.payload,
+        slot: marker.slot,
+        userId
+      };
+      canaries.set(record.id, record);
+      return record;
+    }),
     disbandDeed: async (input) => {
-      const deed = deeds.get(input.deedId);
+      const deed = markers.deed.records.get(input.deedId);
 
       if (deed === undefined) {
         return null;
@@ -294,22 +202,16 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
       ));
       const category = existingCategory ?? {
         color: null,
-        id: `category-${noteCategoryCount + 1}`,
+        id: `category-${noteCategories.size + 1}`,
         markerShape: "circle",
         mapId: deed.mapId,
         name: input.categoryName,
         pipSize: 3
       };
 
-      if (existingCategory === undefined) {
-        noteCategoryCount += 1;
-        noteCategories.set(category.id, category);
-      }
-
-      noteCount += 1;
-      const note = withModifierUsers({ ...input.note, id: `note-${noteCount}` });
-      notes.set(note.id, note);
-      deeds.delete(input.deedId);
+      noteCategories.set(category.id, category);
+      const note = await markers.note.create(input.note);
+      markers.deed.records.delete(input.deedId);
 
       return {
         category,
@@ -317,246 +219,21 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
         note
       };
     },
-    findDeed: async (id) => {
-      const deed = deeds.get(id);
-      return deed === undefined
-        ? null
-        : {
-            ...deed,
-            map: {
-              ...createMapRecord(deed.mapId)
-            }
-          };
-    },
-    findCamp: async (id) => {
-      const camp = camps.get(id);
-      return camp === undefined
-        ? null
-        : {
-            ...camp,
-            map: {
-              ...createMapRecord(camp.mapId)
-            }
-          };
-    },
     findMap: async (mapId) => createMapRecord(mapId),
-    findNote: async (id) => {
-      const note = notes.get(id);
-      return note === undefined
-        ? null
-        : {
-            ...note,
-            map: {
-              ...createMapRecord(note.mapId)
-            }
-          };
-    },
-    findMinedoor: async (id) => {
-      const minedoor = minedoors.get(id);
-      return minedoor === undefined
-        ? null
-        : {
-            ...minedoor,
-            map: {
-              ...createMapRecord(minedoor.mapId)
-            }
-          };
-    },
-    findLocateSoul: async (id) => {
-      const locateSoul = locateSouls.get(id);
-      return locateSoul === undefined
-        ? null
-        : {
-            ...locateSoul,
-            map: {
-              ...createMapRecord(locateSoul.mapId)
-            }
-          };
-    },
-    findRift: async (id) => {
-      const rift = rifts.get(id);
-      return rift === undefined
-        ? null
-        : {
-            ...rift,
-            map: {
-              ...createMapRecord(rift.mapId)
-            }
-          };
-    },
-    findTower: async (id) => {
-      const tower = towers.get(id);
-      return tower === undefined
-        ? null
-        : {
-            ...tower,
-            map: {
-              ...createMapRecord(tower.mapId)
-            }
-          };
-    },
-    findPath: async (id) => {
-      const path = paths.get(id);
-      return path === undefined
-        ? null
-        : {
-            ...path,
-            map: {
-              ...createMapRecord(path.mapId)
-            }
-          };
-    },
-    listActiveMarkers: async (mapId) => ({
-      camps: Array.from(camps.values()).filter((camp) => camp.mapId === mapId),
-      deeds: Array.from(deeds.values()).filter((deed) => deed.mapId === mapId),
-      locateSouls: Array.from(locateSouls.values()).filter((locateSoul) => locateSoul.mapId === mapId),
-      minedoors: Array.from(minedoors.values()).filter((minedoor) => minedoor.mapId === mapId),
-      notes: Array.from(notes.values()).filter((note) => note.mapId === mapId),
-      paths: Array.from(paths.values()).filter((path) => path.mapId === mapId),
-      rifts: Array.from(rifts.values()).filter((rift) => rift.mapId === mapId),
-      towers: Array.from(towers.values()).filter((tower) => tower.mapId === mapId)
-    }),
-    noteCategoryExists: async (mapId, name) => (
-      name === "General" ||
-      name === "Landmarks" ||
-      Array.from(noteCategories.values()).some((category) => category.mapId === mapId && category.name === name)
-    ),
     listCanaryMarkers: async ({ mapId, userId }) => (
       Array.from(canaries.values())
         .filter((canary) => canary.mapId === mapId && canary.userId === userId)
         .sort((a, b) => a.slot - b.slot)
     ),
+    markers,
+    noteCategoryExists: async (mapId, name) => (
+      name === "General" ||
+      name === "Landmarks" ||
+      Array.from(noteCategories.values()).some((category) => category.mapId === mapId && category.name === name)
+    ),
     now: () => new Date("2026-05-10T00:00:00.000Z"),
     recordAudit: async (input) => {
       auditEvents.push(input);
-    },
-    softDeleteCamp: async (id) => {
-      const camp = camps.get(id);
-      camps.delete(id);
-      return camp ?? null;
-    },
-    softDeleteDeed: async (id) => {
-      const deed = deeds.get(id);
-      deeds.delete(id);
-      return deed ?? null;
-    },
-    softDeleteNote: async (id) => {
-      const note = notes.get(id);
-      notes.delete(id);
-      return note ?? null;
-    },
-    softDeleteMinedoor: async (id) => {
-      const minedoor = minedoors.get(id);
-      minedoors.delete(id);
-      return minedoor ?? null;
-    },
-    softDeleteLocateSoul: async (id) => {
-      const locateSoul = locateSouls.get(id);
-      locateSouls.delete(id);
-      return locateSoul ?? null;
-    },
-    softDeletePath: async (id) => {
-      const path = paths.get(id);
-      paths.delete(id);
-      return path ?? null;
-    },
-    softDeleteRift: async (id) => {
-      const rift = rifts.get(id);
-      rifts.delete(id);
-      return rift ?? null;
-    },
-    softDeleteTower: async (id) => {
-      const tower = towers.get(id);
-      towers.delete(id);
-      return tower ?? null;
-    },
-    updateDeed: async (id, data) => {
-      const existing = deeds.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      deeds.set(id, updated);
-      return updated;
-    },
-    updateCamp: async (id, data) => {
-      const existing = camps.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      camps.set(id, updated);
-      return updated;
-    },
-    updateMinedoor: async (id, data) => {
-      const existing = minedoors.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      minedoors.set(id, updated);
-      return updated;
-    },
-    updateLocateSoul: async (id, data) => {
-      const existing = locateSouls.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      locateSouls.set(id, updated);
-      return updated;
-    },
-    updateNote: async (id, data) => {
-      const existing = notes.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      notes.set(id, updated);
-      return updated;
-    },
-    updatePath: async (id, data) => {
-      const existing = paths.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      paths.set(id, updated);
-      return updated;
-    },
-    updateRift: async (id, data) => {
-      const existing = rifts.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      rifts.set(id, updated);
-      return updated;
-    },
-    updateTower: async (id, data) => {
-      const existing = towers.get(id);
-
-      if (existing === undefined) {
-        return null;
-      }
-
-      const updated = withModifierUsers({ ...existing, ...data });
-      towers.set(id, updated);
-      return updated;
     }
   };
 }
@@ -692,16 +369,16 @@ describe("marker service", () => {
       },
       mapId: "map-1"
     }, deps);
-    const softDeleteTower = deps.softDeleteTower;
+    const towers = deps.markers.tower;
+    const softDeleteTower = towers.softDelete;
     let softDeleteCalls = 0;
     // Both requests see the live marker, but only the first conditional write matches.
-    deps.softDeleteTower = async (id, input) => {
+    towers.softDelete = async (id, input) => {
       softDeleteCalls += 1;
       return softDeleteCalls === 1 ? softDeleteTower(id, input) : null;
     };
-    const findTower = deps.findTower;
-    const snapshot = await findTower("tower-1");
-    deps.findTower = async () => snapshot;
+    const snapshot = await towers.find("tower-1");
+    towers.find = async () => snapshot;
 
     const results = await Promise.all([
       deleteMarker({ actor: writer, markerId: "tower-1", markerType: "tower" }, deps),

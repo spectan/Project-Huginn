@@ -4,6 +4,8 @@ import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import type { AccessLevel, MapPermission } from "@/lib/domain/permissions";
 import { getClientIp } from "@/lib/network/client-ip";
+import { readJson } from "@/lib/http/read-json";
+import { ADMIN_USER_ERROR_STATUSES, getErrorStatus } from "@/lib/http/error-status";
 
 type RouteContext = {
   params: Promise<{
@@ -30,7 +32,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error },
-      { status: getErrorStatus(result.error) }
+      { status: getErrorStatus(result.error, ADMIN_USER_ERROR_STATUSES) }
     );
   }
 
@@ -53,19 +55,11 @@ export async function DELETE(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error },
-      { status: getErrorStatus(result.error) }
+      { status: getErrorStatus(result.error, ADMIN_USER_ERROR_STATUSES) }
     );
   }
 
   return NextResponse.json({ userId: result.value.id });
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 function getIsAdmin(body: unknown): boolean {
@@ -114,12 +108,4 @@ function isMapPermissionInput(value: unknown): value is {
 
 function isAccessLevel(value: unknown): value is AccessLevel {
   return value === "NONE" || value === "READ" || value === "WRITE";
-}
-
-function getErrorStatus(error: string): number {
-  if (error === "Admin access is required") {
-    return 403;
-  }
-
-  return error === "User was not found" ? 404 : 400;
 }

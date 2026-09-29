@@ -3,6 +3,7 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createDiscordDependencies } from "@/lib/discord/database";
 import { getDiscordConfig, saveDiscordConfig } from "@/lib/discord/discord-service";
 import { canViewAuditLog } from "@/lib/domain/permissions";
+import { readJson } from "@/lib/http/read-json";
 
 export async function GET() {
   const viewer = await getCurrentViewer();
@@ -33,15 +34,7 @@ export async function PUT(request: Request) {
     );
   }
 
-  let body: unknown = null;
-
-  try {
-    body = await request.json();
-  } catch {
-    body = null;
-  }
-
-  const result = await saveDiscordConfig(body, createDiscordDependencies());
+  const result = await saveDiscordConfig(await readJson(request), createDiscordDependencies());
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 400 });

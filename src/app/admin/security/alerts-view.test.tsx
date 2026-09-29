@@ -1,19 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { openAlert } from "../alerts-test-fixtures";
 import { AdminAlertsView } from "./alerts-view";
-
-const openAlert = {
-  id: "alert-1",
-  rule: "FAILED_LOGINS_BY_IP",
-  severity: "HIGH",
-  status: "OPEN",
-  title: "Repeated failed logins",
-  description: "12 failed logins from a single IP",
-  actorUsername: "Mako",
-  mapName: "Celebration",
-  createdAt: "2026-08-30T10:00:00.000Z"
-};
 
 const acknowledgedAlert = {
   id: "alert-2",

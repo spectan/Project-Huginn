@@ -117,7 +117,6 @@ model User {
   resolvedAlerts     Alert[]             @relation("AlertResolvedBy")
 
   @@index([approvalStatus])
-  @@index([accessLevel])
   @@map("users")
 }
 
@@ -428,7 +427,6 @@ model NoteCategory {
   updatedAt   DateTime @updatedAt
 
   @@unique([mapId, name])
-  @@index([mapId])
   @@map("note_categories")
 }
 
@@ -460,7 +458,6 @@ model UserMapPermission {
 
   @@unique([userId, mapId])
   @@index([mapId])
-  @@index([isOperator])
   @@map("user_map_permissions")
 }
 
@@ -554,7 +551,6 @@ model Event {
   createdAt DateTime @default(now())
 
   @@unique([mapId, timestamp, message])
-  @@index([mapId, timestamp])
   @@map("events")
 }
 
@@ -570,6 +566,5 @@ model CanaryMarker {
   updatedAt DateTime @updatedAt
 
   @@unique([mapId, userId, slot])
-  @@index([mapId, userId])
   @@map("canary_markers")
 }

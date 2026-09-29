@@ -3,7 +3,7 @@ import type {
   LocateSoulDirection,
   LocateSoulDistanceBandKey
 } from "@/lib/domain/locate-soul";
-import type { TowerType } from "@/lib/domain/markers";
+import { PATH_TYPES, type PathType, type TowerType } from "@/lib/domain/markers";
 import type { NoteCategoryMarkerShape } from "@/lib/domain/note-categories";
 
 export type WorkspaceMapLayer = {
@@ -129,7 +129,7 @@ export type PathWorkspaceMarker = {
   name: string;
   notes: string;
   points: Array<{ x: number; y: number }>;
-  type: "bridge" | "canal" | "highway" | "tunnel";
+  type: PathType;
   width: number;
   x: number;
   y: number;
@@ -147,6 +147,39 @@ export type WorkspaceMarker =
   | PathWorkspaceMarker;
 
 export type MarkerType = WorkspaceMarker["type"];
+
+// Marker types stored in their own tables (annotations are not persisted).
+export const PERSISTED_MARKER_TYPES = [
+  "tower", "deed", "note", "rift", "camp", "minedoor", "locateSoul", ...PATH_TYPES
+] as const satisfies readonly MarkerType[];
+export type PersistedMarkerType = typeof PERSISTED_MARKER_TYPES[number];
+
+// One kind per marker table: every path type shares the path table.
+export type MarkerKind = Exclude<PersistedMarkerType, PathType> | "path";
+
+export const MARKER_AUDIT_TARGETS = {
+  camp: "CAMP",
+  deed: "DEED",
+  locateSoul: "LOCATE_SOUL",
+  minedoor: "MINEDOOR",
+  note: "NOTE",
+  path: "PATH",
+  rift: "RIFT",
+  tower: "TOWER"
+} as const satisfies Record<MarkerKind, string>;
+export type MarkerAuditTarget = typeof MARKER_AUDIT_TARGETS[MarkerKind];
+
+export function isPathMarkerType(value: string): value is PathType {
+  return PATH_TYPES.some((pathType) => pathType === value);
+}
+
+export function isPersistedMarkerType(value: string): value is PersistedMarkerType {
+  return PERSISTED_MARKER_TYPES.some((markerType) => markerType === value);
+}
+
+export function getMarkerKind(markerType: PersistedMarkerType): MarkerKind {
+  return isPathMarkerType(markerType) ? "path" : markerType;
+}
 
 export type MarkerVisibility = {
   annotations: boolean;

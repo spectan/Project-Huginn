@@ -29,20 +29,9 @@ export async function GET(_request: Request, context: RouteContext) {
   const storedEvents = await listEventsForMap(map.id);
 
   if (storedEvents.length > 0) {
-    const feed: WurmMapsEventFeed = {
-      events: storedEvents.map((event) => ({
-        id: event.id,
-        kind: "event",
-        label: "Event",
-        message: event.message,
-        subtype: null,
-        timestamp: event.timestamp
-      })),
-      fetchedAt: new Date().toISOString(),
-      serverStatus: { status: "unknown", uptimeSeconds: null, weather: null, wurmTime: null },
-      sourceUrl: getOfficialFeedUrl(map.name) ?? ""
-    };
-    return NextResponse.json({ feed });
+    return NextResponse.json({
+      feed: buildFeed(storedEvents, new Date().toISOString(), getOfficialFeedUrl(map.name) ?? "")
+    });
   }
 
   const freshFeed = await fetchOfficialEventFeed(map.name);
@@ -51,8 +40,18 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Event feed is unavailable" }, { status: 502 });
   }
 
-  const feed: WurmMapsEventFeed = {
-    events: freshFeed.events.slice(0, EVENT_FEED_DISPLAY_LIMIT).map((event) => ({
+  return NextResponse.json({
+    feed: buildFeed(freshFeed.events.slice(0, EVENT_FEED_DISPLAY_LIMIT), freshFeed.fetchedAt, freshFeed.sourceUrl)
+  });
+}
+
+function buildFeed(
+  events: { id: string; message: string; timestamp: number }[],
+  fetchedAt: string,
+  sourceUrl: string
+): WurmMapsEventFeed {
+  return {
+    events: events.map((event) => ({
       id: event.id,
       kind: "event",
       label: "Event",
@@ -60,10 +59,8 @@ export async function GET(_request: Request, context: RouteContext) {
       subtype: null,
       timestamp: event.timestamp
     })),
-    fetchedAt: freshFeed.fetchedAt,
+    fetchedAt,
     serverStatus: { status: "unknown", uptimeSeconds: null, weather: null, wurmTime: null },
-    sourceUrl: freshFeed.sourceUrl
+    sourceUrl
   };
-
-  return NextResponse.json({ feed });
 }

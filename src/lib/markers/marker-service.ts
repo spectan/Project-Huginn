@@ -1,15 +1,12 @@
-import { triggerAlertDetection } from "@/lib/alerts/alert-service";
+import { triggerAlertsSafely } from "@/lib/alerts/trigger-safely";
 import { getOrCreateCanaries, type CanaryDependencies } from "@/lib/canaries/canary-service";
-import { createDiscordDependencies } from "@/lib/discord/database";
-import {
-  dispatchDiscordNotification,
-  type DiscordNotificationMessage
-} from "@/lib/discord/discord-service";
+import { dispatchDiscordSafely } from "@/lib/discord/dispatch-safely";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
   TOWER_PLACEMENT_DISTANCE_TILES,
   TOWER_PROTECTION_DISTANCE_TILES
 } from "@/lib/domain/constants";
+import type { MapBounds } from "@/lib/domain/coordinates";
 import { getDeleteExpiresAt } from "@/lib/domain/deletion";
 import {
   isLocateSoulCasterFacing,
@@ -27,14 +24,20 @@ import {
   validatePathInput,
   validateRiftInput,
   validateTowerInput,
+  type CampInput,
   type CampMarkerInput,
+  type DeedInput,
   type DeedMarkerInput,
+  type LocateSoulInput,
   type LocateSoulMarkerInput,
   type MinedoorMarkerInput,
   type NoteMarkerInput,
+  type PathInput,
   type PathMarkerInput,
   type PathType,
+  type RiftInput,
   type RiftMarkerInput,
+  type TowerInput,
   type TowerMarkerInput,
   type TowerType
 } from "@/lib/domain/markers";
@@ -44,7 +47,14 @@ import {
   canWriteMarkers,
   type UserAccess
 } from "@/lib/domain/permissions";
-import { ABANDONED_DEED_CATEGORY_NAME } from "@/lib/domain/note-categories";
+import {
+  ABANDONED_DEED_CATEGORY_NAME,
+  DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
+  MAX_NOTE_CATEGORY_PIP_SIZE,
+  MIN_NOTE_CATEGORY_PIP_SIZE,
+  NOTE_CATEGORY_MARKER_SHAPES,
+  type NoteCategoryMarkerShape
+} from "@/lib/domain/note-categories";
 import { err, ok, type Result } from "@/lib/domain/result";
 import {
   MAP_NOT_FOUND,
@@ -52,19 +62,26 @@ import {
   READ_ACCESS_REQUIRED,
   WRITE_ACCESS_REQUIRED
 } from "./marker-errors";
-import type {
-  CampWorkspaceMarker,
-  DeedWorkspaceMarker,
-  LocateSoulWorkspaceMarker,
-  MarkerType,
-  MinedoorWorkspaceMarker,
-  NoteCategory,
-  NoteWorkspaceMarker,
-  PathWorkspaceMarker,
-  RiftWorkspaceMarker,
-  TowerWorkspaceMarker,
-  WorkspaceMap,
-  WorkspaceMarker
+import {
+  MARKER_AUDIT_TARGETS,
+  getMarkerKind,
+  isPathMarkerType,
+  isPersistedMarkerType,
+  type CampWorkspaceMarker,
+  type DeedWorkspaceMarker,
+  type LocateSoulWorkspaceMarker,
+  type MarkerAuditTarget,
+  type MarkerKind,
+  type MarkerType,
+  type MinedoorWorkspaceMarker,
+  type NoteCategory,
+  type NoteWorkspaceMarker,
+  type PathWorkspaceMarker,
+  type PersistedMarkerType,
+  type RiftWorkspaceMarker,
+  type TowerWorkspaceMarker,
+  type WorkspaceMap,
+  type WorkspaceMarker
 } from "./marker-types";
 
 type Actor = UserAccess & {
@@ -90,30 +107,24 @@ type MapLayerRecord = {
   widthPx: number;
 };
 
-type UserSummaryRecord = {
-  username: string;
-};
-
 type MarkerModifierRecord = {
-  createdBy?: UserSummaryRecord | null;
-  updatedBy?: UserSummaryRecord | null;
+  createdBy?: { username: string } | null;
+  updatedBy?: { username: string } | null;
 };
 
-type TowerRecord = Omit<TowerMarkerInput, "towerType"> & {
-  id: string;
-  mapId: string;
-  towerType: string;
-} & MarkerModifierRecord;
-
-type DeedRecord = DeedMarkerInput & {
-  id: string;
-  mapId: string;
-} & MarkerModifierRecord;
-
-type NoteRecord = NoteMarkerInput & {
-  id: string;
-  mapId: string;
-} & MarkerModifierRecord;
+type MarkerRecord<T> = T & { id: string; mapId: string } & MarkerModifierRecord;
+type TowerRecord = MarkerRecord<Omit<TowerMarkerInput, "towerType"> & { towerType: string }>;
+type DeedRecord = MarkerRecord<DeedMarkerInput>;
+type NoteRecord = MarkerRecord<NoteMarkerInput>;
+type RiftRecord = MarkerRecord<RiftMarkerInput>;
+type CampRecord = MarkerRecord<Omit<CampMarkerInput, "campType"> & { campType: string }>;
+type MinedoorRecord = MarkerRecord<MinedoorMarkerInput>;
+type LocateSoulRecord = MarkerRecord<Omit<LocateSoulMarkerInput, "casterFacing" | "direction" | "distanceBand"> & {
+  casterFacing: string;
+  direction: string;
+  distanceBand: string;
+}>;
+type PathRecord = MarkerRecord<Omit<PathMarkerInput, "pathType"> & { pathType: string }>;
 
 type NoteCategoryRecord = {
   color: string | null;
@@ -124,208 +135,191 @@ type NoteCategoryRecord = {
   pipSize: number;
 };
 
-type RiftRecord = RiftMarkerInput & {
-  id: string;
-  mapId: string;
-} & MarkerModifierRecord;
-
-type CampRecord = Omit<CampMarkerInput, "campType"> & {
-  campType: string;
-  id: string;
-  mapId: string;
-} & MarkerModifierRecord;
-
-type MinedoorRecord = MinedoorMarkerInput & {
-  id: string;
-  mapId: string;
-} & MarkerModifierRecord;
-
-type LocateSoulRecord = Omit<LocateSoulMarkerInput, "casterFacing" | "direction" | "distanceBand"> & {
-  casterFacing: string;
-  direction: string;
-  distanceBand: string;
-  id: string;
-  mapId: string;
-} & MarkerModifierRecord;
-
-type PathRecord = Omit<PathMarkerInput, "pathType"> & {
-  id: string;
-  mapId: string;
-  pathType: string;
-} & MarkerModifierRecord;
-
 type MarkerWithMap<T> = T & {
   map: MapRecord;
 };
 
-type MarkerAuditAction =
-  | "FAILED_AUTHORIZATION"
-  | "MARKER_CREATED"
-  | "MARKER_UPDATED"
-  | "MARKER_DELETED";
+// Per marker kind: raw parsed input, validated input, stored record and served marker.
+type KindTypes<Input, Valid, StoredRecord, Marker extends WorkspaceMarker> = {
+  input: Input;
+  marker: Marker;
+  record: StoredRecord;
+  valid: Valid;
+};
 
-type MarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "MAP";
+type MarkerKindTypes = {
+  camp: KindTypes<CampInput, CampMarkerInput, CampRecord, CampWorkspaceMarker>;
+  deed: KindTypes<DeedInput, DeedMarkerInput, DeedRecord, DeedWorkspaceMarker>;
+  locateSoul: KindTypes<LocateSoulInput, LocateSoulMarkerInput, LocateSoulRecord, LocateSoulWorkspaceMarker>;
+  minedoor: KindTypes<MinedoorMarkerInput, MinedoorMarkerInput, MinedoorRecord, MinedoorWorkspaceMarker>;
+  note: KindTypes<NoteMarkerInput, NoteMarkerInput, NoteRecord, NoteWorkspaceMarker>;
+  path: KindTypes<PathInput, PathMarkerInput, PathRecord, PathWorkspaceMarker>;
+  rift: KindTypes<RiftInput, RiftMarkerInput, RiftRecord, RiftWorkspaceMarker>;
+  tower: KindTypes<TowerInput, TowerMarkerInput, TowerRecord, TowerWorkspaceMarker>;
+};
+
+type KindInput<K extends MarkerKind> = MarkerKindTypes[K]["input"];
+type KindValid<K extends MarkerKind> = MarkerKindTypes[K]["valid"];
+type KindRecord<K extends MarkerKind> = MarkerKindTypes[K]["record"];
+type KindMarker<K extends MarkerKind> = MarkerKindTypes[K]["marker"];
+type PersistedWorkspaceMarker = KindMarker<MarkerKind>;
 
 type MarkerAuditInput = {
-  action: MarkerAuditAction;
+  action: "FAILED_AUTHORIZATION" | "MARKER_CREATED" | "MARKER_UPDATED" | "MARKER_DELETED";
   actorUserId: string | null;
   mapId: string | null;
   metadata: Record<string, unknown>;
   targetId: string | null;
-  targetType: MarkerAuditTarget;
+  targetType: MarkerAuditTarget | "MAP";
+};
+
+type CreateMarkerData = { createdByUserId: string; mapId: string; updatedByUserId: string };
+
+export type MarkerStore<K extends MarkerKind> = {
+  create(input: KindValid<K> & CreateMarkerData): Promise<KindRecord<K>>;
+  find(id: string): Promise<MarkerWithMap<KindRecord<K>> | null>;
+  listActive(mapId: string): Promise<Array<KindRecord<K>>>;
+  softDelete(
+    id: string,
+    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
+  ): Promise<KindRecord<K> | null>;
+  update(id: string, input: KindValid<K> & { updatedByUserId: string }): Promise<KindRecord<K> | null>;
 };
 
 export type MarkerServiceDependencies = CanaryDependencies & {
-  createCamp(input: CampMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<CampRecord>;
-  createDeed(input: DeedMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<DeedRecord>;
-  createLocateSoul(input: LocateSoulMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<LocateSoulRecord>;
-  createMinedoor(input: MinedoorMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<MinedoorRecord>;
-  createNote(input: NoteMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<NoteRecord>;
-  createPath(input: PathMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<PathRecord>;
-  createRift(input: RiftMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<RiftRecord>;
-  createTower(input: TowerMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string }): Promise<TowerRecord>;
   disbandDeed(input: {
     actorUserId: string;
     categoryName: string;
     deedId: string;
     deletedAt: Date;
     deleteExpiresAt: Date;
-    note: NoteMarkerInput & { createdByUserId: string; mapId: string; updatedByUserId: string };
+    note: NoteMarkerInput & CreateMarkerData;
   }): Promise<{
     category: NoteCategoryRecord;
     deletedDeed: DeedRecord;
     note: NoteRecord;
   } | null>;
-  findCamp(id: string): Promise<MarkerWithMap<CampRecord> | null>;
-  findDeed(id: string): Promise<MarkerWithMap<DeedRecord> | null>;
-  findLocateSoul(id: string): Promise<MarkerWithMap<LocateSoulRecord> | null>;
   findMap(mapId: string): Promise<MapRecord | null>;
-  findMinedoor(id: string): Promise<MarkerWithMap<MinedoorRecord> | null>;
-  findNote(id: string): Promise<MarkerWithMap<NoteRecord> | null>;
-  findPath(id: string): Promise<MarkerWithMap<PathRecord> | null>;
-  findRift(id: string): Promise<MarkerWithMap<RiftRecord> | null>;
-  findTower(id: string): Promise<MarkerWithMap<TowerRecord> | null>;
+  markers: { [K in MarkerKind]: MarkerStore<K> };
   noteCategoryExists(mapId: string, name: string): Promise<boolean>;
-  listActiveMarkers(mapId: string): Promise<{
-    camps: CampRecord[];
-    deeds: DeedRecord[];
-    locateSouls: LocateSoulRecord[];
-    minedoors: MinedoorRecord[];
-    notes: NoteRecord[];
-    paths: PathRecord[];
-    rifts: RiftRecord[];
-    towers: TowerRecord[];
-  }>;
   now(): Date;
   recordAudit(input: MarkerAuditInput): Promise<void>;
-  softDeleteCamp(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<CampRecord | null>;
-  softDeleteDeed(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<DeedRecord | null>;
-  softDeleteLocateSoul(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<LocateSoulRecord | null>;
-  softDeleteMinedoor(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<MinedoorRecord | null>;
-  softDeleteNote(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<NoteRecord | null>;
-  softDeletePath(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<PathRecord | null>;
-  softDeleteRift(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<RiftRecord | null>;
-  softDeleteTower(
-    id: string,
-    input: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date }
-  ): Promise<TowerRecord | null>;
-  updateCamp(id: string, input: CampMarkerInput & { updatedByUserId: string }): Promise<CampRecord | null>;
-  updateDeed(id: string, input: DeedMarkerInput & { updatedByUserId: string }): Promise<DeedRecord | null>;
-  updateLocateSoul(id: string, input: LocateSoulMarkerInput & { updatedByUserId: string }): Promise<LocateSoulRecord | null>;
-  updateMinedoor(id: string, input: MinedoorMarkerInput & { updatedByUserId: string }): Promise<MinedoorRecord | null>;
-  updateNote(id: string, input: NoteMarkerInput & { updatedByUserId: string }): Promise<NoteRecord | null>;
-  updatePath(id: string, input: PathMarkerInput & { updatedByUserId: string }): Promise<PathRecord | null>;
-  updateRift(id: string, input: RiftMarkerInput & { updatedByUserId: string }): Promise<RiftRecord | null>;
-  updateTower(id: string, input: TowerMarkerInput & { updatedByUserId: string }): Promise<TowerRecord | null>;
 };
 
-type PathCreateMarkerInput = { type: PathType } & {
-  name: string;
-  notes: string;
-  points: Array<{ x: number; y: number }>;
-  width: number;
+type FieldReader = {
+  bool(key: string): boolean;
+  num(key: string): number;
+  str(key: string): string;
+  xy(): { x: number; y: number };
 };
 
-type CreateMarkerInput =
-  | ({ type: "tower" } & {
-      damage: string;
-      makerName: string;
-      makerNumber: string;
-      planned?: boolean;
-      ql: string;
-      towerType?: string;
-      x: number;
-      y: number;
-    })
-  | ({ type: "deed" } & {
-      east: number;
-      foundingDate: string;
-      founder: string;
-      name: string;
-      north: number;
-      perimeter: number;
-      south: number;
-      west: number;
-      x: number;
-      y: number;
-    })
-  | ({ type: "note" } & {
-      category: string;
-      text: string;
-      title: string;
-      x: number;
-      y: number;
-    })
-  | ({ type: "rift" } & {
-      arrivalDate: string;
-      estimatedRiftTime: string;
-      notes: string;
-      x: number;
-      y: number;
-    })
-  | ({ type: "camp" } & {
-      campType: string;
-      notes: string;
-      x: number;
-      y: number;
-    })
-  | ({ type: "minedoor" } & {
-      notes: string;
-      strength: string;
-      x: number;
-      y: number;
-    })
-  | ({ type: "locateSoul" } & {
-      casterFacing: string;
-      direction: string;
-      distanceBand: string;
-      notes: string;
-      targetName: string;
-      x: number;
-      y: number;
-    })
-  | PathCreateMarkerInput;
+type MarkerKindHandler<K extends MarkerKind> = {
+  parse(read: FieldReader, input: object, markerType: PersistedMarkerType): KindInput<K>;
+  serialize(record: KindRecord<K>): KindMarker<K>;
+  validate(input: KindInput<K>, bounds: MapBounds): Result<KindValid<K>>;
+  // Extra check before a write; `existing` is null when creating.
+  checkWrite?(
+    dependencies: MarkerServiceDependencies,
+    mapId: string,
+    valid: KindValid<K>,
+    existing: KindRecord<K> | null
+  ): Promise<Result<true>>;
+  // Whether a stored record may be addressed under `markerType`.
+  matchesType?(record: KindRecord<K>, markerType: PersistedMarkerType): boolean;
+};
+
+const MARKER_KINDS: { [K in MarkerKind]: MarkerKindHandler<K> } = {
+  camp: {
+    parse: (read) => ({ campType: read.str("campType"), notes: read.str("notes"), ...read.xy() }),
+    serialize: serializeCamp,
+    validate: validateCampInput
+  },
+  deed: {
+    parse: (read) => ({
+      east: read.num("east"),
+      foundingDate: read.str("foundingDate"),
+      founder: read.str("founder"),
+      name: read.str("name"),
+      north: read.num("north"),
+      perimeter: read.num("perimeter"),
+      south: read.num("south"),
+      west: read.num("west"),
+      ...read.xy()
+    }),
+    serialize: serializeDeed,
+    validate: validateDeedInput
+  },
+  locateSoul: {
+    parse: (read) => ({
+      casterFacing: read.str("casterFacing"),
+      direction: read.str("direction"),
+      distanceBand: read.str("distanceBand"),
+      notes: read.str("notes"),
+      targetName: read.str("targetName"),
+      ...read.xy()
+    }),
+    serialize: serializeLocateSoul,
+    validate: validateLocateSoulInput
+  },
+  minedoor: {
+    parse: (read) => ({ notes: read.str("notes"), strength: read.str("strength"), ...read.xy() }),
+    serialize: serializeMinedoor,
+    validate: validateMinedoorInput
+  },
+  note: {
+    // Only a new or changed category must exist; an unchanged one is left as-is.
+    checkWrite: async (dependencies, mapId, note, existing) => (
+      note.category === existing?.category ? ok(true) : requireNoteCategory(dependencies, mapId, note.category)
+    ),
+    parse: (read) => ({ category: read.str("category"), text: read.str("text"), title: read.str("title"), ...read.xy() }),
+    serialize: serializeNote,
+    validate: validateNoteInput
+  },
+  path: {
+    matchesType: (path, markerType) => path.pathType === markerType,
+    parse: (read, input, markerType) => ({
+      name: read.str("name"),
+      notes: read.str("notes"),
+      points: getPathPoints(input, "points"),
+      type: markerType,
+      width: read.num("width")
+    }),
+    serialize: serializePath,
+    validate: validatePathInput
+  },
+  rift: {
+    parse: (read) => ({
+      arrivalDate: read.str("arrivalDate"),
+      estimatedRiftTime: read.str("estimatedRiftTime"),
+      notes: read.str("notes"),
+      ...read.xy()
+    }),
+    serialize: serializeRift,
+    validate: validateRiftInput
+  },
+  tower: {
+    parse: (read) => ({
+      damage: read.str("damage"),
+      makerName: read.str("makerName"),
+      makerNumber: read.str("makerNumber"),
+      planned: read.bool("planned"),
+      ql: read.str("ql"),
+      towerType: read.str("towerType"),
+      ...read.xy()
+    }),
+    serialize: serializeTower,
+    validate: validateTowerInput
+  }
+};
+
+// Order in which marker kinds are listed.
+const LISTED_MARKER_KINDS = ["tower", "deed", "note", "rift", "camp", "minedoor", "locateSoul", "path"] as const;
+
+type ParsedMarkerInput<K extends MarkerKind> = {
+  input: KindInput<K>;
+  kind: K;
+  type: PersistedMarkerType;
+};
 
 export async function listMarkers(
   input: { actor: Actor; includeCanaries?: boolean; mapId: string },
@@ -342,17 +336,9 @@ export async function listMarkers(
     return err(MAP_NOT_FOUND);
   }
 
-  const markers = await dependencies.listActiveMarkers(map.id);
-  const serialized: WorkspaceMarker[] = [
-    ...markers.towers.map(serializeTower),
-    ...markers.deeds.map(serializeDeed),
-    ...markers.notes.map(serializeNote),
-    ...markers.rifts.map(serializeRift),
-    ...markers.camps.map(serializeCamp),
-    ...markers.minedoors.map(serializeMinedoor),
-    ...markers.locateSouls.map(serializeLocateSoul),
-    ...markers.paths.map(serializePath)
-  ];
+  const serialized: WorkspaceMarker[] = (await Promise.all(
+    LISTED_MARKER_KINDS.map((kind) => listActiveKind(kind, map.id, dependencies))
+  )).flat();
 
   if (input.includeCanaries === true) {
     const canaries = await getOrCreateCanaries(
@@ -367,6 +353,15 @@ export async function listMarkers(
     map: serializeMap(map),
     markers: serialized
   });
+}
+
+async function listActiveKind<K extends MarkerKind>(
+  kind: K,
+  mapId: string,
+  dependencies: MarkerServiceDependencies
+): Promise<WorkspaceMarker[]> {
+  const records = await dependencies.markers[kind].listActive(mapId);
+  return records.map((record) => MARKER_KINDS[kind].serialize(record));
 }
 
 // Inserts each canary at a deterministic position derived from its id so
@@ -385,9 +380,10 @@ export async function createMarker(
   input: { actor: Actor; input: unknown; mapId: string },
   dependencies: MarkerServiceDependencies
 ): Promise<Result<WorkspaceMarker>> {
-  if (!canWriteMarkers(input.actor, input.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, input.mapId, "MARKER_WRITE");
-    return err(WRITE_ACCESS_REQUIRED);
+  const access = await checkWriteAccess(dependencies, input.actor, input.mapId);
+
+  if (!access.ok) {
+    return access;
   }
 
   const map = await dependencies.findMap(input.mapId);
@@ -396,163 +392,35 @@ export async function createMarker(
     return err(MAP_NOT_FOUND);
   }
 
-  const bounds = { heightPx: map.heightPx, widthPx: map.widthPx };
   const markerInput = parseMarkerInput(input.input);
 
   if (!markerInput.ok) {
     return markerInput;
   }
 
-  if (markerInput.value.type === "tower") {
-    const tower = validateTowerInput(markerInput.value, bounds);
+  return createParsedMarker(markerInput.value, map, input.actor, dependencies);
+}
 
-    if (!tower.ok) {
-      return tower;
-    }
+async function createParsedMarker<K extends MarkerKind>(
+  parsed: ParsedMarkerInput<K>,
+  map: MapRecord,
+  actor: Actor,
+  dependencies: MarkerServiceDependencies
+): Promise<Result<WorkspaceMarker>> {
+  const validated = await validateMarkerWrite(parsed, map, map.id, null, dependencies);
 
-    const created = await dependencies.createTower({
-      ...tower.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializeTower(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
+  if (!validated.ok) {
+    return validated;
   }
 
-  if (markerInput.value.type === "deed") {
-    const deed = validateDeedInput(markerInput.value, bounds);
-
-    if (!deed.ok) {
-      return deed;
-    }
-
-    const created = await dependencies.createDeed({
-      ...deed.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializeDeed(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
-  }
-
-  if (markerInput.value.type === "rift") {
-    const rift = validateRiftInput(markerInput.value, bounds);
-
-    if (!rift.ok) {
-      return rift;
-    }
-
-    const created = await dependencies.createRift({
-      ...rift.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializeRift(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
-  }
-
-  if (markerInput.value.type === "camp") {
-    const camp = validateCampInput(markerInput.value, bounds);
-
-    if (!camp.ok) {
-      return camp;
-    }
-
-    const created = await dependencies.createCamp({
-      ...camp.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializeCamp(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
-  }
-
-  if (markerInput.value.type === "minedoor") {
-    const minedoor = validateMinedoorInput(markerInput.value, bounds);
-
-    if (!minedoor.ok) {
-      return minedoor;
-    }
-
-    const created = await dependencies.createMinedoor({
-      ...minedoor.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializeMinedoor(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
-  }
-
-  if (markerInput.value.type === "locateSoul") {
-    const locateSoul = validateLocateSoulInput(markerInput.value, bounds);
-
-    if (!locateSoul.ok) {
-      return locateSoul;
-    }
-
-    const created = await dependencies.createLocateSoul({
-      ...locateSoul.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializeLocateSoul(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
-  }
-
-  if (isPathCreateMarkerInput(markerInput.value)) {
-    const path = validatePathInput(markerInput.value, bounds);
-
-    if (!path.ok) {
-      return path;
-    }
-
-    const created = await dependencies.createPath({
-      ...path.value,
-      createdByUserId: input.actor.id,
-      mapId: map.id,
-      updatedByUserId: input.actor.id
-    });
-    const marker = serializePath(created);
-    await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
-    return ok(marker);
-  }
-
-  if (markerInput.value.type !== "note") {
-    return err("Marker type is invalid");
-  }
-
-  const note = validateNoteInput(markerInput.value, bounds);
-
-  if (!note.ok) {
-    return note;
-  }
-
-  const category = await requireNoteCategory(dependencies, map.id, note.value.category);
-
-  if (!category.ok) {
-    return category;
-  }
-
-  const created = await dependencies.createNote({
-    ...note.value,
-    createdByUserId: input.actor.id,
+  const created = await dependencies.markers[parsed.kind].create({
+    ...validated.value,
+    createdByUserId: actor.id,
     mapId: map.id,
-    updatedByUserId: input.actor.id
+    updatedByUserId: actor.id
   });
-  const marker = serializeNote(created);
-  await auditMarkerWrite(dependencies, "MARKER_CREATED", input.actor, map.id, map.name, marker);
+  const marker = MARKER_KINDS[parsed.kind].serialize(created);
+  await auditMarkerWrite(dependencies, "MARKER_CREATED", actor, map.id, map.name, marker);
   return ok(marker);
 }
 
@@ -575,251 +443,75 @@ export async function updateMarker(
     return err("Marker type mismatch");
   }
 
-  if (input.markerType === "tower") {
-    const existing = await dependencies.findTower(input.markerId);
+  return updateParsedMarker(markerInput.value, input.markerId, input.actor, dependencies);
+}
 
-    if (existing === null || markerInput.value.type !== "tower") {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
+async function updateParsedMarker<K extends MarkerKind>(
+  parsed: ParsedMarkerInput<K>,
+  markerId: string,
+  actor: Actor,
+  dependencies: MarkerServiceDependencies
+): Promise<Result<WorkspaceMarker>> {
+  const existing = await findMarker(parsed.kind, parsed.type, markerId, dependencies);
 
-    const validated = validateTowerInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updateTower(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializeTower(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  if (input.markerType === "deed") {
-    const existing = await dependencies.findDeed(input.markerId);
-
-    if (existing === null || markerInput.value.type !== "deed") {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
-
-    const validated = validateDeedInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updateDeed(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializeDeed(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  if (input.markerType === "rift") {
-    const existing = await dependencies.findRift(input.markerId);
-
-    if (existing === null || markerInput.value.type !== "rift") {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
-
-    const validated = validateRiftInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updateRift(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializeRift(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  if (input.markerType === "camp") {
-    const existing = await dependencies.findCamp(input.markerId);
-
-    if (existing === null || markerInput.value.type !== "camp") {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
-
-    const validated = validateCampInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updateCamp(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializeCamp(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  if (input.markerType === "minedoor") {
-    const existing = await dependencies.findMinedoor(input.markerId);
-
-    if (existing === null || markerInput.value.type !== "minedoor") {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
-
-    const validated = validateMinedoorInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updateMinedoor(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializeMinedoor(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  if (input.markerType === "locateSoul") {
-    const existing = await dependencies.findLocateSoul(input.markerId);
-
-    if (existing === null || markerInput.value.type !== "locateSoul") {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
-
-    const validated = validateLocateSoulInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updateLocateSoul(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializeLocateSoul(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  if (isPathMarkerType(input.markerType)) {
-    const existing = await dependencies.findPath(input.markerId);
-
-    if (existing === null || !isPathCreateMarkerInput(markerInput.value) || existing.pathType !== input.markerType) {
-      return err(MARKER_NOT_FOUND);
-    }
-    if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-      return err(WRITE_ACCESS_REQUIRED);
-    }
-
-    const validated = validatePathInput(markerInput.value, existing.map);
-    if (!validated.ok) {
-      return validated;
-    }
-
-    const updated = await dependencies.updatePath(input.markerId, {
-      ...validated.value,
-      updatedByUserId: input.actor.id
-    });
-
-    if (updated === null) {
-      return err(MARKER_NOT_FOUND);
-    }
-
-    const marker = serializePath(updated);
-    await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
-    return ok(marker);
-  }
-
-  const existing = await dependencies.findNote(input.markerId);
-
-  if (existing === null || markerInput.value.type !== "note") {
+  if (existing === null) {
     return err(MARKER_NOT_FOUND);
   }
-  if (!canWriteMarkers(input.actor, existing.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-    return err(WRITE_ACCESS_REQUIRED);
+
+  const access = await checkWriteAccess(dependencies, actor, existing.mapId);
+
+  if (!access.ok) {
+    return access;
   }
 
-  const validated = validateNoteInput(markerInput.value, existing.map);
+  const validated = await validateMarkerWrite(parsed, existing.map, existing.mapId, existing, dependencies);
+
   if (!validated.ok) {
     return validated;
   }
 
-  // Only a changed category must exist; an unchanged one is left as-is.
-  if (validated.value.category !== existing.category) {
-    const category = await requireNoteCategory(dependencies, existing.mapId, validated.value.category);
-    if (!category.ok) {
-      return category;
-    }
-  }
-
-  const updated = await dependencies.updateNote(input.markerId, {
+  const updated = await dependencies.markers[parsed.kind].update(markerId, {
     ...validated.value,
-    updatedByUserId: input.actor.id
+    updatedByUserId: actor.id
   });
 
   if (updated === null) {
     return err(MARKER_NOT_FOUND);
   }
 
-  const marker = serializeNote(updated);
-  await auditMarkerWrite(dependencies, "MARKER_UPDATED", input.actor, existing.mapId, existing.map.name, marker);
+  const marker = MARKER_KINDS[parsed.kind].serialize(updated);
+  await auditMarkerWrite(dependencies, "MARKER_UPDATED", actor, existing.mapId, existing.map.name, marker);
   return ok(marker);
+}
+
+async function validateMarkerWrite<K extends MarkerKind>(
+  parsed: ParsedMarkerInput<K>,
+  bounds: MapBounds,
+  mapId: string,
+  existing: KindRecord<K> | null,
+  dependencies: MarkerServiceDependencies
+): Promise<Result<KindValid<K>>> {
+  const handler = MARKER_KINDS[parsed.kind];
+  const validated = handler.validate(parsed.input, bounds);
+
+  if (!validated.ok || handler.checkWrite === undefined) {
+    return validated;
+  }
+
+  const checked = await handler.checkWrite(dependencies, mapId, validated.value, existing);
+  return checked.ok ? validated : checked;
+}
+
+// A marker is found only while live and addressable under the requested type
+// (a path id addressed under a different path type is treated as not found).
+async function findMarker<K extends MarkerKind>(
+  kind: K,
+  markerType: PersistedMarkerType,
+  markerId: string,
+  dependencies: MarkerServiceDependencies
+): Promise<MarkerWithMap<KindRecord<K>> | null> {
+  const existing = await dependencies.markers[kind].find(markerId);
+  return existing === null || MARKER_KINDS[kind].matchesType?.(existing, markerType) === false ? null : existing;
 }
 
 export async function disbandDeedMarker(
@@ -833,14 +525,16 @@ export async function disbandDeedMarker(
   deletedMarkerId: string;
   marker: NoteWorkspaceMarker;
 }>> {
-  const existing = await dependencies.findDeed(input.markerId);
+  const existing = await dependencies.markers.deed.find(input.markerId);
 
   if (existing === null) {
     return err(MARKER_NOT_FOUND);
   }
-  if (!canWriteMarkers(input.actor, existing.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-    return err(WRITE_ACCESS_REQUIRED);
+
+  const access = await checkWriteAccess(dependencies, input.actor, existing.mapId);
+
+  if (!access.ok) {
+    return access;
   }
 
   const note = validateNoteInput({
@@ -894,115 +588,38 @@ export async function disbandDeedMarker(
   triggerAlertsSafely();
 
   return ok({
-    category: {
-      ...serializeNoteCategory(conversion.category)
-    },
+    category: serializeNoteCategory(conversion.category),
     deletedMarkerId: conversion.deletedDeed.id,
     marker
   });
 }
 
-function parseMarkerInput(input: unknown): Result<CreateMarkerInput> {
+function parseMarkerInput(input: unknown): Result<ParsedMarkerInput<MarkerKind>> {
   if (typeof input !== "object" || input === null || !("type" in input)) {
     return err("Marker input is required");
   }
 
-  if (input.type === "tower") {
-    return ok({
-      damage: getString(input, "damage"),
-      makerName: getString(input, "makerName"),
-      makerNumber: getString(input, "makerNumber"),
-      planned: getBoolean(input, "planned"),
-      ql: getString(input, "ql"),
-      towerType: getString(input, "towerType"),
-      type: "tower",
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
+  if (typeof input.type !== "string" || !isPersistedMarkerType(input.type)) {
+    return err("Marker type is invalid");
   }
 
-  if (input.type === "deed") {
-    return ok({
-      east: getNumber(input, "east"),
-      foundingDate: getString(input, "foundingDate"),
-      founder: getString(input, "founder"),
-      name: getString(input, "name"),
-      north: getNumber(input, "north"),
-      perimeter: getNumber(input, "perimeter"),
-      south: getNumber(input, "south"),
-      type: "deed",
-      west: getNumber(input, "west"),
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
-  }
+  const read: FieldReader = {
+    bool: (key) => getBoolean(input, key),
+    num: (key) => getNumber(input, key),
+    str: (key) => getString(input, key),
+    xy: () => ({ x: getNumber(input, "x"), y: getNumber(input, "y") })
+  };
 
-  if (input.type === "note") {
-    return ok({
-      category: getString(input, "category"),
-      text: getString(input, "text"),
-      title: getString(input, "title"),
-      type: "note",
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
-  }
+  return ok(parseKindInput(getMarkerKind(input.type), input.type, read, input));
+}
 
-  if (input.type === "rift") {
-    return ok({
-      arrivalDate: getString(input, "arrivalDate"),
-      estimatedRiftTime: getString(input, "estimatedRiftTime"),
-      notes: getString(input, "notes"),
-      type: "rift",
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
-  }
-
-  if (input.type === "camp") {
-    return ok({
-      campType: getString(input, "campType"),
-      notes: getString(input, "notes"),
-      type: "camp",
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
-  }
-
-  if (input.type === "minedoor") {
-    return ok({
-      notes: getString(input, "notes"),
-      strength: getString(input, "strength"),
-      type: "minedoor",
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
-  }
-
-  if (input.type === "locateSoul") {
-    return ok({
-      casterFacing: getString(input, "casterFacing"),
-      direction: getString(input, "direction"),
-      distanceBand: getString(input, "distanceBand"),
-      notes: getString(input, "notes"),
-      targetName: getString(input, "targetName"),
-      type: "locateSoul",
-      x: getNumber(input, "x"),
-      y: getNumber(input, "y")
-    });
-  }
-
-  if (input.type === "bridge" || input.type === "canal" || input.type === "highway" || input.type === "tunnel") {
-    return ok({
-      name: getString(input, "name"),
-      notes: getString(input, "notes"),
-      points: getPathPoints(input, "points"),
-      type: input.type,
-      width: getNumber(input, "width")
-    });
-  }
-
-  return err("Marker type is invalid");
+function parseKindInput<K extends MarkerKind>(
+  kind: K,
+  type: PersistedMarkerType,
+  read: FieldReader,
+  input: object
+): ParsedMarkerInput<K> {
+  return { input: MARKER_KINDS[kind].parse(read, input, type), kind, type };
 }
 
 function getString(input: object, key: string): string {
@@ -1033,33 +650,34 @@ function getBoolean(input: object, key: string): boolean {
 }
 
 export async function deleteMarker(
-  input: { actor: Actor; markerId: string; markerType: MarkerType },
+  input: { actor: Actor; markerId: string; markerType: PersistedMarkerType },
   dependencies: MarkerServiceDependencies
 ): Promise<Result<{
   deletedAt: Date;
   deleteExpiresAt: Date;
   markerId: string;
-  markerType: MarkerType;
+  markerType: PersistedMarkerType;
 }>> {
-  const existing = await findExistingMarkerForDelete(input, dependencies);
+  const kind = getMarkerKind(input.markerType);
+  const existing = await findMarker(kind, input.markerType, input.markerId, dependencies);
 
   if (existing === null) {
     return err(MARKER_NOT_FOUND);
   }
 
-  if (!canWriteMarkers(input.actor, existing.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
-    return err(WRITE_ACCESS_REQUIRED);
+  const access = await checkWriteAccess(dependencies, input.actor, existing.mapId);
+
+  if (!access.ok) {
+    return access;
   }
 
   const deletedAt = dependencies.now();
   const deleteExpiresAt = getDeleteExpiresAt(deletedAt);
-  const softDeleteInput = {
+  const deleted = await dependencies.markers[kind].softDelete(input.markerId, {
     deletedAt,
     deletedByUserId: input.actor.id,
     deleteExpiresAt
-  };
-  const deleted = await softDeleteMarker(input, softDeleteInput, dependencies);
+  });
 
   if (deleted === null) {
     return err(MARKER_NOT_FOUND);
@@ -1071,11 +689,11 @@ export async function deleteMarker(
     mapId: deleted.mapId,
     metadata: {
       markerType: input.markerType,
-      x: "x" in deleted ? deleted.x : undefined,
-      y: "y" in deleted ? deleted.y : undefined
+      x: deleted.x,
+      y: deleted.y
     },
     targetId: deleted.id,
-    targetType: getAuditTargetType(input.markerType)
+    targetType: MARKER_AUDIT_TARGETS[kind]
   });
   triggerAlertsSafely();
   dispatchDiscordSafely({
@@ -1219,15 +837,14 @@ function serializeNoteCategory(category: NoteCategoryRecord): NoteCategory {
   return {
     color: category.color,
     id: category.id,
-    markerShape: category.markerShape === "x" ||
-      category.markerShape === "o" ||
-      category.markerShape === "triangle" ||
-      category.markerShape === "square"
-      ? category.markerShape
-      : "circle",
+    markerShape: normalizeNoteCategoryMarkerShape(category.markerShape),
     name: category.name,
-    pipSize: Math.min(10, Math.max(1, Math.round(category.pipSize)))
+    pipSize: Math.min(MAX_NOTE_CATEGORY_PIP_SIZE, Math.max(MIN_NOTE_CATEGORY_PIP_SIZE, Math.round(category.pipSize)))
   };
+}
+
+export function normalizeNoteCategoryMarkerShape(value: string): NoteCategoryMarkerShape {
+  return NOTE_CATEGORY_MARKER_SHAPES.find((shape) => shape === value) ?? DEFAULT_NOTE_CATEGORY_MARKER_SHAPE;
 }
 
 function serializeRift(rift: RiftRecord): RiftWorkspaceMarker {
@@ -1309,11 +926,7 @@ function serializePath(path: PathRecord): PathWorkspaceMarker {
 }
 
 function normalizeStoredPathType(pathType: string): PathType {
-  if (pathType === "canal" || pathType === "highway" || pathType === "tunnel") {
-    return pathType;
-  }
-
-  return "bridge";
+  return isPathMarkerType(pathType) ? pathType : "bridge";
 }
 
 function formatDisbandedDeedNoteText(deed: DeedRecord): string {
@@ -1331,80 +944,6 @@ function formatOptionalDateTime(value: Date | null): string | null {
   return value === null ? null : value.toISOString().slice(0, 16);
 }
 
-async function softDeleteMarker(
-  input: { markerId: string; markerType: MarkerType },
-  softDeleteInput: { deletedAt: Date; deletedByUserId: string; deleteExpiresAt: Date },
-  dependencies: MarkerServiceDependencies
-): Promise<(TowerRecord | DeedRecord | NoteRecord | RiftRecord | CampRecord | MinedoorRecord | LocateSoulRecord | PathRecord) | null> {
-  if (input.markerType === "tower") {
-    return dependencies.softDeleteTower(input.markerId, softDeleteInput);
-  }
-
-  if (input.markerType === "deed") {
-    return dependencies.softDeleteDeed(input.markerId, softDeleteInput);
-  }
-
-  if (input.markerType === "rift") {
-    return dependencies.softDeleteRift(input.markerId, softDeleteInput);
-  }
-
-  if (input.markerType === "camp") {
-    return dependencies.softDeleteCamp(input.markerId, softDeleteInput);
-  }
-
-  if (input.markerType === "minedoor") {
-    return dependencies.softDeleteMinedoor(input.markerId, softDeleteInput);
-  }
-
-  if (input.markerType === "locateSoul") {
-    return dependencies.softDeleteLocateSoul(input.markerId, softDeleteInput);
-  }
-
-  if (isPathMarkerType(input.markerType)) {
-    return dependencies.softDeletePath(input.markerId, softDeleteInput);
-  }
-
-  return dependencies.softDeleteNote(input.markerId, softDeleteInput);
-}
-
-async function findExistingMarkerForDelete(
-  input: { markerId: string; markerType: MarkerType },
-  dependencies: MarkerServiceDependencies
-): Promise<{ mapId: string; map: MapRecord } | null> {
-  if (input.markerType === "tower") {
-    return dependencies.findTower(input.markerId);
-  }
-
-  if (input.markerType === "deed") {
-    return dependencies.findDeed(input.markerId);
-  }
-
-  if (input.markerType === "rift") {
-    return dependencies.findRift(input.markerId);
-  }
-
-  if (input.markerType === "camp") {
-    return dependencies.findCamp(input.markerId);
-  }
-
-  if (input.markerType === "minedoor") {
-    return dependencies.findMinedoor(input.markerId);
-  }
-
-  if (input.markerType === "locateSoul") {
-    return dependencies.findLocateSoul(input.markerId);
-  }
-
-  if (isPathMarkerType(input.markerType)) {
-    const path = await dependencies.findPath(input.markerId);
-
-    // A path id addressed under a different path type is treated as not found.
-    return path === null || path.pathType !== input.markerType ? null : path;
-  }
-
-  return dependencies.findNote(input.markerId);
-}
-
 async function auditAuthorizationFailure(
   dependencies: MarkerServiceDependencies,
   actor: Actor,
@@ -1420,6 +959,20 @@ async function auditAuthorizationFailure(
     targetType: "MAP"
   });
   triggerAlertsSafely();
+}
+
+// Audits and rejects an actor without write access to the map.
+async function checkWriteAccess(
+  dependencies: MarkerServiceDependencies,
+  actor: Actor,
+  mapId: string
+): Promise<Result<true>> {
+  if (canWriteMarkers(actor, mapId)) {
+    return ok(true);
+  }
+
+  await auditAuthorizationFailure(dependencies, actor, mapId, "MARKER_WRITE");
+  return err(WRITE_ACCESS_REQUIRED);
 }
 
 async function requireNoteCategory(
@@ -1440,7 +993,7 @@ async function auditMarkerWrite(
   actor: Actor,
   mapId: string,
   mapName: string,
-  marker: WorkspaceMarker
+  marker: PersistedWorkspaceMarker
 ): Promise<void> {
   await recordAudit(dependencies, {
     action,
@@ -1456,7 +1009,7 @@ async function auditMarkerWrite(
       y: marker.y
     },
     targetId: marker.id,
-    targetType: getAuditTargetType(marker.type)
+    targetType: MARKER_AUDIT_TARGETS[getMarkerKind(marker.type)]
   });
   dispatchDiscordSafely({
     kind: "marker",
@@ -1467,46 +1020,6 @@ async function auditMarkerWrite(
   });
 }
 
-function getAuditTargetType(markerType: MarkerType): MarkerAuditTarget {
-  if (markerType === "tower") {
-    return "TOWER";
-  }
-
-  if (markerType === "deed") {
-    return "DEED";
-  }
-
-  if (markerType === "rift") {
-    return "RIFT";
-  }
-
-  if (markerType === "camp") {
-    return "CAMP";
-  }
-
-  if (markerType === "minedoor") {
-    return "MINEDOOR";
-  }
-
-  if (markerType === "locateSoul") {
-    return "LOCATE_SOUL";
-  }
-
-  if (isPathMarkerType(markerType)) {
-    return "PATH";
-  }
-
-  return "NOTE";
-}
-
-function isPathMarkerType(markerType: MarkerType): markerType is PathType {
-  return markerType === "bridge" || markerType === "canal" || markerType === "highway" || markerType === "tunnel";
-}
-
-function isPathCreateMarkerInput(input: CreateMarkerInput): input is PathCreateMarkerInput {
-  return isPathMarkerType(input.type);
-}
-
 async function recordAudit(
   dependencies: MarkerServiceDependencies,
   input: MarkerAuditInput
@@ -1514,22 +1027,6 @@ async function recordAudit(
   const metadata = removeUndefined(input.metadata);
   assertNoCoordinateMetadata(metadata);
   await dependencies.recordAudit({ ...input, metadata });
-}
-
-function triggerAlertsSafely(): void {
-  try {
-    triggerAlertDetection();
-  } catch {
-    // Alert detection is fire-and-forget; failures must not block the request.
-  }
-}
-
-function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
-  try {
-    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
-  } catch {
-    // Discord notifications are fire-and-forget; failures must not block the request.
-  }
 }
 
 function removeUndefined(metadata: Record<string, unknown>): Record<string, unknown> {

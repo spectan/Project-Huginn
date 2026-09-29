@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 import type { SaveUserMapSettingsDependencies } from "@/lib/map-settings/map-settings-service";
 
 const mocks = vi.hoisted(() => {
@@ -139,12 +140,4 @@ describe("PATCH /api/maps/[mapId]/settings", () => {
   });
 });
 
-function createSettingsRequest(body: unknown): Request {
-  return new Request("http://localhost/api/maps/map-1/settings", {
-    body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "PATCH"
-  });
-}
+const createSettingsRequest = (body: unknown) => jsonRequest("http://localhost/api/maps/map-1/settings", "PATCH", body);

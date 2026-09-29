@@ -26,7 +26,7 @@ export const TOWER_TYPES = [
 export type TowerType = typeof TOWER_TYPES[number];
 export const DEFAULT_TOWER_TYPE: TowerType = "Freedom Isles";
 
-type TowerInput = {
+export type TowerInput = {
   x: number;
   y: number;
   ql: string;
@@ -50,7 +50,7 @@ export type TowerMarkerInput = {
 
 type CampType = "Rift" | "Goblin";
 
-type DeedInput = {
+export type DeedInput = {
   east: number;
   foundingDate: string;
   founder: string;
@@ -76,14 +76,6 @@ export type DeedMarkerInput = {
   y: number;
 };
 
-type NoteInput = {
-  category: string;
-  title: string;
-  x: number;
-  y: number;
-  text: string;
-};
-
 export type NoteMarkerInput = {
   category: string;
   title: string;
@@ -92,7 +84,7 @@ export type NoteMarkerInput = {
   text: string;
 };
 
-type RiftInput = {
+export type RiftInput = {
   arrivalDate: string;
   estimatedRiftTime: string;
   notes: string;
@@ -108,7 +100,7 @@ export type RiftMarkerInput = {
   y: number;
 };
 
-type CampInput = {
+export type CampInput = {
   campType: string;
   notes: string;
   x: number;
@@ -122,13 +114,6 @@ export type CampMarkerInput = {
   y: number;
 };
 
-type MinedoorInput = {
-  notes: string;
-  strength: string;
-  x: number;
-  y: number;
-};
-
 export type MinedoorMarkerInput = {
   notes: string;
   strength: string;
@@ -136,7 +121,7 @@ export type MinedoorMarkerInput = {
   y: number;
 };
 
-type LocateSoulInput = {
+export type LocateSoulInput = {
   casterFacing: string;
   direction: string;
   distanceBand: string;
@@ -156,14 +141,15 @@ export type LocateSoulMarkerInput = {
   y: number;
 };
 
-export type PathType = "bridge" | "canal" | "highway" | "tunnel";
+export const PATH_TYPES = ["bridge", "canal", "highway", "tunnel"] as const;
+export type PathType = typeof PATH_TYPES[number];
 
 type PathPointInput = {
   x: number;
   y: number;
 };
 
-type PathInput = {
+export type PathInput = {
   name: string;
   notes: string;
   points: PathPointInput[];
@@ -326,7 +312,7 @@ export function validateDeedInput(
 }
 
 export function validateNoteInput(
-  input: NoteInput,
+  input: NoteMarkerInput,
   bounds: MapBounds
 ): Result<NoteMarkerInput> {
   const coordinate = validateCoordinate({ x: input.x, y: input.y }, bounds);
@@ -429,7 +415,7 @@ export function validateCampInput(
 }
 
 export function validateMinedoorInput(
-  input: MinedoorInput,
+  input: MinedoorMarkerInput,
   bounds: MapBounds
 ): Result<MinedoorMarkerInput> {
   const coordinate = validateCoordinate({ x: input.x, y: input.y }, bounds);
@@ -673,8 +659,10 @@ function normalizeCampType(input: string): Result<CampType> {
 }
 
 function normalizePathType(input: string): Result<PathType> {
-  if (input === "bridge" || input === "canal" || input === "highway" || input === "tunnel") {
-    return ok(input);
+  const pathType = PATH_TYPES.find((candidate) => candidate === input);
+
+  if (pathType !== undefined) {
+    return ok(pathType);
   }
 
   return err("Path type must be bridge, canal, highway, or tunnel");

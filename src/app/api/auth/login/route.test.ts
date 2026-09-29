@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 
 const mocks = vi.hoisted(() => ({
   clearSessionCookie: vi.fn(),
@@ -53,10 +54,5 @@ describe("POST /api/auth/login", () => {
   });
 });
 
-function createLoginRequest(headers: Record<string, string> = {}): Request {
-  return new Request("http://localhost/api/auth/login", {
-    body: JSON.stringify({ password: "pw", username: "Mako" }),
-    headers: { "content-type": "application/json", ...headers },
-    method: "POST"
-  });
-}
+const createLoginRequest = (headers: Record<string, string> = {}) =>
+  jsonRequest("http://localhost/api/auth/login", "POST", { password: "pw", username: "Mako" }, headers);

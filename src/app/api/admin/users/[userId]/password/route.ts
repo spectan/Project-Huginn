@@ -3,6 +3,8 @@ import { updateAdminUserPassword } from "@/lib/admin/users";
 import { createAdminUserDependencies } from "@/lib/admin/users-database";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { getClientIp } from "@/lib/network/client-ip";
+import { readJson } from "@/lib/http/read-json";
+import { ADMIN_USER_ERROR_STATUSES, getErrorStatus } from "@/lib/http/error-status";
 
 type RouteContext = {
   params: Promise<{
@@ -28,19 +30,11 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error },
-      { status: getErrorStatus(result.error) }
+      { status: getErrorStatus(result.error, ADMIN_USER_ERROR_STATUSES) }
     );
   }
 
   return NextResponse.json({ user: result.value });
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 function getPassword(body: unknown): string {
@@ -54,12 +48,4 @@ function getPassword(body: unknown): string {
   }
 
   return "";
-}
-
-function getErrorStatus(error: string): number {
-  if (error === "Admin access is required") {
-    return 403;
-  }
-
-  return error === "User was not found" ? 404 : 400;
 }

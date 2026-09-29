@@ -57,21 +57,35 @@ import {
   type UserMapSettings
 } from "@/lib/map-settings/map-settings";
 import type { WurmMapsEvent, WurmMapsEventFeed } from "@/lib/wurmmaps/event-feed";
-import type {
-  MarkerColors,
-  MarkerOpacities,
-  MarkerType,
-  MarkerVisibility,
-  NoteCategory,
-  TileHighlightSettings,
-  WorkspaceMap,
-  WorkspaceMapLayer,
-  WorkspaceMarker,
-  WorkspaceServer
+import {
+  isPathMarkerType,
+  type MarkerColors,
+  type MarkerOpacities,
+  type MarkerType,
+  type MarkerVisibility,
+  type NoteCategory,
+  type TileHighlightSettings,
+  type WorkspaceMap,
+  type WorkspaceMapLayer,
+  type WorkspaceMarker,
+  type WorkspaceServer
 } from "@/lib/markers/marker-types";
 import { AccountOverlay, type AccountViewer } from "./account-overlay";
 import { MapSettingsOverlay, type NoteCategoryMutationResult } from "./map-settings-overlay";
+import { DialogHeader } from "./dialog-header";
+import {
+  formatPixels,
+  formatSvgNumber,
+  getPathCoordinateOffset,
+  getPathSvgPoints,
+  getScreenRectStyle,
+  isPathMarker,
+  jsonRequest,
+  percentageToOpacity,
+  type PathMarkerType
+} from "./map-helpers";
 import { MarkerLayer } from "./marker-layer";
+import { readResponseError, requestJson } from "@/lib/client/request-json";
 
 const FALLBACK_MAP_SIZE_PX = 2048;
 const MAX_ZOOM = 64;
@@ -158,6 +172,25 @@ const SERVER_CLUSTERS = new Map<string, typeof SERVER_CLUSTER_ORDER[number]>([
   ["Serenity", "Epic"]
 ]);
 const tileSourceImageDataCache = new Map<string, Promise<ImageData>>();
+const MARKER_TYPE_LABELS: Record<MarkerType, string> = {
+  annotation: "Annotation",
+  bridge: "Bridge",
+  camp: "Camp",
+  canal: "Canal",
+  deed: "Deed",
+  highway: "Highway",
+  locateSoul: "Locate Soul",
+  minedoor: "Minedoor",
+  note: "Note",
+  rift: "Rift",
+  tower: "Tower",
+  tunnel: "Tunnel"
+};
+
+// Settings keys are the plural marker type ("locateSoul" -> "locateSouls").
+function getMarkerTypeKey<T extends MarkerType>(type: T): `${T}s` {
+  return `${type}s`;
+}
 
 type ViewState = {
   x: number;
@@ -250,8 +283,6 @@ type HoveredMarkerState = {
   screenX: number;
   screenY: number;
 };
-
-type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway" | "tunnel">;
 
 type PathDraftState = {
   id?: string;
@@ -515,37 +546,13 @@ export default function MapWorkspace({
     world.style.transformOrigin = "0 0";
   }, []);
 
-  const applyMapImageTransform = useCallback((nextView: ViewState) => {
-    const image = mapImageRef.current;
-
-    if (image === null) {
-      return;
+  const applyImageTransforms = useCallback((nextView: ViewState) => {
+    for (const element of [mapImageRef.current, tileHighlightRef.current, wildernessRef.current]) {
+      if (element !== null) {
+        element.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
+        element.style.transformOrigin = "0 0";
+      }
     }
-
-    image.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
-    image.style.transformOrigin = "0 0";
-  }, []);
-
-  const applyTileHighlightTransform = useCallback((nextView: ViewState) => {
-    const overlay = tileHighlightRef.current;
-
-    if (overlay === null) {
-      return;
-    }
-
-    overlay.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
-    overlay.style.transformOrigin = "0 0";
-  }, []);
-
-  const applyWildernessTransform = useCallback((nextView: ViewState) => {
-    const overlay = wildernessRef.current;
-
-    if (overlay === null) {
-      return;
-    }
-
-    overlay.style.transform = `translate3d(${formatPixels(nextView.x)}, ${formatPixels(nextView.y)}, 0) scale(${formatZoom(nextView.zoom)})`;
-    overlay.style.transformOrigin = "0 0";
   }, []);
 
   const applyMapStageTransform = useCallback((nextView: ViewState) => {
@@ -559,12 +566,10 @@ export default function MapWorkspace({
   }, []);
 
   const applyDirectTransforms = useCallback((nextView: ViewState, baseView: ViewState) => {
-    applyMapImageTransform(nextView);
-    applyTileHighlightTransform(nextView);
-    applyWildernessTransform(nextView);
+    applyImageTransforms(nextView);
     applyMapStageTransform(nextView);
     applyMarkerWorldTransform(nextView, baseView);
-  }, [applyMapImageTransform, applyTileHighlightTransform, applyWildernessTransform, applyMapStageTransform, applyMarkerWorldTransform]);
+  }, [applyImageTransforms, applyMapStageTransform, applyMarkerWorldTransform]);
 
   useEffect(() => {
     if (!isDragging) {
@@ -575,12 +580,10 @@ export default function MapWorkspace({
         world.style.transformOrigin = "";
       }
 
-      applyMapImageTransform(view);
-      applyTileHighlightTransform(view);
-      applyWildernessTransform(view);
+      applyImageTransforms(view);
       applyMapStageTransform(view);
     }
-  }, [isDragging, view, applyMapImageTransform, applyTileHighlightTransform, applyWildernessTransform, applyMapStageTransform]);
+  }, [isDragging, view, applyImageTransforms, applyMapStageTransform]);
 
   const flushPendingView = useCallback(() => {
     if (viewUpdateFrameRef.current !== null) {
@@ -639,7 +642,6 @@ export default function MapWorkspace({
     },
     [dialog, displayedMarkers, pathDraft]
   );
-  const visibleMarkers = displayedMarkersWithEditPreview;
   // Wilderness depends on every deed, not just the ones matching the current search.
   const wildernessMarkers = useMemo(
     () => {
@@ -650,10 +652,6 @@ export default function MapWorkspace({
       return allMarkers.map((marker) => marker.id === dialog.marker.id ? dialog.marker : marker);
     },
     [allMarkers, dialog]
-  );
-  const visibleNameMarkers = useMemo(
-    () => getVisibleNameMarkers(displayedMarkersWithEditPreview, markerVisibility),
-    [displayedMarkersWithEditPreview, markerVisibility]
   );
   const hoveredMarkers = hoveredMarker?.markers ?? [];
   const hiddenDeedLabelId = hoveredMarkers.find((marker) => marker.type === "deed")?.id ?? null;
@@ -748,38 +746,27 @@ export default function MapWorkspace({
     },
     [initialMarkers]
   );
-  const resetUserMapSettings = useCallback(() => {
-    setEventFeedPanelSize(DEFAULT_USER_MAP_SETTINGS.eventFeedPanelSize);
-    setFavoriteServerId(DEFAULT_USER_MAP_SETTINGS.favoriteServerId);
-    setMarkerColors(DEFAULT_USER_MAP_SETTINGS.markerColors);
-    setMarkerOpacities(DEFAULT_USER_MAP_SETTINGS.markerOpacities);
-    setMarkerVisibility(DEFAULT_USER_MAP_SETTINGS.markerVisibility);
-    setNoteCategoryColors(DEFAULT_USER_MAP_SETTINGS.noteCategoryColors);
-    setNoteCategoryMarkerShapes(DEFAULT_USER_MAP_SETTINGS.noteCategoryMarkerShapes);
-    setNoteCategoryPipSizes(DEFAULT_USER_MAP_SETTINGS.noteCategoryPipSizes);
-    setRoadwayEditPanelPosition(DEFAULT_USER_MAP_SETTINGS.roadwayEditPanelPosition);
-    setRoutePlannerSpeedKmh(DEFAULT_USER_MAP_SETTINGS.routePlannerSpeedKmh);
-    setSearchLinesEnabled(DEFAULT_USER_MAP_SETTINGS.searchLinesEnabled);
-    setTileHighlight(DEFAULT_USER_MAP_SETTINGS.tileHighlight);
-    setTileHighlightPanelPosition(DEFAULT_USER_MAP_SETTINGS.tileHighlightPanelPosition);
+  // Annotations are left alone: profiles are shared across servers, so loading one keeps this map's annotations.
+  const applySettings = useCallback((settings: UserMapSettings) => {
+    setEventFeedPanelSize(settings.eventFeedPanelSize);
+    setFavoriteServerId(settings.favoriteServerId);
+    setMarkerColors(settings.markerColors);
+    setMarkerOpacities(settings.markerOpacities);
+    setMarkerVisibility(settings.markerVisibility);
+    setNoteCategoryColors(settings.noteCategoryColors);
+    setNoteCategoryMarkerShapes(settings.noteCategoryMarkerShapes);
+    setNoteCategoryPipSizes(settings.noteCategoryPipSizes);
+    setRoadwayEditPanelPosition(settings.roadwayEditPanelPosition);
+    setRoutePlannerSpeedKmh(settings.routePlannerSpeedKmh);
+    setSearchLinesEnabled(settings.searchLinesEnabled);
+    setTileHighlight(settings.tileHighlight);
+    setTileHighlightPanelPosition(settings.tileHighlightPanelPosition);
   }, []);
-  // Profiles are shared across servers, so loading one keeps this map's annotations.
-  const loadUserMapSettings = useCallback((settings: UserMapSettings) => {
-    const parsed = parseUserMapSettings(settings);
-    setEventFeedPanelSize(parsed.eventFeedPanelSize);
-    setFavoriteServerId(parsed.favoriteServerId);
-    setMarkerColors(parsed.markerColors);
-    setMarkerOpacities(parsed.markerOpacities);
-    setMarkerVisibility(parsed.markerVisibility);
-    setNoteCategoryColors(parsed.noteCategoryColors);
-    setNoteCategoryMarkerShapes(parsed.noteCategoryMarkerShapes);
-    setNoteCategoryPipSizes(parsed.noteCategoryPipSizes);
-    setRoadwayEditPanelPosition(parsed.roadwayEditPanelPosition);
-    setRoutePlannerSpeedKmh(parsed.routePlannerSpeedKmh);
-    setSearchLinesEnabled(parsed.searchLinesEnabled);
-    setTileHighlight(parsed.tileHighlight);
-    setTileHighlightPanelPosition(parsed.tileHighlightPanelPosition);
-  }, []);
+  const resetUserMapSettings = useCallback(() => applySettings(DEFAULT_USER_MAP_SETTINGS), [applySettings]);
+  const loadUserMapSettings = useCallback(
+    (settings: UserMapSettings) => applySettings(parseUserMapSettings(settings)),
+    [applySettings]
+  );
   const enqueueSettingsSave = useCallback((mapId: string, settings: UserMapSettings): Promise<void> => {
     const next = settingsSaveChainRef.current.then(async () => {
       const result = await saveUserMapSettings(mapId, settings);
@@ -824,21 +811,9 @@ export default function MapWorkspace({
 
     setIsEventFeedLoading(true);
 
-    try {
-      const response = await fetch(`/api/maps/${map.id}/events`);
-
-      if (!response.ok) {
-        setEventFeedState({ feed: null, mapId: map.id });
-        return;
-      }
-
-      const body = (await response.json().catch(() => null)) as { feed?: WurmMapsEventFeed } | null;
-      setEventFeedState({ feed: body?.feed ?? null, mapId: map.id });
-    } catch {
-      setEventFeedState({ feed: null, mapId: map.id });
-    } finally {
-      setIsEventFeedLoading(false);
-    }
+    const result = await requestJson<{ feed?: WurmMapsEventFeed } | null>(`/api/maps/${map.id}/events`, undefined, "");
+    setEventFeedState({ feed: result.ok ? result.body?.feed ?? null : null, mapId: map.id });
+    setIsEventFeedLoading(false);
   }, [map]);
 
   const handleEventFeedOpenChange = useCallback((isOpen: boolean) => {
@@ -860,25 +835,26 @@ export default function MapWorkspace({
       return { error: null, ok: false };
     }
 
-    try {
-      const response = await fetch(`/api/maps/${map.id}/note-categories`, {
-        body: JSON.stringify(input),
-        headers: { "content-type": "application/json" },
-        method: "POST"
-      });
+    // The settings overlay shows a generic message for a failure without a server error ("" -> null).
+    const result = await requestJson<{ category: NoteCategory }>(
+      `/api/maps/${map.id}/note-categories`,
+      jsonRequest("POST", input),
+      ""
+    );
 
-      if (!response.ok) {
-        return { error: await readResponseError(response), ok: false };
-      }
-
-      const body = (await response.json()) as { category: NoteCategory };
-      setNoteCategories((current) => upsertNoteCategory(current, body.category));
-      return { category: body.category, ok: true };
-    } catch {
-      // The settings overlay shows a generic message for a failure without a server error.
-      return { error: null, ok: false };
+    if (!result.ok) {
+      return { error: result.error || null, ok: false };
     }
+
+    const { category } = result.body;
+    setNoteCategories((current) => upsertNoteCategory(current, category));
+    return { category, ok: true };
   }, [map]);
+  const renameNoteCategoryOnMarkers = useCallback((from: string, to: string) => {
+    updateMarkers((current) => current.map((marker) => (
+      marker.type === "note" && marker.category === from ? { ...marker, category: to } : marker
+    )));
+  }, [updateMarkers]);
   const updateNoteCategoryColor = useCallback((categoryId: string, color: string | null) => {
     setNoteCategoryColors((current) => {
       const nextColors = { ...current };
@@ -926,71 +902,52 @@ export default function MapWorkspace({
     }
 
     const previousCategory = noteCategories.find((category) => category.id === categoryId) ?? null;
-    let body: { category: NoteCategory };
+    const result = await requestJson<{ category: NoteCategory }>(
+      `/api/maps/${map.id}/note-categories/${categoryId}`,
+      jsonRequest("PATCH", input),
+      ""
+    );
 
-    try {
-      const response = await fetch(`/api/maps/${map.id}/note-categories/${categoryId}`, {
-        body: JSON.stringify(input),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      });
-
-      if (!response.ok) {
-        return { error: await readResponseError(response), ok: false };
-      }
-
-      body = (await response.json()) as { category: NoteCategory };
-    } catch {
-      // The settings overlay shows a generic message for a failure without a server error.
-      return { error: null, ok: false };
+    if (!result.ok) {
+      return { error: result.error || null, ok: false };
     }
 
-    setNoteCategories((current) => upsertNoteCategory(current, body.category));
+    const { category } = result.body;
+    setNoteCategories((current) => upsertNoteCategory(current, category));
 
-    if (previousCategory !== null && previousCategory.name !== body.category.name) {
-      updateMarkers((current) => current.map((marker) => (
-        marker.type === "note" && marker.category === previousCategory.name
-          ? { ...marker, category: body.category.name }
-          : marker
-      )));
+    if (previousCategory !== null && previousCategory.name !== category.name) {
+      renameNoteCategoryOnMarkers(previousCategory.name, category.name);
     }
 
-    return { category: body.category, ok: true };
-  }, [map, noteCategories, updateMarkers]);
+    return { category, ok: true };
+  }, [map, noteCategories, renameNoteCategoryOnMarkers]);
   const deleteNoteCategory = useCallback(async (categoryId: string): Promise<boolean> => {
     if (map === null) {
       return false;
     }
 
     const previousCategory = noteCategories.find((category) => category.id === categoryId) ?? null;
-    let body: { category: { id: string; reassignedTo: string } };
+    const result = await requestJson<{ category: { id: string; reassignedTo: string } }>(
+      `/api/maps/${map.id}/note-categories/${categoryId}`,
+      { method: "DELETE" },
+      ""
+    );
 
-    try {
-      const response = await fetch(`/api/maps/${map.id}/note-categories/${categoryId}`, { method: "DELETE" });
-
-      if (!response.ok) {
-        return false;
-      }
-
-      body = (await response.json()) as { category: { id: string; reassignedTo: string } };
-    } catch {
-      // The settings overlay reports a false result as a failed delete.
+    // The settings overlay reports a false result as a failed delete.
+    if (!result.ok) {
       return false;
     }
 
-    setNoteCategories((current) => current.filter((category) => category.id !== body.category.id));
-    clearNoteCategoryPresentation(body.category.id);
+    const { id, reassignedTo } = result.body.category;
+    setNoteCategories((current) => current.filter((category) => category.id !== id));
+    clearNoteCategoryPresentation(id);
 
     if (previousCategory !== null) {
-      updateMarkers((current) => current.map((marker) => (
-        marker.type === "note" && marker.category === previousCategory.name
-          ? { ...marker, category: body.category.reassignedTo }
-          : marker
-      )));
+      renameNoteCategoryOnMarkers(previousCategory.name, reassignedTo);
     }
 
     return true;
-  }, [clearNoteCategoryPresentation, map, noteCategories, updateMarkers]);
+  }, [clearNoteCategoryPresentation, map, noteCategories, renameNoteCategoryOnMarkers]);
   const openDialog = useCallback((next: DialogState) => {
     // Marker dialogs overlap the top-panel overlays; close them so only one
     // panel is ever open at a time.
@@ -1067,25 +1024,14 @@ export default function MapWorkspace({
   const zoomAt = useCallback((factor: number, clientX: number, clientY: number) => {
     setManualView((currentManualView) => {
       const current = currentManualView ?? viewRef.current;
-      const baseView = viewRef.current;
-      const minZoom = getFitZoom(viewport, mapSize);
-      const nextZoom = current.zoom * factor;
-
-      if (nextZoom <= minZoom) {
-        const nextView = getFitView(viewport, mapSize);
-        applyDirectTransforms(nextView, baseView);
-        return nextView;
-      }
-
-      const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
-      const mapX = (clientX - current.x) / current.zoom;
-      const mapY = (clientY - current.y) / current.zoom;
-      const nextView = {
-        x: clientX - mapX * zoom,
-        y: clientY - mapY * zoom,
-        zoom
-      };
-      applyDirectTransforms(nextView, baseView);
+      const nextView = getZoomedView(
+        viewport,
+        mapSize,
+        current.zoom * factor,
+        { clientX, clientY },
+        { x: (clientX - current.x) / current.zoom, y: (clientY - current.y) / current.zoom }
+      );
+      applyDirectTransforms(nextView, viewRef.current);
       return nextView;
     });
   }, [mapSize, viewport, applyDirectTransforms]);
@@ -1160,26 +1106,15 @@ export default function MapWorkspace({
       selectCoordinate(coordinate);
       setHoveredMarker(null);
 
-      if (canWriteMapMarkers && markersAtCoordinate.length > 0) {
-        setContextMenu({
-          mapX: coordinate.x,
-          mapY: coordinate.y,
-          markers: markersAtCoordinate,
-          mode: "marker",
-          screenX: clientX,
-          screenY: clientY,
-          view: contextView
-        });
-        return true;
-      }
-
       setContextMenu({
         mapX: coordinate.x,
         mapY: coordinate.y,
-        mode: "map",
         screenX: clientX,
         screenY: clientY,
-        view: contextView
+        view: contextView,
+        ...(canWriteMapMarkers && markersAtCoordinate.length > 0
+          ? { markers: markersAtCoordinate, mode: "marker" as const }
+          : { mode: "map" as const })
       });
       return true;
     },
@@ -1238,14 +1173,7 @@ export default function MapWorkspace({
   }, []);
 
   const startPinchZoomIfReady = useCallback((): boolean => {
-    const pointers = Array.from(activeTouchPointersRef.current.values());
-
-    if (pointers.length < 2) {
-      return false;
-    }
-
-    const firstPointer = pointers[0];
-    const secondPointer = pointers[1];
+    const [firstPointer, secondPointer] = Array.from(activeTouchPointersRef.current.values());
 
     if (firstPointer === undefined || secondPointer === undefined) {
       return false;
@@ -1327,20 +1255,11 @@ export default function MapWorkspace({
 
   const handleContextMenu = useCallback(
     (event: React.MouseEvent<HTMLElement>) => {
-      if (!canViewMap || visualMap === null) {
-        return;
+      if (openCoordinateContextMenu(event.clientX, event.clientY, view)) {
+        event.preventDefault();
       }
-
-      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
-
-      if (!isInsideMap(coordinate, visualMap)) {
-        return;
-      }
-
-      event.preventDefault();
-      void openCoordinateContextMenu(event.clientX, event.clientY, view);
     },
-    [canViewMap, openCoordinateContextMenu, view, visualMap]
+    [openCoordinateContextMenu, view]
   );
 
   const handleDoubleClick = useCallback(
@@ -1423,11 +1342,6 @@ export default function MapWorkspace({
         ? [marker]
         : [...markersUnderPointer, marker]
       );
-
-      if (hoverMarkers.length === 0) {
-        setHoveredMarker(null);
-        return;
-      }
 
       setHoveredMarker((current) => {
         if (
@@ -1514,13 +1428,7 @@ export default function MapWorkspace({
   const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; ctrlKey?: boolean; pointerId: number; pointerType?: string }) => {
     const drag = dragRef.current;
 
-    if (drag === null) {
-      return;
-    }
-
-    const dragPointerId = drag.pointerId as number | undefined;
-
-    if (dragPointerId !== undefined && dragPointerId !== event.pointerId) {
+    if (drag === null || drag.pointerId !== event.pointerId) {
       return;
     }
 
@@ -1702,23 +1610,15 @@ export default function MapWorkspace({
 
             if (distance >= PINCH_MIN_DISTANCE_PX) {
               const center = getPointerCenter(firstPointer, secondPointer);
-              const minZoom = getFitZoom(viewport, mapSize);
-              const nextZoom = pinchZoom.startZoom * (distance / pinchZoom.startDistance);
-
-              if (nextZoom <= minZoom) {
-                const nextView = getFitView(viewport, mapSize);
-                applyDirectTransforms(nextView, markerView);
-                scheduleViewUpdate(nextView);
-              } else {
-                const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
-                const nextView = {
-                  x: center.clientX - pinchZoom.startMapX * zoom,
-                  y: center.clientY - pinchZoom.startMapY * zoom,
-                  zoom
-                };
-                applyDirectTransforms(nextView, markerView);
-                scheduleViewUpdate(nextView);
-              }
+              const nextView = getZoomedView(
+                viewport,
+                mapSize,
+                pinchZoom.startZoom * (distance / pinchZoom.startDistance),
+                center,
+                { x: pinchZoom.startMapX, y: pinchZoom.startMapY }
+              );
+              applyDirectTransforms(nextView, markerView);
+              scheduleViewUpdate(nextView);
             }
           }
 
@@ -1770,15 +1670,7 @@ export default function MapWorkspace({
       finishPointerDrag(event);
     }
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", endDrag);
-    window.addEventListener("pointercancel", endDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", endDrag);
-      window.removeEventListener("pointercancel", endDrag);
-    };
+    return listenWindowPointer(handlePointerMove, endDrag);
   }, [applyDirectTransforms, finishPointerDrag, flushPendingView, mapSize, markerView, scheduleViewUpdate, viewport]);
 
   useEffect(() => {
@@ -1825,15 +1717,7 @@ export default function MapWorkspace({
       });
     }
 
-    window.addEventListener("pointermove", handleQuickDeedDrag);
-    window.addEventListener("pointerup", endQuickDeedDrag);
-    window.addEventListener("pointercancel", endQuickDeedDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handleQuickDeedDrag);
-      window.removeEventListener("pointerup", endQuickDeedDrag);
-      window.removeEventListener("pointercancel", endQuickDeedDrag);
-    };
+    return listenWindowPointer(handleQuickDeedDrag, endQuickDeedDrag);
   }, [openDialog, selectCoordinate, visualMap]);
 
   useEffect(() => {
@@ -1862,23 +1746,7 @@ export default function MapWorkspace({
       });
     }
 
-    function endPathPointDrag(event: PointerEvent) {
-      const drag = pathPointDragRef.current;
-
-      if (drag !== null && drag.pointerId === event.pointerId) {
-        pathPointDragRef.current = null;
-      }
-    }
-
-    window.addEventListener("pointermove", handlePathPointDrag);
-    window.addEventListener("pointerup", endPathPointDrag);
-    window.addEventListener("pointercancel", endPathPointDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handlePathPointDrag);
-      window.removeEventListener("pointerup", endPathPointDrag);
-      window.removeEventListener("pointercancel", endPathPointDrag);
-    };
+    return listenWindowPointer(handlePathPointDrag, (event) => releaseDrag(pathPointDragRef, event));
   }, [view, visualMap]);
 
   useEffect(() => {
@@ -1912,23 +1780,7 @@ export default function MapWorkspace({
       });
     }
 
-    function endMarkerRelocationDrag(event: PointerEvent) {
-      const drag = markerRelocationDragRef.current;
-
-      if (drag !== null && drag.pointerId === event.pointerId) {
-        markerRelocationDragRef.current = null;
-      }
-    }
-
-    window.addEventListener("pointermove", handleMarkerRelocationDrag);
-    window.addEventListener("pointerup", endMarkerRelocationDrag);
-    window.addEventListener("pointercancel", endMarkerRelocationDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handleMarkerRelocationDrag);
-      window.removeEventListener("pointerup", endMarkerRelocationDrag);
-      window.removeEventListener("pointercancel", endMarkerRelocationDrag);
-    };
+    return listenWindowPointer(handleMarkerRelocationDrag, (event) => releaseDrag(markerRelocationDragRef, event));
   }, [view, visualMap]);
 
   useEffect(() => {
@@ -1958,23 +1810,7 @@ export default function MapWorkspace({
       });
     }
 
-    function endDeedResizeDrag(event: PointerEvent) {
-      const drag = deedResizeDragRef.current;
-
-      if (drag !== null && drag.pointerId === event.pointerId) {
-        deedResizeDragRef.current = null;
-      }
-    }
-
-    window.addEventListener("pointermove", handleDeedResizeDrag);
-    window.addEventListener("pointerup", endDeedResizeDrag);
-    window.addEventListener("pointercancel", endDeedResizeDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handleDeedResizeDrag);
-      window.removeEventListener("pointerup", endDeedResizeDrag);
-      window.removeEventListener("pointercancel", endDeedResizeDrag);
-    };
+    return listenWindowPointer(handleDeedResizeDrag, (event) => releaseDrag(deedResizeDragRef, event));
   }, [visualMap]);
 
   useEffect(() => {
@@ -2029,7 +1865,7 @@ export default function MapWorkspace({
   }, []);
 
   useEffect(() => {
-    if (!canViewMap || map === null || isShareMode || typeof window === "undefined") {
+    if (!canViewMap || map === null || isShareMode) {
       return;
     }
 
@@ -2147,7 +1983,7 @@ export default function MapWorkspace({
               mapSize={mapSize}
               markerColors={markerColors}
               markerOpacities={markerOpacities}
-              markers={visibleMarkers}
+              markers={displayedMarkersWithEditPreview}
               noteCategories={noteCategories}
               noteCategoryColors={noteCategoryColors}
               noteCategoryMarkerShapes={noteCategoryMarkerShapes}
@@ -2190,18 +2026,16 @@ export default function MapWorkspace({
                 view={markerView}
               />
             ) : null}
-            <DeedNameLayer
-              hiddenDeedLabelId={hiddenDeedLabelId}
-              markers={visibleNameMarkers}
-              view={markerView}
-              visibility={markerVisibility}
-            />
-            <TowerNameLayer
-              hiddenTowerLabelId={hiddenTowerLabelId}
-              markers={visibleNameMarkers}
-              view={markerView}
-              visibility={markerVisibility}
-            />
+            {(["deed", "tower"] as const).map((type) => (
+              <NameLayer
+                hiddenLabelId={type === "deed" ? hiddenDeedLabelId : hiddenTowerLabelId}
+                key={type}
+                markers={displayedMarkersWithEditPreview}
+                type={type}
+                view={markerView}
+                visibility={markerVisibility}
+              />
+            ))}
             <SelectedCoordinateReticule coordinate={renderedSelectedCoordinate} view={markerView} />
           </div>
         </section>
@@ -2486,19 +2320,10 @@ function MapContextMenu({
 
 type AddMarkerSubmenuId = "misc" | "roadways";
 
-const ROADWAY_ADD_ITEMS: Array<{ label: string; markerType: MarkerType }> = [
-  { label: "Bridge", markerType: "bridge" },
-  { label: "Canal", markerType: "canal" },
-  { label: "Highway", markerType: "highway" },
-  { label: "Tunnel", markerType: "tunnel" }
-];
-
-const MISC_ADD_ITEMS: Array<{ label: string; markerType: MarkerType }> = [
-  { label: "Rift", markerType: "rift" },
-  { label: "Camp", markerType: "camp" },
-  { label: "Minedoor", markerType: "minedoor" },
-  { label: "Locate Soul", markerType: "locateSoul" }
-];
+const toAddItems = (markerTypes: readonly MarkerType[]) =>
+  markerTypes.map((markerType) => ({ label: MARKER_TYPE_LABELS[markerType], markerType }));
+const ROADWAY_ADD_ITEMS = toAddItems(["bridge", "canal", "highway", "tunnel"]);
+const MISC_ADD_ITEMS = toAddItems(["rift", "camp", "minedoor", "locateSoul"]);
 
 function AddMarkerMenu({
   coordinate,
@@ -2968,6 +2793,32 @@ function RoutePlannerControl({
   );
 }
 
+function PanelToggleButton({
+  isOpen,
+  label,
+  name,
+  onClick
+}: {
+  isOpen: boolean;
+  label: string;
+  name: "counters" | "event-feed" | "legend" | "share";
+  onClick(): void;
+}) {
+  return (
+    <button
+      aria-expanded={isOpen}
+      aria-haspopup="dialog"
+      aria-label={label}
+      className={isOpen ? `map-${name}-button is-active` : `map-${name}-button`}
+      onClick={onClick}
+      title={label}
+      type="button"
+    >
+      <span aria-hidden="true" className={`map-${name}-button-icon`} />
+    </button>
+  );
+}
+
 function MapLegendControl({
   isOpen,
   markerColors,
@@ -2981,17 +2832,7 @@ function MapLegendControl({
 
   return (
     <div className="map-legend-control">
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        aria-label="Map legend"
-        className={isOpen ? "map-legend-button is-active" : "map-legend-button"}
-        onClick={() => onOpenChange(!isOpen)}
-        title="Map legend"
-        type="button"
-      >
-        <span aria-hidden="true" className="map-legend-button-icon" />
-      </button>
+      <PanelToggleButton isOpen={isOpen} label="Map legend" name="legend" onClick={() => onOpenChange(!isOpen)} />
       {isOpen ? (
         <section aria-label="Map legend" className="map-legend-panel" role="dialog">
           <strong>Legend</strong>
@@ -3027,17 +2868,7 @@ function MapCountersControl({
 
   return (
     <div className="map-counters-control">
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        aria-label="Map counters"
-        className={isOpen ? "map-counters-button is-active" : "map-counters-button"}
-        onClick={() => onOpenChange(!isOpen)}
-        title="Map counters"
-        type="button"
-      >
-        <span aria-hidden="true" className="map-counters-button-icon" />
-      </button>
+      <PanelToggleButton isOpen={isOpen} label="Map counters" name="counters" onClick={() => onOpenChange(!isOpen)} />
       {isOpen ? (
         <section aria-label="Map counters" className="map-counters-panel" role="dialog">
           <strong>Counters</strong>
@@ -3109,39 +2940,23 @@ function ShareControl({
     setShareLink(null);
     setIsCopied(false);
 
-    try {
-      const payload: Record<string, unknown> = layerId.length > 0
-        ? { expiresInHours, layerId }
-        : { expiresInHours };
+    const result = await requestJson(
+      `/api/maps/${mapId}/share`,
+      jsonRequest("POST", layerId.length > 0 ? { expiresInHours, layerId } : { expiresInHours }),
+      "Share link could not be created"
+    );
+    const created = result.ok ? parseShareLinkResponse(result.body) : null;
 
-      const response = await fetch(`/api/maps/${mapId}/share`, {
-        body: JSON.stringify(payload),
-        headers: { "content-type": "application/json" },
-        method: "POST"
-      });
-      const body: unknown = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        setShareError(getShareErrorMessage(body));
-        return;
-      }
-
-      const created = parseShareLinkResponse(body);
-
-      if (created === null) {
-        setShareError("Share link could not be created");
-        return;
-      }
-
+    if (created === null) {
+      setShareError(result.ok ? "Share link could not be created" : result.error);
+    } else {
       setShareLink({
         absoluteUrl: `${window.location.origin}${created.url}`,
         expiresAt: created.expiresAt
       });
-    } catch {
-      setShareError("Share link could not be created");
-    } finally {
-      setIsGenerating(false);
     }
+
+    setIsGenerating(false);
   }
 
   async function copyShareLink() {
@@ -3159,17 +2974,7 @@ function ShareControl({
 
   return (
     <div className="map-share-control">
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        aria-label="Share map"
-        className={isOpen ? "map-share-button is-active" : "map-share-button"}
-        onClick={() => setIsOpen((current) => !current)}
-        title="Share map"
-        type="button"
-      >
-        <span aria-hidden="true" className="map-share-button-icon" />
-      </button>
+      <PanelToggleButton isOpen={isOpen} label="Share map" name="share" onClick={() => setIsOpen((current) => !current)} />
       {isOpen ? (
         <section aria-label="Share read-only link" className="map-share-panel" role="dialog">
           <div className="map-share-panel-title">
@@ -3259,21 +3064,9 @@ function MapEventFeedControl({
   serverName: string;
   size: EventFeedPanelSize;
 }) {
-  const buttonLabel = `${serverName} events`;
-
   return (
     <div className="map-event-feed-control">
-      <button
-        aria-expanded={isOpen}
-        aria-haspopup="dialog"
-        aria-label={buttonLabel}
-        className={isOpen ? "map-event-feed-button is-active" : "map-event-feed-button"}
-        onClick={() => onOpenChange(!isOpen)}
-        title={buttonLabel}
-        type="button"
-      >
-        <span aria-hidden="true" className="map-event-feed-button-icon" />
-      </button>
+      <PanelToggleButton isOpen={isOpen} label={`${serverName} events`} name="event-feed" onClick={() => onOpenChange(!isOpen)} />
       {isOpen ? (
         <MapEventFeedPanel
           feed={feed}
@@ -3345,23 +3138,7 @@ function MapEventFeedPanel({
       ));
     }
 
-    function endResizeDrag(event: PointerEvent) {
-      const drag = resizeDragRef.current;
-
-      if (drag !== null && drag.pointerId === event.pointerId) {
-        resizeDragRef.current = null;
-      }
-    }
-
-    window.addEventListener("pointermove", handleResizeDrag);
-    window.addEventListener("pointerup", endResizeDrag);
-    window.addEventListener("pointercancel", endResizeDrag);
-
-    return () => {
-      window.removeEventListener("pointermove", handleResizeDrag);
-      window.removeEventListener("pointerup", endResizeDrag);
-      window.removeEventListener("pointercancel", endResizeDrag);
-    };
+    return listenWindowPointer(handleResizeDrag, (event) => releaseDrag(resizeDragRef, event));
   }, [onSizeChange]);
 
   return (
@@ -3446,21 +3223,28 @@ type LegendSymbolStyle = CSSProperties & {
   "--map-legend-color": string;
 };
 
+const LEGEND_VARIANTS: Array<[MarkerType, LegendItem["variant"]]> = [
+  ["annotation", "triangle"],
+  ["tower", "square"],
+  ["deed", "square"],
+  ["note", "circle"],
+  ["rift", "triangle"],
+  ["camp", "triangle"],
+  ["minedoor", "minedoor"],
+  ["locateSoul", "triangle"],
+  ["bridge", "line"],
+  ["canal", "line"],
+  ["highway", "line"],
+  ["tunnel", "line"]
+];
+
 function getLegendItems(markerColors: MarkerColors): LegendItem[] {
-  return [
-    { color: markerColors.annotations, id: "annotation", label: "Annotation", variant: "triangle" },
-    { color: markerColors.towers, id: "tower", label: "Tower", variant: "square" },
-    { color: markerColors.deeds, id: "deed", label: "Deed", variant: "square" },
-    { color: markerColors.notes, id: "note", label: "Note", variant: "circle" },
-    { color: markerColors.rifts, id: "rift", label: "Rift", variant: "triangle" },
-    { color: markerColors.camps, id: "camp", label: "Camp", variant: "triangle" },
-    { color: markerColors.minedoors, id: "minedoor", label: "Minedoor", variant: "minedoor" },
-    { color: markerColors.locateSouls, id: "locate-soul", label: "Locate Soul", variant: "triangle" },
-    { color: markerColors.bridges, id: "bridge", label: "Bridge", variant: "line" },
-    { color: markerColors.canals, id: "canal", label: "Canal", variant: "line" },
-    { color: markerColors.highways, id: "highway", label: "Highway", variant: "line" },
-    { color: markerColors.tunnels, id: "tunnel", label: "Tunnel", variant: "line" }
-  ];
+  return LEGEND_VARIANTS.map(([type, variant]) => ({
+    color: markerColors[getMarkerTypeKey(type)],
+    id: type === "locateSoul" ? "locate-soul" : type,
+    label: MARKER_TYPE_LABELS[type],
+    variant
+  }));
 }
 
 function getLegendSymbolStyle(color: string): LegendSymbolStyle {
@@ -3518,7 +3302,7 @@ function PathDraftLayer({
         <polyline
           className="map-path-draft-line"
           fill="none"
-          points={getPathDraftSvgPoints(draft.points, draft.width, view)}
+          points={getPathSvgPoints(draft.points, draft.width, view)}
           stroke={getDefaultPathColor(draft.type)}
           strokeLinecap="square"
           strokeLinejoin="miter"
@@ -3559,8 +3343,8 @@ function PathDraftPanel({
   onUndo(): void;
 }) {
   return (
-    <section className="map-path-draft-panel" role="dialog" aria-label={`Draw ${getPathTypeTitle(draft.type)}`}>
-      <DialogHeader title={`Draw ${getPathTypeTitle(draft.type)}`} onClose={onCancel} />
+    <section className="map-path-draft-panel" role="dialog" aria-label={`Draw ${MARKER_TYPE_LABELS[draft.type]}`}>
+      <DialogHeader closeLabel="Close marker dialog" title={`Draw ${MARKER_TYPE_LABELS[draft.type]}`} onClose={onCancel} />
       <div className="map-marker-form">
         <p>{draft.points.length} {draft.points.length === 1 ? "point" : "points"}</p>
         <label><span>Name</span><input aria-label="Name" onChange={(event) => onChange({ ...draft, name: event.target.value })} value={draft.name} /></label>
@@ -3595,73 +3379,38 @@ function PathDraftPanel({
   );
 }
 
-function DeedNameLayer({
-  hiddenDeedLabelId,
+function NameLayer({
+  hiddenLabelId,
   markers,
+  type,
   view,
   visibility
 }: {
-  hiddenDeedLabelId: string | null;
+  hiddenLabelId: string | null;
   markers: WorkspaceMarker[];
+  type: "deed" | "tower";
   view: ViewState;
   visibility: MarkerVisibility;
 }) {
-  if (!visibility.deeds || !visibility.deedNames) {
+  if (type === "deed" ? !visibility.deeds || !visibility.deedNames : !visibility.towers || !visibility.towerNames) {
     return null;
   }
 
   return (
-    <div aria-label="Deed names" className="map-deed-name-layer">
+    <div aria-label={type === "deed" ? "Deed names" : "Tower names"} className="map-deed-name-layer">
       {markers.map((marker) => {
-        if (marker.type !== "deed" || marker.id === hiddenDeedLabelId) {
+        if (marker.type !== type || marker.id === hiddenLabelId) {
           return null;
         }
 
         return (
           <span
-            className="map-deed-name-label"
-            data-testid={`deed-name-label-${marker.id}`}
+            className={marker.type === "deed" ? "map-deed-name-label" : "map-deed-name-label map-tower-name-label"}
+            data-testid={`${type}-name-label-${marker.id}`}
             key={marker.id}
-            style={getDeedNameLabelStyle(marker, view)}
+            style={marker.type === "deed" ? getDeedNameLabelStyle(marker, view) : getTowerNameLabelStyle(marker, view)}
           >
-            {marker.name}
-          </span>
-        );
-      })}
-    </div>
-  );
-}
-
-function TowerNameLayer({
-  hiddenTowerLabelId,
-  markers,
-  view,
-  visibility
-}: {
-  hiddenTowerLabelId: string | null;
-  markers: WorkspaceMarker[];
-  view: ViewState;
-  visibility: MarkerVisibility;
-}) {
-  if (!visibility.towers || !visibility.towerNames) {
-    return null;
-  }
-
-  return (
-    <div aria-label="Tower names" className="map-deed-name-layer">
-      {markers.map((marker) => {
-        if (marker.type !== "tower" || marker.id === hiddenTowerLabelId) {
-          return null;
-        }
-
-        return (
-          <span
-            className="map-deed-name-label map-tower-name-label"
-            data-testid={`tower-name-label-${marker.id}`}
-            key={marker.id}
-            style={getTowerNameLabelStyle(marker, view)}
-          >
-            {formatTowerCreator(marker)}
+            {marker.type === "deed" ? marker.name : formatTowerCreator(marker)}
           </span>
         );
       })}
@@ -3729,14 +3478,10 @@ function TileHighlightOverlay({
           getTileHighlightTargetColors(selection),
           parseHexRgb(tileHighlight.color)
         );
-        const nextOverlaySrc = renderTileHighlightDataUrl(mask, map);
-
-        if (!isCancelled) {
-          setOverlay({
-            key: overlayKey,
-            src: nextOverlaySrc
-          });
-        }
+        setOverlay({
+          key: overlayKey,
+          src: renderTileHighlightDataUrl(mask, map)
+        });
       }).catch(() => {
         if (!isCancelled) {
           setOverlay(null);
@@ -3967,15 +3712,13 @@ function MarkerContextMenu({
       role="menu"
       style={getContextMenuStyle(contextMenu.screenX, contextMenu.screenY)}
     >
-      {contextMenu.markers.length > 0 ? (
-        <MarkerContextRows
-          coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
-          markerColors={markerColors}
-          markers={contextMenu.markers}
-          onDelete={onDelete}
-          onEdit={onEdit}
-        />
-      ) : null}
+      <MarkerContextRows
+        coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
+        markerColors={markerColors}
+        markers={contextMenu.markers}
+        onDelete={onDelete}
+        onEdit={onEdit}
+      />
       <AddMarkerMenu
         coordinate={{ x: contextMenu.mapX, y: contextMenu.mapY }}
         onCreate={onCreate}
@@ -3997,12 +3740,6 @@ function MarkerContextRows({
   onDelete(marker: WorkspaceMarker): void;
   onEdit(marker: WorkspaceMarker): void;
 }) {
-  const firstMarker = markers[0] ?? null;
-
-  if (firstMarker === null) {
-    return null;
-  }
-
   return (
     <>
       <CoordinateCopyRow
@@ -4038,7 +3775,7 @@ function RoutePlannerLayer({
           className="map-route-planner-line"
           data-testid="route-planner-line"
           fill="none"
-          points={getPathDraftSvgPoints(points, 1, view)}
+          points={getPathSvgPoints(points, 1, view)}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -4220,7 +3957,7 @@ function MarkerDialog({
   onSubmit(event: FormEvent<HTMLFormElement>): void;
 }) {
   const markerType = dialog.mode === "create" ? dialog.markerType : dialog.marker.type;
-  const title = dialog.mode === "create" ? `Add ${getMarkerTypeTitle(markerType)}` : `Edit ${getMarkerTitle(dialog.marker)}`;
+  const title = dialog.mode === "create" ? `Add ${MARKER_TYPE_LABELS[markerType].toLowerCase()}` : `Edit ${getMarkerTitle(dialog.marker)}`;
   const coordinate = dialog.mode === "create"
     ? { x: dialog.x, y: dialog.y }
     : { x: dialog.marker.x, y: dialog.marker.y };
@@ -4230,7 +3967,7 @@ function MarkerDialog({
 
   return (
     <section className="map-marker-dialog" role="dialog" aria-label={title}>
-      <DialogHeader title={title} onClose={onClose} />
+      <DialogHeader closeLabel="Close marker dialog" title={title} onClose={onClose} />
       <form className="map-marker-form" onSubmit={onSubmit}>
         <div className="map-position-fields" key={`${coordinate.x}:${coordinate.y}`}>
           <label>
@@ -4280,10 +4017,6 @@ function MarkerHoverDetails({
   onMouseEnter(): void;
   onMouseLeave(): void;
 }) {
-  if (hoveredMarker.markers.length === 0) {
-    return null;
-  }
-
   const title = `Map items at ${hoveredMarker.coordinate.x}, ${hoveredMarker.coordinate.y}`;
 
   return (
@@ -4323,17 +4056,6 @@ function HoverMarkerPill({
       style={getMarkerContextRowStyle(marker, markerColors)}
     >
       <MarkerContextSummary marker={marker} />
-    </div>
-  );
-}
-
-function DialogHeader({ onClose, title }: { onClose(): void; title: string }) {
-  return (
-    <div className="map-account-panel-header">
-      <strong>{title}</strong>
-      <button aria-label="Close marker dialog" className="map-account-close" onClick={onClose} type="button">
-        x
-      </button>
     </div>
   );
 }
@@ -4519,6 +4241,12 @@ function MarkerFields({
   );
 }
 
+const TOWER_TEXT_FIELDS = [
+  { label: "QL", name: "ql" },
+  { label: "Damage", name: "damage" },
+  { label: "Creator", name: "creator" }
+] as const;
+
 function TowerMarkerFields({
   isCreate,
   tower
@@ -4557,42 +4285,20 @@ function TowerMarkerFields({
           />
         </label>
       ) : null}
-      <label>
-        <span>QL</span>
-        <input
-          name="ql"
-          value={towerFields.ql}
-          onChange={(event) => {
-            const ql = event.currentTarget.value;
+      {TOWER_TEXT_FIELDS.map(({ label, name }) => (
+        <label key={name}>
+          <span>{label}</span>
+          <input
+            name={name}
+            value={towerFields[name]}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
 
-            setTowerFields((current) => ({ ...current, ql }));
-          }}
-        />
-      </label>
-      <label>
-        <span>Damage</span>
-        <input
-          name="damage"
-          value={towerFields.damage}
-          onChange={(event) => {
-            const damage = event.currentTarget.value;
-
-            setTowerFields((current) => ({ ...current, damage }));
-          }}
-        />
-      </label>
-      <label>
-        <span>Creator</span>
-        <input
-          name="creator"
-          value={towerFields.creator}
-          onChange={(event) => {
-            const creator = event.currentTarget.value;
-
-            setTowerFields((current) => ({ ...current, creator }));
-          }}
-        />
-      </label>
+              setTowerFields((current) => ({ ...current, [name]: value }));
+            }}
+          />
+        </label>
+      ))}
       <label>
         <span>Tower type</span>
         <select name="towerType" defaultValue={tower?.towerType ?? DEFAULT_TOWER_TYPE}>
@@ -4646,88 +4352,38 @@ function NoteFields({
   );
 }
 
-function formatLocateSoulOutputForForm(marker: Extract<WorkspaceMarker, { type: "locateSoul" }>): string {
+type LocateSoulMarker = Extract<WorkspaceMarker, { type: "locateSoul" }>;
+
+const LOCATE_SOUL_FORM_DISTANCE_PHRASES: Record<Exclude<LocateSoulMarker["distanceBand"], "0">, string> = {
+  "1-3": "a stone's throw away",
+  "4-5": "very close",
+  "6-9": "pretty close by",
+  "10-19": "fairly close by",
+  "20-49": "some distance away",
+  "50-199": "quite some distance away",
+  "200-499": "rather a long distance away",
+  "500-999": "pretty far away",
+  "1000+": "far away",
+  "2000+": "very far away"
+};
+
+const LOCATE_SOUL_FORM_DIRECTION_PHRASES: Record<LocateSoulMarker["direction"], string> = {
+  ahead: "ahead of you",
+  aheadLeft: "ahead of you to the left",
+  aheadRight: "ahead of you to the right",
+  behind: "behind you",
+  behindLeft: "behind you to the left",
+  behindRight: "behind you to the right",
+  left: "to the left",
+  right: "to the right"
+};
+
+function formatLocateSoulOutputForForm(marker: LocateSoulMarker): string {
   if (marker.distanceBand === "0") {
     return `You are practically standing on ${marker.targetName}!`;
   }
 
-  return `${marker.targetName} is ${formatLocateSoulDistancePhraseForForm(marker.distanceBand)} ${formatLocateSoulDirectionPhraseForForm(marker.direction)}.`;
-}
-
-function formatLocateSoulDistancePhraseForForm(
-  distanceBand: Extract<WorkspaceMarker, { type: "locateSoul" }>["distanceBand"]
-): string {
-  if (distanceBand === "1-3") {
-    return "a stone's throw away";
-  }
-
-  if (distanceBand === "4-5") {
-    return "very close";
-  }
-
-  if (distanceBand === "6-9") {
-    return "pretty close by";
-  }
-
-  if (distanceBand === "10-19") {
-    return "fairly close by";
-  }
-
-  if (distanceBand === "20-49") {
-    return "some distance away";
-  }
-
-  if (distanceBand === "50-199") {
-    return "quite some distance away";
-  }
-
-  if (distanceBand === "200-499") {
-    return "rather a long distance away";
-  }
-
-  if (distanceBand === "500-999") {
-    return "pretty far away";
-  }
-
-  if (distanceBand === "1000+") {
-    return "far away";
-  }
-
-  return "very far away";
-}
-
-function formatLocateSoulDirectionPhraseForForm(
-  direction: Extract<WorkspaceMarker, { type: "locateSoul" }>["direction"]
-): string {
-  if (direction === "ahead") {
-    return "ahead of you";
-  }
-
-  if (direction === "aheadRight") {
-    return "ahead of you to the right";
-  }
-
-  if (direction === "right") {
-    return "to the right";
-  }
-
-  if (direction === "behindRight") {
-    return "behind you to the right";
-  }
-
-  if (direction === "behind") {
-    return "behind you";
-  }
-
-  if (direction === "behindLeft") {
-    return "behind you to the left";
-  }
-
-  if (direction === "left") {
-    return "to the left";
-  }
-
-  return "ahead of you to the left";
+  return `${marker.targetName} is ${LOCATE_SOUL_FORM_DISTANCE_PHRASES[marker.distanceBand]} ${LOCATE_SOUL_FORM_DIRECTION_PHRASES[marker.direction]}.`;
 }
 
 async function submitMarkerForm(
@@ -4769,7 +4425,7 @@ async function submitMarkerForm(
       return false;
     }
 
-    setAnnotations((current) => upsertAnnotation(current, annotation));
+    setAnnotations((current) => upsertById(current, annotation));
     setDialog(null);
     setFormError(null);
     return true;
@@ -4779,28 +4435,21 @@ async function submitMarkerForm(
     ? `/api/markers/${dialog.marker.type}/${dialog.marker.id}`
     : `/api/maps/${mapId}/markers`;
 
-  try {
-    const response = await fetch(url, {
-      body: JSON.stringify(payloadResult.payload),
-      headers: { "content-type": "application/json" },
-      method: dialog.mode === "edit" ? "PATCH" : "POST"
-    });
+  const result = await requestJson<{ marker: WorkspaceMarker }>(
+    url,
+    jsonRequest(dialog.mode === "edit" ? "PATCH" : "POST", payloadResult.payload),
+    "Marker could not be saved"
+  );
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setFormError(body?.error ?? "Marker could not be saved");
-      return false;
-    }
-
-    const body = (await response.json()) as { marker: WorkspaceMarker };
-    setMarkers((current) => upsertMarker(current, body.marker));
-    setDialog(null);
-    setFormError(null);
-    return true;
-  } catch {
-    setFormError("Marker could not be saved");
+  if (!result.ok) {
+    setFormError(result.error);
     return false;
   }
+
+  setMarkers((current) => upsertById(current, result.body.marker));
+  setDialog(null);
+  setFormError(null);
+  return true;
 }
 
 async function deleteMarkerRequest(
@@ -4817,21 +4466,20 @@ async function deleteMarkerRequest(
     return;
   }
 
-  try {
-    const response = await fetch(`/api/markers/${marker.type}/${marker.id}`, { method: "DELETE" });
+  const result = await requestJson(
+    `/api/markers/${marker.type}/${marker.id}`,
+    { method: "DELETE" },
+    "Marker could not be deleted"
+  );
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setFormError(body?.error ?? "Marker could not be deleted");
-      return;
-    }
-
-    setMarkers((current) => current.filter((candidate) => candidate.id !== marker.id));
-    setDialog(null);
-    setFormError(null);
-  } catch {
-    setFormError("Marker could not be deleted");
+  if (!result.ok) {
+    setFormError(result.error);
+    return;
   }
+
+  setMarkers((current) => current.filter((candidate) => candidate.id !== marker.id));
+  setDialog(null);
+  setFormError(null);
 }
 
 async function disbandDeedRequest(
@@ -4841,31 +4489,25 @@ async function disbandDeedRequest(
   setDialog: (dialog: DialogState | null) => void,
   setFormError: (error: string | null) => void
 ): Promise<void> {
-  try {
-    const response = await fetch(`/api/markers/deed/${marker.id}/disband`, { method: "POST" });
+  const result = await requestJson<{ category: NoteCategory; deletedMarkerId: string; marker: WorkspaceMarker }>(
+    `/api/markers/deed/${marker.id}/disband`,
+    { method: "POST" },
+    "Deed could not be marked disbanded"
+  );
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setFormError(body?.error ?? "Deed could not be marked disbanded");
-      return;
-    }
-
-    const body = (await response.json()) as {
-      category: NoteCategory;
-      deletedMarkerId: string;
-      marker: WorkspaceMarker;
-    };
-
-    setNoteCategories((current) => upsertNoteCategory(current, body.category));
-    setMarkers((current) => upsertMarker(
-      current.filter((candidate) => candidate.id !== body.deletedMarkerId),
-      body.marker
-    ));
-    setDialog(null);
-    setFormError(null);
-  } catch {
-    setFormError("Deed could not be marked disbanded");
+  if (!result.ok) {
+    setFormError(result.error);
+    return;
   }
+
+  const { body } = result;
+  setNoteCategories((current) => upsertNoteCategory(current, body.category));
+  setMarkers((current) => upsertById(
+    current.filter((candidate) => candidate.id !== body.deletedMarkerId),
+    body.marker
+  ));
+  setDialog(null);
+  setFormError(null);
 }
 
 async function savePathDraft(
@@ -4880,37 +4522,21 @@ async function savePathDraft(
     return;
   }
 
-  const payload = {
-    name: draft.name,
-    notes: draft.notes,
-    points: draft.points,
-    type: draft.type,
-    width: draft.width
-  };
-  const url = draft.mode === "edit" && draft.id !== undefined
-    ? `/api/markers/${draft.type}/${draft.id}`
-    : `/api/maps/${mapId}/markers`;
+  const { name, notes, points, type, width } = draft;
+  const result = await requestJson<{ marker: WorkspaceMarker }>(
+    draft.mode === "edit" && draft.id !== undefined ? `/api/markers/${type}/${draft.id}` : `/api/maps/${mapId}/markers`,
+    jsonRequest(draft.mode === "edit" ? "PATCH" : "POST", { name, notes, points, type, width }),
+    "Path could not be saved"
+  );
 
-  try {
-    const response = await fetch(url, {
-      body: JSON.stringify(payload),
-      headers: { "content-type": "application/json" },
-      method: draft.mode === "edit" ? "PATCH" : "POST"
-    });
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setFormError(body?.error ?? "Path could not be saved");
-      return;
-    }
-
-    const body = (await response.json()) as { marker: WorkspaceMarker };
-    setMarkers((current) => upsertMarker(current, body.marker));
-    setPathDraft(null);
-    setFormError(null);
-  } catch {
-    setFormError("Path could not be saved");
+  if (!result.ok) {
+    setFormError(result.error);
+    return;
   }
+
+  setMarkers((current) => upsertById(current, result.body.marker));
+  setPathDraft(null);
+  setFormError(null);
 }
 
 async function createAutoplannedTower(
@@ -4919,7 +4545,8 @@ async function createAutoplannedTower(
   setMarkers: (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => void,
   setFormError: (error: string | null) => void
 ): Promise<void> {
-  const payload = {
+  const fallbackError = "Planned tower could not be created";
+  const result = await requestJson<{ marker: WorkspaceMarker }>(`/api/maps/${mapId}/markers`, jsonRequest("POST", {
     damage: "",
     makerName: "",
     makerNumber: "",
@@ -4929,33 +4556,16 @@ async function createAutoplannedTower(
     type: "tower",
     x: coordinate.x,
     y: coordinate.y
-  };
+  }), fallbackError);
 
-  try {
-    const response = await fetch(`/api/maps/${mapId}/markers`, {
-      body: JSON.stringify(payload),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    });
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setFormError(body?.error ?? "Planned tower could not be created");
-      return;
-    }
-
-    const body = (await response.json()) as { marker: WorkspaceMarker };
-
-    if (body.marker.type !== "tower") {
-      setFormError("Planned tower could not be created");
-      return;
-    }
-
-    setMarkers((current) => upsertMarker(current, body.marker));
-    setFormError(null);
-  } catch {
-    setFormError("Planned tower could not be created");
+  if (!result.ok || result.body.marker.type !== "tower") {
+    setFormError(result.ok ? fallbackError : result.error);
+    return;
   }
+
+  const { marker } = result.body;
+  setMarkers((current) => upsertById(current, marker));
+  setFormError(null);
 }
 
 type SettingsSaveResult = { ok: true } | { error: string; ok: false };
@@ -4986,12 +4596,6 @@ async function saveUserMapSettings(
   } catch {
     return { error: SETTINGS_SAVE_ERROR_MESSAGE, ok: false };
   }
-}
-
-async function readResponseError(response: Response): Promise<string | null> {
-  const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
-
-  return typeof body?.error === "string" && body.error.length > 0 ? body.error : null;
 }
 
 // One mouse-wheel notch (~100px) zooms by ZOOM_STEP; trackpad scrolls and pinches, which send
@@ -5037,99 +4641,47 @@ function parseShareLinkResponse(body: unknown): { expiresAt: string; url: string
   return { expiresAt, url };
 }
 
-function getShareErrorMessage(body: unknown): string {
-  if (typeof body === "object" && body !== null) {
-    const { error } = body as Record<string, unknown>;
-
-    if (typeof error === "string" && error.length > 0) {
-      return error;
-    }
-  }
-
-  return "Share link could not be created";
-}
-
 type MarkerPayloadResult =
   | { error: string; ok: false }
   | { ok: true; payload: Record<string, unknown> };
 
+// Plain form fields per marker type, in payload key order; tower, note, locate soul and paths are built by hand.
+const MARKER_FORM_FIELDS: Partial<Record<MarkerType, readonly string[]>> = {
+  annotation: ["text", "title"],
+  camp: ["campType", "notes"],
+  deed: ["east", "foundingDate", "founder", "name", "north", "perimeter", "south", "west"],
+  minedoor: ["notes", "strength"],
+  rift: ["arrivalDate", "estimatedRiftTime", "notes"]
+};
+const NUMERIC_FORM_FIELDS = new Set(["east", "north", "perimeter", "south", "west", "x", "y"]);
+
 function buildMarkerPayload(markerType: MarkerType, formData: FormData): MarkerPayloadResult {
-  const base = {
-    type: markerType,
-    x: Number(formData.get("x")),
-    y: Number(formData.get("y"))
-  };
+  const str = (name: string, fallback = "") => String(formData.get(name) ?? fallback);
+  const fields = (names: readonly string[]) => Object.fromEntries(names.map((name) => [
+    name,
+    NUMERIC_FORM_FIELDS.has(name) ? Number(formData.get(name)) : str(name)
+  ]));
+  const base = { type: markerType, ...fields(["x", "y"]) };
 
   if (markerType === "tower") {
-    const creator = parseCreatorInput(String(formData.get("creator") ?? ""));
+    const creator = parseCreatorInput(str("creator"));
 
     return {
       ok: true,
       payload: {
         ...base,
-        damage: String(formData.get("damage") ?? ""),
+        damage: str("damage"),
         makerName: creator.makerName,
         makerNumber: creator.makerNumber,
         planned: formData.get("planned") === "on",
-        ql: String(formData.get("ql") ?? ""),
-        towerType: String(formData.get("towerType") ?? DEFAULT_TOWER_TYPE)
-      }
-    };
-  }
-
-  if (markerType === "deed") {
-    return {
-      ok: true,
-      payload: {
-        ...base,
-        east: Number(formData.get("east")),
-        foundingDate: String(formData.get("foundingDate") ?? ""),
-        founder: String(formData.get("founder") ?? ""),
-        name: String(formData.get("name") ?? ""),
-        north: Number(formData.get("north")),
-        perimeter: Number(formData.get("perimeter")),
-        south: Number(formData.get("south")),
-        west: Number(formData.get("west"))
-      }
-    };
-  }
-
-  if (markerType === "rift") {
-    return {
-      ok: true,
-      payload: {
-        ...base,
-        arrivalDate: String(formData.get("arrivalDate") ?? ""),
-        estimatedRiftTime: String(formData.get("estimatedRiftTime") ?? ""),
-        notes: String(formData.get("notes") ?? "")
-      }
-    };
-  }
-
-  if (markerType === "camp") {
-    return {
-      ok: true,
-      payload: {
-        ...base,
-        campType: String(formData.get("campType") ?? ""),
-        notes: String(formData.get("notes") ?? "")
-      }
-    };
-  }
-
-  if (markerType === "minedoor") {
-    return {
-      ok: true,
-      payload: {
-        ...base,
-        notes: String(formData.get("notes") ?? ""),
-        strength: String(formData.get("strength") ?? "")
+        ql: str("ql"),
+        towerType: str("towerType", DEFAULT_TOWER_TYPE)
       }
     };
   }
 
   if (markerType === "locateSoul") {
-    const locateSoul = parseLocateSoulMessage(String(formData.get("locateSoulOutput") ?? ""));
+    const locateSoul = parseLocateSoulMessage(str("locateSoulOutput"));
 
     if (locateSoul === null) {
       return {
@@ -5138,52 +4690,22 @@ function buildMarkerPayload(markerType: MarkerType, formData: FormData): MarkerP
       };
     }
 
+    const { direction, distanceBand, targetName } = locateSoul;
     return {
       ok: true,
-      payload: {
-        ...base,
-        casterFacing: String(formData.get("casterFacing") ?? ""),
-        direction: locateSoul.direction,
-        distanceBand: locateSoul.distanceBand,
-        notes: String(formData.get("notes") ?? ""),
-        targetName: locateSoul.targetName
-      }
+      payload: { ...base, casterFacing: str("casterFacing"), direction, distanceBand, notes: str("notes"), targetName }
     };
   }
 
   if (isPathMarkerType(markerType)) {
-    return {
-      ok: true,
-      payload: {
-        name: String(formData.get("name") ?? ""),
-        notes: String(formData.get("notes") ?? ""),
-        points: [],
-        type: markerType,
-        width: 1
-      }
-    };
+    return { ok: true, payload: { ...fields(["name", "notes"]), points: [], type: markerType, width: 1 } };
   }
 
-  if (markerType === "annotation") {
-    return {
-      ok: true,
-      payload: {
-        ...base,
-        text: String(formData.get("text") ?? ""),
-        title: String(formData.get("title") ?? "")
-      }
-    };
+  if (markerType === "note") {
+    return { ok: true, payload: { category: str("category"), ...base, ...fields(["title", "text"]) } };
   }
 
-  return {
-    ok: true,
-    payload: {
-      category: String(formData.get("category") ?? ""),
-      ...base,
-      title: String(formData.get("title") ?? ""),
-      text: String(formData.get("text") ?? "")
-    }
-  };
+  return { ok: true, payload: { ...base, ...fields(MARKER_FORM_FIELDS[markerType] ?? []) } };
 }
 
 function buildAnnotationMarker(dialog: DialogState, payload: Record<string, unknown>): UserAnnotation {
@@ -5207,24 +4729,10 @@ function createClientMarkerId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function upsertAnnotation(annotations: UserAnnotation[], annotation: UserAnnotation): UserAnnotation[] {
-  const existingIndex = annotations.findIndex((candidate) => candidate.id === annotation.id);
-
-  if (existingIndex === -1) {
-    return [...annotations, annotation];
-  }
-
-  return annotations.map((candidate, index) => (index === existingIndex ? annotation : candidate));
-}
-
-function upsertMarker(markers: WorkspaceMarker[], marker: WorkspaceMarker): WorkspaceMarker[] {
-  const existingIndex = markers.findIndex((candidate) => candidate.id === marker.id);
-
-  if (existingIndex === -1) {
-    return [...markers, marker];
-  }
-
-  return markers.map((candidate, index) => (index === existingIndex ? marker : candidate));
+function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
+  return items.some((candidate) => candidate.id === item.id)
+    ? items.map((candidate) => (candidate.id === item.id ? item : candidate))
+    : [...items, item];
 }
 
 function upsertNoteCategory(categories: NoteCategory[], category: NoteCategory): NoteCategory[] {
@@ -5507,18 +5015,6 @@ function getScreenCoordinateCenter(coordinate: MapCoordinate, view: ViewState): 
   };
 }
 
-function getScreenRectStyle(
-  rect: { height: number; width: number; x: number; y: number },
-  view: ViewState
-): CSSProperties {
-  return {
-    height: formatPixels(rect.height * view.zoom),
-    left: formatPixels(view.x + rect.x * view.zoom),
-    top: formatPixels(view.y + rect.y * view.zoom),
-    width: formatPixels(rect.width * view.zoom)
-  };
-}
-
 function getCoordinateRect(start: MapCoordinate, end: MapCoordinate): { height: number; width: number; x: number; y: number } {
   const minX = Math.min(start.x, end.x);
   const maxX = Math.max(start.x, end.x);
@@ -5556,17 +5052,6 @@ function getQuickDeedDialogState(
   };
 }
 
-function getPathDraftSvgPoints(points: MapCoordinate[], width: number, view: ViewState): string {
-  const offset = getPathCoordinateOffset(width);
-
-  return points.map((point) => {
-    const x = view.x + (point.x + offset) * view.zoom;
-    const y = view.y + (point.y + offset) * view.zoom;
-
-    return `${formatSvgNumber(x)},${formatSvgNumber(y)}`;
-  }).join(" ");
-}
-
 function getPathPointStyle(point: MapCoordinate, width: number, view: ViewState): CSSProperties {
   const offset = getPathCoordinateOffset(width);
 
@@ -5576,40 +5061,8 @@ function getPathPointStyle(point: MapCoordinate, width: number, view: ViewState)
   }, view);
 }
 
-function getPathCoordinateOffset(width: number): number {
-  return Math.round(width) % 2 === 0 ? 1 : 0.5;
-}
-
 function getDefaultPathColor(type: PathMarkerType): string {
-  if (type === "bridge") {
-    return DEFAULT_USER_MAP_SETTINGS.markerColors.bridges;
-  }
-
-  if (type === "canal") {
-    return DEFAULT_USER_MAP_SETTINGS.markerColors.canals;
-  }
-
-  if (type === "highway") {
-    return DEFAULT_USER_MAP_SETTINGS.markerColors.highways;
-  }
-
-  return DEFAULT_USER_MAP_SETTINGS.markerColors.tunnels;
-}
-
-function getPathTypeTitle(type: PathMarkerType): string {
-  if (type === "bridge") {
-    return "Bridge";
-  }
-
-  if (type === "canal") {
-    return "Canal";
-  }
-
-  if (type === "highway") {
-    return "Highway";
-  }
-
-  return "Tunnel";
+  return DEFAULT_USER_MAP_SETTINGS.markerColors[getMarkerTypeKey(type)];
 }
 
 function appendPathDraftPoint(points: MapCoordinate[], coordinate: MapCoordinate): MapCoordinate[] {
@@ -5683,10 +5136,6 @@ function formatRouteTravelTime(distanceMeters: number, speedKmh: number): string
   const remainingMinutes = minutes % 60;
 
   return remainingMinutes === 0 ? `${hours} hr` : `${hours} hr ${remainingMinutes} min`;
-}
-
-function formatSvgNumber(value: number): string {
-  return Number(value.toFixed(3)).toString();
 }
 
 function getEventFeedPanelStyle(size: EventFeedPanelSize): CSSProperties {
@@ -5800,6 +5249,41 @@ function parseViewportSnapshot(snapshot: string): ViewportSize {
   };
 }
 
+function getZoomedView(
+  viewport: ViewportSize,
+  mapSize: { heightPx: number; widthPx: number },
+  nextZoom: number,
+  anchor: { clientX: number; clientY: number },
+  anchorMap: MapCoordinate
+): ViewState {
+  const minZoom = getFitZoom(viewport, mapSize);
+
+  if (nextZoom <= minZoom) {
+    return getFitView(viewport, mapSize);
+  }
+
+  const zoom = clamp(nextZoom, minZoom, MAX_ZOOM);
+  return { x: anchor.clientX - anchorMap.x * zoom, y: anchor.clientY - anchorMap.y * zoom, zoom };
+}
+
+function listenWindowPointer(move: (event: PointerEvent) => void, end: (event: PointerEvent) => void): () => void {
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+
+  return () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("pointercancel", end);
+  };
+}
+
+function releaseDrag(ref: { current: { pointerId: number } | null }, event: PointerEvent) {
+  if (ref.current?.pointerId === event.pointerId) {
+    ref.current = null;
+  }
+}
+
 function getFitView(viewport: ViewportSize, mapSize: { heightPx: number; widthPx: number }): ViewState {
   const zoom = getFitZoom(viewport, mapSize);
 
@@ -5839,23 +5323,6 @@ function getCenteredPosition(
     x: (viewport.width - mapSize.widthPx * zoom) / 2,
     y: (viewport.height - mapSize.heightPx * zoom) / 2
   };
-}
-
-function getVisibleNameMarkers(
-  markers: WorkspaceMarker[],
-  visibility: MarkerVisibility
-): WorkspaceMarker[] {
-  return markers.filter((marker) => {
-    if (marker.type === "deed" && !visibility.deeds) {
-      return false;
-    }
-
-    if (marker.type === "tower" && !visibility.towers) {
-      return false;
-    }
-
-    return true;
-  });
 }
 
 function getMapCoordinate(clientX: number, clientY: number, view: ViewState) {
@@ -6213,59 +5680,15 @@ function resizeDeedMarker(
 }
 
 function isMarkerVisible(marker: WorkspaceMarker, visibility: MarkerVisibility): boolean {
-  if (isPathMarker(marker)) {
-    if (marker.type === "bridge") {
-      return visibility.bridges;
-    }
-
-    if (marker.type === "canal") {
-      return visibility.canals;
-    }
-
-    if (marker.type === "highway") {
-      return visibility.highways;
-    }
-
-    return visibility.tunnels;
+  if (marker.type === "rift") {
+    return true;
   }
 
   if (marker.type === "tower") {
     return visibility.towers && (marker.planned !== true || visibility.plannedTowers);
   }
 
-  if (marker.type === "annotation") {
-    return visibility.annotations;
-  }
-
-  if (marker.type === "deed") {
-    return visibility.deeds;
-  }
-
-  if (marker.type === "rift") {
-    return true;
-  }
-
-  if (marker.type === "camp") {
-    return visibility.camps;
-  }
-
-  if (marker.type === "minedoor") {
-    return visibility.minedoors;
-  }
-
-  if (marker.type === "locateSoul") {
-    return visibility.locateSouls;
-  }
-
-  return visibility.notes;
-}
-
-function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: PathMarkerType }> {
-  return isPathMarkerType(marker.type);
-}
-
-function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType {
-  return markerType === "bridge" || markerType === "canal" || markerType === "highway" || markerType === "tunnel";
+  return visibility[getMarkerTypeKey(marker.type)];
 }
 
 function markerMatchesSearch(marker: WorkspaceMarker, searchTerm: string): boolean {
@@ -6276,7 +5699,7 @@ function markerMatchesSearch(marker: WorkspaceMarker, searchTerm: string): boole
   return getMarkerSearchText(marker).toLowerCase().includes(searchTerm);
 }
 
-function getMarkerSearchText(marker: WorkspaceMarker): string {
+function getMarkerSearchText(marker: Exclude<WorkspaceMarker, { type: PathMarkerType }>): string {
   if (marker.type === "annotation") {
     return [
       "annotation",
@@ -6359,10 +5782,6 @@ function getMarkerSearchText(marker: WorkspaceMarker): string {
       marker.x,
       marker.y
     ].join(" ");
-  }
-
-  if (isPathMarker(marker)) {
-    return "";
   }
 
   return [
@@ -6466,46 +5885,18 @@ function getMarkerTitle(marker: WorkspaceMarker): string {
     return `Annotation ${marker.title}`;
   }
 
-  if (marker.type === "tower") {
-    return "Tower";
+  if (marker.type === "note") {
+    return `Note ${marker.category} - ${marker.title}`;
   }
 
-  if (marker.type === "deed") {
-    return "Deed";
-  }
-
-  if (marker.type === "rift") {
-    return "Rift";
-  }
-
-  if (marker.type === "camp") {
-    return "Camp";
-  }
-
-  if (marker.type === "minedoor") {
-    return "Minedoor";
-  }
-
-  if (marker.type === "locateSoul") {
-    return "Locate Soul";
-  }
-
-  if (isPathMarker(marker)) {
-    return getPathTypeTitle(marker.type);
-  }
-
-  return `Note ${marker.category} - ${marker.title}`;
+  return MARKER_TYPE_LABELS[marker.type];
 }
 
 function getMarkerLastModifiedBy(marker: WorkspaceMarker): string {
   return "lastModifiedBy" in marker ? marker.lastModifiedBy ?? "Unknown" : "Unknown";
 }
 
-function getMarkerLabel(marker: WorkspaceMarker): string {
-  if (marker.type === "annotation") {
-    return `Annotation ${marker.title}`;
-  }
-
+function getMarkerAtCoordinateLabel(marker: WorkspaceMarker): string {
   if (marker.type === "tower") {
     return `Tower ${formatTowerCreator(marker)}`;
   }
@@ -6514,16 +5905,8 @@ function getMarkerLabel(marker: WorkspaceMarker): string {
     return `Deed ${marker.name}`;
   }
 
-  if (marker.type === "rift") {
-    return "Rift";
-  }
-
   if (marker.type === "camp") {
     return `Camp ${marker.campType}`;
-  }
-
-  if (marker.type === "minedoor") {
-    return "Minedoor";
   }
 
   if (marker.type === "locateSoul") {
@@ -6531,22 +5914,10 @@ function getMarkerLabel(marker: WorkspaceMarker): string {
   }
 
   if (isPathMarker(marker)) {
-    return `${getPathTypeTitle(marker.type)} ${marker.name || "path"}`;
+    return `${MARKER_TYPE_LABELS[marker.type]} ${marker.name || "path"}`;
   }
 
-  return "Note";
-}
-
-function getMarkerAtCoordinateLabel(marker: WorkspaceMarker): string {
-  if (marker.type === "annotation") {
-    return `Annotation ${marker.title}`;
-  }
-
-  if (marker.type === "note") {
-    return `Note ${marker.category} - ${marker.title}`;
-  }
-
-  return getMarkerLabel(marker);
+  return getMarkerTitle(marker);
 }
 
 function getMarkerContextTitle(marker: WorkspaceMarker): string {
@@ -6579,7 +5950,7 @@ function getMarkerContextTitle(marker: WorkspaceMarker): string {
   }
 
   if (isPathMarker(marker)) {
-    return marker.name || getPathTypeTitle(marker.type);
+    return marker.name || MARKER_TYPE_LABELS[marker.type];
   }
 
   return marker.title;
@@ -6615,7 +5986,7 @@ function getMarkerContextMeta(marker: WorkspaceMarker): string {
   }
 
   if (isPathMarker(marker)) {
-    return `${getPathTypeTitle(marker.type)} | ${marker.points.length} points | Width ${marker.width}`;
+    return `${MARKER_TYPE_LABELS[marker.type]} | ${marker.points.length} points | Width ${marker.width}`;
   }
 
   return `Note | ${marker.category}`;
@@ -6632,103 +6003,11 @@ function getMarkerContextRowStyle(marker: WorkspaceMarker, markerColors: MarkerC
 }
 
 function getMarkerContextColor(marker: WorkspaceMarker, markerColors: MarkerColors): string {
-  if (marker.type === "annotation") {
-    return markerColors.annotations;
-  }
-
-  if (marker.type === "tower") {
-    return markerColors.towers;
-  }
-
-  if (marker.type === "deed") {
-    return markerColors.deeds;
-  }
-
-  if (marker.type === "rift") {
-    return markerColors.rifts;
-  }
-
-  if (marker.type === "camp") {
-    return markerColors.camps;
-  }
-
-  if (marker.type === "minedoor") {
-    return markerColors.minedoors;
-  }
-
-  if (marker.type === "locateSoul") {
-    return markerColors.locateSouls;
-  }
-
-  if (marker.type === "bridge") {
-    return markerColors.bridges;
-  }
-
-  if (marker.type === "canal") {
-    return markerColors.canals;
-  }
-
-  if (marker.type === "highway") {
-    return markerColors.highways;
-  }
-
-  if (marker.type === "tunnel") {
-    return markerColors.tunnels;
-  }
-
-  return markerColors.notes;
+  return markerColors[getMarkerTypeKey(marker.type)];
 }
 
 function formatDeedDimensions(marker: Extract<WorkspaceMarker, { type: "deed" }>): string {
   return `${marker.west + marker.east + 1}x${marker.north + marker.south + 1}`;
-}
-
-function getMarkerTypeTitle(markerType: MarkerType): string {
-  if (markerType === "annotation") {
-    return "annotation";
-  }
-
-  if (markerType === "tower") {
-    return "tower";
-  }
-
-  if (markerType === "deed") {
-    return "deed";
-  }
-
-  if (markerType === "rift") {
-    return "rift";
-  }
-
-  if (markerType === "camp") {
-    return "camp";
-  }
-
-  if (markerType === "minedoor") {
-    return "minedoor";
-  }
-
-  if (markerType === "locateSoul") {
-    return "locate soul";
-  }
-
-  if (markerType === "bridge") {
-    return "bridge";
-  }
-
-  if (markerType === "canal") {
-    return "canal";
-  }
-
-  if (markerType === "highway") {
-    return "highway";
-  }
-
-  if (markerType === "tunnel") {
-    return "tunnel";
-  }
-
-  return "note";
 }
 
 function getHoverDetailsStyle(screenX: number, screenY: number): CSSProperties {
@@ -6799,14 +6078,6 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-function percentageToOpacity(value: number): number {
-  return clamp(value, 0, 100) / 100;
-}
-
 function formatZoom(value: number): string {
   return Number(value.toFixed(4)).toString();
-}
-
-function formatPixels(value: number): string {
-  return `${Number(value.toFixed(4))}px`;
 }

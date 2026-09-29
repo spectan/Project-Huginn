@@ -1,4 +1,4 @@
-import { triggerAlertDetection } from "@/lib/alerts/alert-service";
+import { triggerAlertsSafely } from "@/lib/alerts/trigger-safely";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { canViewAuditLog, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
@@ -109,7 +109,7 @@ export type AuditHistoryEvent = {
   y: number | null;
 };
 
-export type AuditHistoryFilters = {
+type AuditHistoryFilters = {
   actionGroup?: AuditHistoryActionGroup;
   actorUserId?: string;
   mapId?: string;
@@ -251,14 +251,6 @@ async function recordFailedAuthorization(
     targetType: "SYSTEM"
   });
   triggerAlertsSafely();
-}
-
-function triggerAlertsSafely(): void {
-  try {
-    triggerAlertDetection();
-  } catch {
-    // Alert detection is fire-and-forget; failures must not block the request.
-  }
 }
 
 function sanitizeMetadata(metadata: unknown): Record<string, unknown> {

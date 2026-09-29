@@ -1,21 +1,4 @@
-const OFFICIAL_EVENT_FEED_URLS: Record<string, string> = {
-  Affliction: "http://affliction.wurmonline.com/battles/server_feed.xml",
-  Cadence: "https://cadence.game.wurmonline.com/battles/server_feed.xml",
-  Celebration: "https://celebration.wurmonline.com/battles/server_feed.xml",
-  Chaos: "http://chaos.game.wurmonline.com/battles/server_feed.xml",
-  Defiance: "https://defiance.game.wurmonline.com/battles/server_feed.xml",
-  Deliverance: "http://deliverance.game.wurmonline.com/battles/server_feed.xml",
-  Desertion: "http://desertion.wurmonline.com/battles/server_feed.xml",
-  Elevation: "http://elevation.wurmonline.com/battles/server_feed.xml",
-  Exodus: "http://exodus.game.wurmonline.com/battles/server_feed.xml",
-  Harmony: "https://harmony.game.wurmonline.com/battles/server_feed.xml",
-  Independence: "https://independence.game.wurmonline.com/battles/server_feed.xml",
-  Melody: "https://melody.game.wurmonline.com/battles/server_feed.xml",
-  Pristine: "http://pristine.game.wurmonline.com/battles/server_feed.xml",
-  Release: "http://release.game.wurmonline.com/battles/server_feed.xml",
-  Serenity: "http://serenity.wurmonline.com/battles/server_feed.xml",
-  Xanadu: "http://xanadu.game.wurmonline.com/battles/server_feed.xml"
-};
+import { OFFICIAL_EVENT_FEED_URLS, parseEventFeedEntries } from "../../../scripts/event-feed-shared.mjs";
 
 const DEFAULT_EVENT_FEED_TIMEOUT_MS = 5000;
 const MAX_EVENT_FEED_TIMEOUT_MS = 30000;
@@ -79,24 +62,9 @@ export async function fetchOfficialEventFeed(
 }
 
 export function parseEventFeedXml(xml: string): OfficialEvent[] {
-  const events: OfficialEvent[] = [];
-  const messageRegex = /<message\s+text="([^"]*)"\s+time="(\d+)"\s*\/>/g;
-  let match;
-
-  while ((match = messageRegex.exec(xml)) !== null) {
-    const message = decodeXmlEntities(match[1] ?? "");
-    const timestamp = Number.parseInt(match[2] ?? "0", 10);
-
-    if (message !== "" && Number.isFinite(timestamp)) {
-      events.push({
-        id: `${timestamp}-${events.length}`,
-        message,
-        timestamp
-      });
-    }
-  }
-
-  return events.sort((a, b) => b.timestamp - a.timestamp || b.id.localeCompare(a.id));
+  return parseEventFeedEntries(xml)
+    .map((entry, index) => ({ id: `${entry.timestamp}-${index}`, ...entry }))
+    .sort((a, b) => b.timestamp - a.timestamp || b.id.localeCompare(a.id));
 }
 
 export function getOfficialFeedUrl(serverName: string): string | null {
@@ -111,13 +79,4 @@ function getEventFeedTimeoutMs(): number {
   }
 
   return Math.min(configured, MAX_EVENT_FEED_TIMEOUT_MS);
-}
-
-function decodeXmlEntities(value: string): string {
-  return value
-    .replace(/&quot;/g, "\"")
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
 }

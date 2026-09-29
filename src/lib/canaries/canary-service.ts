@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "crypto";
+import { TOWER_TYPES } from "@/lib/domain/markers";
 import type { WorkspaceMarker } from "@/lib/markers/marker-types";
 
 export const CANARY_MARKERS_PER_MAP = 3;
@@ -236,13 +237,6 @@ const USERNAMES = [
   "Ragna",
   "Sten",
   "Tilda"
-] as const;
-
-const TOWER_TYPES = [
-  "Freedom Isles",
-  "Horde of the Summoned",
-  "Jenn-Kellon",
-  "Mol-Rehan"
 ] as const;
 
 const NOTE_TITLES = [

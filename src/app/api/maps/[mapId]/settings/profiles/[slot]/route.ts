@@ -6,6 +6,10 @@ import {
   renameSettingsProfile,
   saveSettingsProfile
 } from "@/lib/map-settings/map-settings-service";
+import { readJson } from "@/lib/http/read-json";
+import { MAP_ERROR_STATUSES, getErrorStatus } from "@/lib/http/error-status";
+
+const PROFILE_ERROR_STATUSES = new Map<string, number>([...MAP_ERROR_STATUSES, ["Profile was not found", 404]]);
 
 type RouteContext = {
   params: Promise<{
@@ -28,7 +32,7 @@ export async function GET(_request: Request, context: RouteContext) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error) });
+    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error, PROFILE_ERROR_STATUSES) });
   }
 
   return NextResponse.json({ profile: result.value });
@@ -54,7 +58,7 @@ export async function PUT(request: Request, context: RouteContext) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error) });
+    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error, PROFILE_ERROR_STATUSES) });
   }
 
   // `created` only picks 201 (new slot) vs 200 (overwrite); it is not part of the body.
@@ -83,7 +87,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error) });
+    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error, PROFILE_ERROR_STATUSES) });
   }
 
   return NextResponse.json({ profile: result.value });
@@ -93,26 +97,6 @@ function parseSlot(raw: string): number {
   return /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
 }
 
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
-}
-
 function isRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
-}
-
-function getErrorStatus(error: string): number {
-  if (error === "Read access is required") {
-    return 403;
-  }
-
-  if (error === "Map was not found" || error === "Profile was not found") {
-    return 404;
-  }
-
-  return 400;
 }

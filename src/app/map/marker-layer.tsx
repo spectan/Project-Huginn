@@ -28,6 +28,14 @@ import type {
   NoteCategoryMarkerShapes,
   NoteCategoryPipSizes
 } from "@/lib/map-settings/map-settings";
+import {
+  formatSvgNumber,
+  getPathSvgPoints,
+  getScreenRectStyle,
+  isPathMarker,
+  percentageToOpacity,
+  type ScreenView as MarkerLayerView
+} from "./map-helpers";
 
 type MarkerLayerProps = {
   activeRelocatableMarkerId: string | null;
@@ -50,32 +58,13 @@ type MarkerLayerProps = {
   visibility: MarkerVisibility;
 };
 
-type MarkerLayerView = {
-  x: number;
-  y: number;
-  zoom: number;
-};
+type EdgeStyles = Record<"bottom" | "left" | "right" | "top", CSSProperties>;
+type MarkerStyle = CSSProperties & Record<`--${string}`, string>;
 
-export const MarkerLayer = React.memo(function MarkerLayer({
-  activeRelocatableMarkerId,
-  highlightedMarkerIds,
-  mapSize,
-  markerColors,
-  markerOpacities,
-  markers,
-  noteCategories,
-  noteCategoryColors,
-  noteCategoryMarkerShapes,
-  noteCategoryPipSizes,
-  onContextMenu,
-  onDeedOverlayPointerDown,
-  onHoverEnd,
-  onHoverMove,
-  onMarkerPointerDown,
-  roadwayEditMode,
-  view,
-  visibility
-}: MarkerLayerProps) {
+const EDGES = ["top", "bottom", "left", "right"] as const;
+
+export const MarkerLayer = React.memo(function MarkerLayer(props: MarkerLayerProps) {
+  const { highlightedMarkerIds, markerColors, markerOpacities, markers, roadwayEditMode, view, visibility } = props;
   const pathMarkers: PathWorkspaceMarker[] = [];
   const nonPathMarkers: Exclude<WorkspaceMarker, PathWorkspaceMarker>[] = [];
 
@@ -89,31 +78,34 @@ export const MarkerLayer = React.memo(function MarkerLayer({
 
   return (
     <div className="map-marker-layer" aria-label="Map markers" data-testid="map-marker-layer">
-      {nonPathMarkers.map((marker) => renderMarker(marker, activeRelocatableMarkerId, highlightedMarkerIds, mapSize, markerColors, markerOpacities, noteCategories, noteCategoryColors, noteCategoryMarkerShapes, noteCategoryPipSizes, onContextMenu, onDeedOverlayPointerDown, onHoverEnd, onHoverMove, onMarkerPointerDown, roadwayEditMode, view, visibility))}
+      {nonPathMarkers.map((marker) => renderMarker(marker, props))}
       {pathMarkers.length > 0 ? (
         <svg aria-label="Roadway paths" className="map-path-svg" data-testid="map-paths-svg">
           {pathMarkers.map((marker) => {
-            if (!isPathVisible(marker, visibility)) {
+            const layerKey = `${marker.type}s` as const;
+
+            if (!visibility[layerKey]) {
               return null;
             }
 
             const canUseActions = roadwayEditMode;
+            const handlers = getMarkerHandlers(marker, props);
 
             return (
               <polyline
-                aria-label={`${getPathTypeLabel(marker.type)} ${marker.name || "path"} from ${marker.x}, ${marker.y}`}
+                aria-label={`${marker.type.charAt(0).toUpperCase()}${marker.type.slice(1)} ${marker.name || "path"} from ${marker.x}, ${marker.y}`}
                 className={getPathClassName(highlightedMarkerIds.has(marker.id), canUseActions)}
                 data-testid={`path-marker-${marker.id}`}
                 fill="none"
                 key={marker.id}
-                onContextMenu={canUseActions ? (event) => onContextMenu(marker, event) : undefined}
-                onMouseEnter={(event) => onHoverMove(marker, event)}
-                onMouseLeave={onHoverEnd}
-                onMouseMove={(event) => onHoverMove(marker, event)}
-                opacity={getPathOpacity(marker.type, markerOpacities)}
+                onContextMenu={canUseActions ? handlers.onContextMenu : undefined}
+                onMouseEnter={handlers.onMouseEnter}
+                onMouseLeave={handlers.onMouseLeave}
+                onMouseMove={handlers.onMouseMove}
+                opacity={percentageToOpacity(markerOpacities[layerKey])}
                 points={getPathSvgPoints(marker.points, marker.width, view)}
                 role={canUseActions ? "button" : undefined}
-                stroke={getPathColor(marker.type, markerColors)}
+                stroke={markerColors[layerKey]}
                 strokeLinecap="square"
                 strokeLinejoin="miter"
                 strokeWidth={getPathStrokeWidth(marker.width, view)}
@@ -127,28 +119,47 @@ export const MarkerLayer = React.memo(function MarkerLayer({
   );
 });
 
-function renderMarker(
-  marker: Exclude<WorkspaceMarker, PathWorkspaceMarker>,
-  activeRelocatableMarkerId: string | null,
-  highlightedMarkerIds: Set<string>,
-  mapSize: { heightPx: number; widthPx: number },
-  markerColors: MarkerColors,
-  markerOpacities: MarkerOpacities,
-  noteCategories: NoteCategory[],
-  noteCategoryColors: NoteCategoryColors,
-  noteCategoryMarkerShapes: NoteCategoryMarkerShapes,
-  noteCategoryPipSizes: NoteCategoryPipSizes,
-  onContextMenu: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
-  onDeedOverlayPointerDown: (marker: WorkspaceMarker, event: PointerEvent<Element>) => void,
-  onHoverEnd: () => void,
-  onHoverMove: (marker: WorkspaceMarker, event: MouseEvent<Element>) => void,
-  onMarkerPointerDown: (marker: WorkspaceMarker, event: PointerEvent<Element>) => void,
-  roadwayEditMode: boolean,
-  view: MarkerLayerView,
-  visibility: MarkerVisibility
+function getMarkerHandlers(
+  marker: WorkspaceMarker,
+  { onContextMenu, onHoverEnd, onHoverMove, onMarkerPointerDown }: MarkerLayerProps
 ) {
+  return {
+    onContextMenu: (event: MouseEvent<Element>) => onContextMenu(marker, event),
+    onMouseEnter: (event: MouseEvent<Element>) => onHoverMove(marker, event),
+    onMouseLeave: onHoverEnd,
+    onMouseMove: (event: MouseEvent<Element>) => onHoverMove(marker, event),
+    onPointerDown: (event: PointerEvent<Element>) => onMarkerPointerDown(marker, event)
+  };
+}
+
+function EdgeSpans({ className, id, styles, testIdPrefix }: { className: string; id: string; styles: EdgeStyles; testIdPrefix: string }) {
+  return (
+    <>
+      {EDGES.map((edge) => (
+        <span className={className} data-testid={`${testIdPrefix}-${edge}-${id}`} key={edge} style={styles[edge]} />
+      ))}
+    </>
+  );
+}
+
+function renderMarker(marker: Exclude<WorkspaceMarker, PathWorkspaceMarker>, props: MarkerLayerProps) {
+  const {
+    activeRelocatableMarkerId,
+    highlightedMarkerIds,
+    mapSize,
+    markerColors,
+    markerOpacities,
+    noteCategories,
+    noteCategoryColors,
+    noteCategoryMarkerShapes,
+    noteCategoryPipSizes,
+    onDeedOverlayPointerDown,
+    view,
+    visibility
+  } = props;
   const isHighlighted = highlightedMarkerIds.has(marker.id);
   const isRelocatable = activeRelocatableMarkerId === marker.id;
+  const handlers = getMarkerHandlers(marker, props);
 
   if (marker.type === "tower") {
     if (!visibility.towers) {
@@ -163,26 +174,6 @@ function renderMarker(
       return null;
     }
 
-    const protectionBorderStyles = getSquareEdgeStyles(
-      marker.x,
-      marker.y,
-      TOWER_PROTECTION_DISTANCE_TILES,
-      towerColor,
-      towerOpacity,
-      view,
-      1,
-      isPlannedTower
-    );
-    const placementBorderStyles = getSquareEdgeStyles(
-      marker.x,
-      marker.y,
-      TOWER_PLACEMENT_DISTANCE_TILES,
-      towerColor,
-      towerOpacity,
-      view,
-      0.5
-    );
-
     return (
       <div className="map-marker-group" key={marker.id}>
         {visibility.overlays ? (
@@ -192,25 +183,11 @@ function renderMarker(
               data-testid={`tower-placement-${marker.id}`}
               style={getTowerOverlayStyle(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, towerOpacity, view)}
             />
-            <span
+            <EdgeSpans
               className="map-tower-zone-edge map-tower-zone-edge--placement"
-              data-testid={`tower-placement-border-top-${marker.id}`}
-              style={placementBorderStyles.top}
-            />
-            <span
-              className="map-tower-zone-edge map-tower-zone-edge--placement"
-              data-testid={`tower-placement-border-bottom-${marker.id}`}
-              style={placementBorderStyles.bottom}
-            />
-            <span
-              className="map-tower-zone-edge map-tower-zone-edge--placement"
-              data-testid={`tower-placement-border-left-${marker.id}`}
-              style={placementBorderStyles.left}
-            />
-            <span
-              className="map-tower-zone-edge map-tower-zone-edge--placement"
-              data-testid={`tower-placement-border-right-${marker.id}`}
-              style={placementBorderStyles.right}
+              id={marker.id}
+              styles={getSquareEdgeStyles(marker.x, marker.y, TOWER_PLACEMENT_DISTANCE_TILES, towerColor, towerOpacity, view, 0.5)}
+              testIdPrefix="tower-placement-border"
             />
             <span
               className={isPlannedTower ? "map-tower-zone map-tower-zone--protection is-planned" : "map-tower-zone map-tower-zone--protection"}
@@ -225,25 +202,13 @@ function renderMarker(
                 towerColor
               )}
             />
-            <span
-              className={getTowerProtectionEdgeClassName(isPlannedTower)}
-              data-testid={`tower-protection-border-top-${marker.id}`}
-              style={protectionBorderStyles.top}
-            />
-            <span
-              className={getTowerProtectionEdgeClassName(isPlannedTower)}
-              data-testid={`tower-protection-border-bottom-${marker.id}`}
-              style={protectionBorderStyles.bottom}
-            />
-            <span
-              className={getTowerProtectionEdgeClassName(isPlannedTower)}
-              data-testid={`tower-protection-border-left-${marker.id}`}
-              style={protectionBorderStyles.left}
-            />
-            <span
-              className={getTowerProtectionEdgeClassName(isPlannedTower)}
-              data-testid={`tower-protection-border-right-${marker.id}`}
-              style={protectionBorderStyles.right}
+            <EdgeSpans
+              className={isPlannedTower
+                ? "map-tower-zone-edge map-tower-zone-edge--protection is-planned"
+                : "map-tower-zone-edge map-tower-zone-edge--protection"}
+              id={marker.id}
+              styles={getSquareEdgeStyles(marker.x, marker.y, TOWER_PROTECTION_DISTANCE_TILES, towerColor, towerOpacity, view, 1, isPlannedTower)}
+              testIdPrefix="tower-protection-border"
             />
           </>
         ) : null}
@@ -251,11 +216,7 @@ function renderMarker(
           aria-label={`Tower by ${formatTowerCreator(marker)} at ${marker.x}, ${marker.y}`}
           className={getMarkerClassName("map-marker map-marker--tower", isHighlighted, isRelocatable)}
           data-testid={`tower-center-${marker.id}`}
-          onContextMenu={(event) => onContextMenu(marker, event)}
-          onMouseEnter={(event) => onHoverMove(marker, event)}
-          onMouseLeave={onHoverEnd}
-          onMouseMove={(event) => onHoverMove(marker, event)}
-          onPointerDown={(event) => onMarkerPointerDown(marker, event)}
+          {...handlers}
           style={getOpaqueCenterTileStyle(marker.x, marker.y, towerColor, view)}
           type="button"
         />
@@ -274,12 +235,8 @@ function renderMarker(
         className={getMarkerClassName("map-marker map-marker--note map-marker--note-shape-triangle map-marker--annotation", isHighlighted, isRelocatable)}
         data-testid={`annotation-center-${marker.id}`}
         key={marker.id}
-        onContextMenu={(event) => onContextMenu(marker, event)}
-        onMouseEnter={(event) => onHoverMove(marker, event)}
-        onMouseLeave={onHoverEnd}
-        onMouseMove={(event) => onHoverMove(marker, event)}
-        onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-        style={getAnnotationMarkerStyle(marker.x, marker.y, markerColors.annotations, view)}
+        {...handlers}
+        style={getNoteStyle(getCenterTileStyle(marker.x, marker.y, view), markerColors.annotations)}
         type="button"
       />
     );
@@ -290,17 +247,6 @@ function renderMarker(
       return null;
     }
 
-    const deedOverlayStyle = {
-      ...getScreenRectStyle({
-        height: getDeedHeight(marker),
-        width: getDeedWidth(marker),
-        x: marker.x - marker.west,
-        y: marker.y - marker.north
-      }, view)
-    };
-    const deedBorderStyles = getDeedBorderStyles(marker, markerColors.deeds, markerOpacities.deeds, view);
-    const deedPerimeterStyles = getDeedPerimeterStyles(marker, markerColors.deeds, markerOpacities.deeds, view);
-
     return (
       <div className="map-marker-group" key={marker.id}>
         {visibility.overlays ? (
@@ -309,82 +255,46 @@ function renderMarker(
               aria-label={`Deed ${marker.name} at ${marker.x}, ${marker.y}`}
               className="map-deed-overlay"
               data-testid={`deed-overlay-${marker.id}`}
-              onContextMenu={(event) => onContextMenu(marker, event)}
-              onMouseEnter={(event) => onHoverMove(marker, event)}
-              onMouseLeave={onHoverEnd}
-              onMouseMove={(event) => onHoverMove(marker, event)}
+              {...handlers}
               onPointerDown={(event) => onDeedOverlayPointerDown(marker, event)}
               style={{
-                ...deedOverlayStyle,
+                ...getScreenRectStyle({
+                  height: getDeedHeight(marker),
+                  width: getDeedWidth(marker),
+                  x: marker.x - marker.west,
+                  y: marker.y - marker.north
+                }, view),
                 opacity: percentageToOpacity(markerOpacities.deeds)
               }}
               type="button"
             />
-            <span
+            <EdgeSpans
               className="map-deed-border"
-              data-testid={`deed-border-top-${marker.id}`}
-              style={deedBorderStyles.top}
-            />
-            <span
-              className="map-deed-border"
-              data-testid={`deed-border-bottom-${marker.id}`}
-              style={deedBorderStyles.bottom}
-            />
-            <span
-              className="map-deed-border"
-              data-testid={`deed-border-left-${marker.id}`}
-              style={deedBorderStyles.left}
-            />
-            <span
-              className="map-deed-border"
-              data-testid={`deed-border-right-${marker.id}`}
-              style={deedBorderStyles.right}
+              id={marker.id}
+              styles={getDeedBorderStyles(marker, markerColors.deeds, markerOpacities.deeds, view)}
+              testIdPrefix="deed-border"
             />
             {visibility.deedPerimeters ? (
-              <>
-                <span
-                  className="map-deed-perimeter"
-                  data-testid={`deed-perimeter-top-${marker.id}`}
-                  style={deedPerimeterStyles.top}
-                />
-                <span
-                  className="map-deed-perimeter"
-                  data-testid={`deed-perimeter-bottom-${marker.id}`}
-                  style={deedPerimeterStyles.bottom}
-                />
-                <span
-                  className="map-deed-perimeter"
-                  data-testid={`deed-perimeter-left-${marker.id}`}
-                  style={deedPerimeterStyles.left}
-                />
-                <span
-                  className="map-deed-perimeter"
-                  data-testid={`deed-perimeter-right-${marker.id}`}
-                  style={deedPerimeterStyles.right}
-                />
-              </>
+              <EdgeSpans
+                className="map-deed-perimeter"
+                id={marker.id}
+                styles={getDeedPerimeterStyles(marker, markerColors.deeds, markerOpacities.deeds, view)}
+                testIdPrefix="deed-perimeter"
+              />
             ) : null}
             <span
-              className={getDeedCenterClassName("map-deed-center map-deed-center--visual", isHighlighted, isRelocatable)}
+              className={getMarkerClassName("map-deed-center map-deed-center--visual", isHighlighted, isRelocatable, "map-deed-center--relocatable")}
               data-testid={`deed-center-${marker.id}`}
-              onContextMenu={isRelocatable ? (event) => onContextMenu(marker, event) : undefined}
-              onMouseEnter={isRelocatable ? (event) => onHoverMove(marker, event) : undefined}
-              onMouseLeave={isRelocatable ? onHoverEnd : undefined}
-              onMouseMove={isRelocatable ? (event) => onHoverMove(marker, event) : undefined}
-              onPointerDown={isRelocatable ? (event) => onMarkerPointerDown(marker, event) : undefined}
+              {...(isRelocatable ? handlers : {})}
               style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.deeds, view)}
             />
           </>
         ) : (
           <button
             aria-label={`Deed ${marker.name} at ${marker.x}, ${marker.y}`}
-            className={getDeedCenterClassName("map-deed-center map-deed-center--interactive", isHighlighted, isRelocatable)}
+            className={getMarkerClassName("map-deed-center map-deed-center--interactive", isHighlighted, isRelocatable, "map-deed-center--relocatable")}
             data-testid={`deed-center-${marker.id}`}
-            onContextMenu={(event) => onContextMenu(marker, event)}
-            onMouseEnter={(event) => onHoverMove(marker, event)}
-            onMouseLeave={onHoverEnd}
-            onMouseMove={(event) => onHoverMove(marker, event)}
-            onPointerDown={(event) => onMarkerPointerDown(marker, event)}
+            {...handlers}
             style={getOpaqueCenterTileStyle(marker.x, marker.y, markerColors.deeds, view)}
             type="button"
           />
@@ -394,15 +304,6 @@ function renderMarker(
   }
 
   if (marker.type === "rift") {
-    const riftBorderStyles = getSquareEdgeStyles(
-      marker.x,
-      marker.y,
-      RIFT_OVERLAY_DISTANCE_TILES,
-      markerColors.rifts,
-      markerOpacities.riftOverlays,
-      view
-    );
-
     return (
       <div className="map-marker-group" key={marker.id}>
         {visibility.overlays && visibility.riftOverlays ? (
@@ -410,27 +311,16 @@ function renderMarker(
             <span
               className="map-rift-overlay"
               data-testid={`rift-overlay-${marker.id}`}
-              style={getOverlayStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, markerOpacities.riftOverlays, view)}
+              style={{
+                ...getSquareStyle(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, view),
+                opacity: percentageToOpacity(markerOpacities.riftOverlays)
+              }}
             />
-            <span
+            <EdgeSpans
               className="map-rift-border"
-              data-testid={`rift-overlay-border-top-${marker.id}`}
-              style={riftBorderStyles.top}
-            />
-            <span
-              className="map-rift-border"
-              data-testid={`rift-overlay-border-bottom-${marker.id}`}
-              style={riftBorderStyles.bottom}
-            />
-            <span
-              className="map-rift-border"
-              data-testid={`rift-overlay-border-left-${marker.id}`}
-              style={riftBorderStyles.left}
-            />
-            <span
-              className="map-rift-border"
-              data-testid={`rift-overlay-border-right-${marker.id}`}
-              style={riftBorderStyles.right}
+              id={marker.id}
+              styles={getSquareEdgeStyles(marker.x, marker.y, RIFT_OVERLAY_DISTANCE_TILES, markerColors.rifts, markerOpacities.riftOverlays, view)}
+              testIdPrefix="rift-overlay-border"
             />
           </>
         ) : null}
@@ -438,12 +328,8 @@ function renderMarker(
           aria-label={`Rift at ${marker.x}, ${marker.y}`}
           className={getMarkerClassName("map-marker map-marker--rift", isHighlighted, isRelocatable)}
           data-testid={`rift-marker-${marker.id}`}
-          onContextMenu={(event) => onContextMenu(marker, event)}
-          onMouseEnter={(event) => onHoverMove(marker, event)}
-          onMouseLeave={onHoverEnd}
-          onMouseMove={(event) => onHoverMove(marker, event)}
-          onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-          style={getRiftMarkerStyle(marker.x, marker.y, markerColors.rifts, view)}
+          {...handlers}
+          style={withColorVar(getCenterTileStyle(marker.x, marker.y, view), "--map-rift-color", markerColors.rifts)}
           type="button"
         />
       </div>
@@ -461,12 +347,8 @@ function renderMarker(
         className={getMarkerClassName("map-marker map-marker--camp", isHighlighted, isRelocatable)}
         data-testid={`camp-marker-${marker.id}`}
         key={marker.id}
-        onContextMenu={(event) => onContextMenu(marker, event)}
-        onMouseEnter={(event) => onHoverMove(marker, event)}
-        onMouseLeave={onHoverEnd}
-        onMouseMove={(event) => onHoverMove(marker, event)}
-        onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-        style={getCampMarkerStyle(marker.x, marker.y, markerColors.camps, view)}
+        {...handlers}
+        style={withColorVar(getCenterTileStyle(marker.x, marker.y, view), "--map-camp-color", markerColors.camps)}
         type="button"
       />
     );
@@ -483,12 +365,8 @@ function renderMarker(
         className={getMarkerClassName("map-marker map-marker--minedoor", isHighlighted, isRelocatable)}
         data-testid={`minedoor-marker-${marker.id}`}
         key={marker.id}
-        onContextMenu={(event) => onContextMenu(marker, event)}
-        onMouseEnter={(event) => onHoverMove(marker, event)}
-        onMouseLeave={onHoverEnd}
-        onMouseMove={(event) => onHoverMove(marker, event)}
-        onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-        style={getMinedoorMarkerStyle(marker.x, marker.y, markerColors.minedoors, view)}
+        {...handlers}
+        style={withColorVar(getScreenRectStyle({ height: 1, width: 1, x: marker.x, y: marker.y }, view), "--map-minedoor-color", markerColors.minedoors)}
         type="button"
       />
     );
@@ -551,12 +429,11 @@ function renderMarker(
           aria-label={`Locate Soul ${marker.targetName} at ${marker.x}, ${marker.y}`}
           className={getMarkerClassName("map-marker map-marker--locate-soul", isHighlighted, isRelocatable)}
           data-testid={`locate-soul-marker-${marker.id}`}
-          onContextMenu={(event) => onContextMenu(marker, event)}
-          onMouseEnter={(event) => onHoverMove(marker, event)}
-          onMouseLeave={onHoverEnd}
-          onMouseMove={(event) => onHoverMove(marker, event)}
-          onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-          style={getLocateSoulMarkerStyle(marker.x, marker.y, markerColors.locateSouls, view)}
+          {...handlers}
+          style={{
+            ...withColorVar(getScreenRectStyle({ height: 9, width: 9, x: marker.x - 4, y: marker.y - 4 }, view), "--map-locate-soul-color", markerColors.locateSouls),
+            opacity: 1
+          }}
           type="button"
         />
       </div>
@@ -567,7 +444,7 @@ function renderMarker(
     return null;
   }
 
-  const noteCategory = getNoteCategory(marker.category, noteCategories);
+  const noteCategory = noteCategories.find((category) => category.name === marker.category) ?? null;
   const noteColor = noteCategory === null ? markerColors.notes : noteCategoryColors[noteCategory.id] ?? markerColors.notes;
   const noteShape = noteCategory === null
     ? DEFAULT_NOTE_CATEGORY_MARKER_SHAPE
@@ -575,6 +452,7 @@ function renderMarker(
   const noteSize = noteCategory === null
     ? DEFAULT_NOTE_CATEGORY_PIP_SIZE
     : noteCategoryPipSizes[noteCategory.id] ?? noteCategory.pipSize;
+  const normalizedSize = Math.min(10, Math.max(1, Math.round(noteSize)));
 
   return (
     <button
@@ -582,34 +460,28 @@ function renderMarker(
       className={getMarkerClassName(`map-marker map-marker--note map-marker--note-shape-${noteShape}`, isHighlighted, isRelocatable)}
       data-testid={`note-center-${marker.id}`}
       key={marker.id}
-      onContextMenu={(event) => onContextMenu(marker, event)}
-      onMouseEnter={(event) => onHoverMove(marker, event)}
-      onMouseLeave={onHoverEnd}
-      onMouseMove={(event) => onHoverMove(marker, event)}
-      onPointerDown={(event) => onMarkerPointerDown(marker, event)}
-      style={getNoteMarkerStyle(marker.x, marker.y, noteSize, noteColor, view)}
+      {...handlers}
+      style={getNoteStyle(getScreenRectStyle({
+        height: normalizedSize,
+        width: normalizedSize,
+        x: marker.x + 0.5 - normalizedSize / 2,
+        y: marker.y + 0.5 - normalizedSize / 2
+      }, view), noteColor)}
       type="button"
     />
   );
 }
 
-function getNoteCategory(categoryName: string, noteCategories: NoteCategory[]): NoteCategory | null {
-  return noteCategories.find((category) => category.name === categoryName) ?? null;
-}
-
-function getMarkerClassName(baseClassName: string, isHighlighted: boolean, isRelocatable: boolean): string {
+function getMarkerClassName(
+  baseClassName: string,
+  isHighlighted: boolean,
+  isRelocatable: boolean,
+  relocatableClassName = "map-marker--relocatable"
+): string {
   return [
     baseClassName,
     isHighlighted ? "map-search-match" : "",
-    isRelocatable ? "map-marker--relocatable" : ""
-  ].filter(Boolean).join(" ");
-}
-
-function getDeedCenterClassName(baseClassName: string, isHighlighted: boolean, isRelocatable: boolean): string {
-  return [
-    baseClassName,
-    isHighlighted ? "map-search-match" : "",
-    isRelocatable ? "map-deed-center--relocatable" : ""
+    isRelocatable ? relocatableClassName : ""
   ].filter(Boolean).join(" ");
 }
 
@@ -622,151 +494,16 @@ function getCenterTileStyle(x: number, y: number, view: MarkerLayerView): CSSPro
   }, view);
 }
 
-function getSingleTileStyle(x: number, y: number, view: MarkerLayerView): CSSProperties {
-  return getScreenRectStyle({
-    height: 1,
-    width: 1,
-    x,
-    y
-  }, view);
+function withColorVar(base: CSSProperties, variable: `--${string}`, color: string): MarkerStyle {
+  return { ...base, [variable]: color };
 }
 
-type CampMarkerStyle = CSSProperties & {
-  "--map-camp-color": string;
-};
-
-type RiftMarkerStyle = CSSProperties & {
-  "--map-rift-color": string;
-};
-
-function getRiftMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): RiftMarkerStyle {
+function getNoteStyle(base: CSSProperties, color: string): MarkerStyle {
   return {
-    ...getCenterTileStyle(x, y, view),
-    "--map-rift-color": color
-  };
-}
-
-function getCampMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): CampMarkerStyle {
-  return {
-    ...getCenterTileStyle(x, y, view),
-    "--map-camp-color": color
-  };
-}
-
-type LocateSoulMarkerStyle = CSSProperties & {
-  "--map-locate-soul-color": string;
-};
-
-type MinedoorMarkerStyle = CSSProperties & {
-  "--map-minedoor-color": string;
-};
-
-type NoteMarkerStyle = CSSProperties & {
-  "--map-note-category-color": string;
-};
-
-type AnnotationMarkerStyle = CSSProperties & {
-  "--map-note-category-color": string;
-};
-
-function getMinedoorMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): MinedoorMarkerStyle {
-  return {
-    ...getSingleTileStyle(x, y, view),
-    "--map-minedoor-color": color
-  };
-}
-
-function getLocateSoulMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): LocateSoulMarkerStyle {
-  return {
-    ...getScreenRectStyle({
-      height: 9,
-      width: 9,
-      x: x - 4,
-      y: y - 4
-    }, view),
-    "--map-locate-soul-color": color,
-    opacity: 1
-  };
-}
-
-function getAnnotationMarkerStyle(x: number, y: number, color: string, view: MarkerLayerView): AnnotationMarkerStyle {
-  return {
-    ...getCenterTileStyle(x, y, view),
-    "--map-note-category-color": color,
+    ...withColorVar(base, "--map-note-category-color", color),
     backgroundColor: color,
     opacity: 1
   };
-}
-
-function getNoteMarkerStyle(x: number, y: number, size: number, color: string, view: MarkerLayerView): NoteMarkerStyle {
-  const normalizedSize = Math.min(10, Math.max(1, Math.round(size)));
-
-  return {
-    ...getScreenRectStyle({
-      height: normalizedSize,
-      width: normalizedSize,
-      x: x + 0.5 - normalizedSize / 2,
-      y: y + 0.5 - normalizedSize / 2
-    }, view),
-    "--map-note-category-color": color,
-    backgroundColor: color,
-    opacity: 1
-  };
-}
-
-function isPathMarker(marker: WorkspaceMarker): marker is Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }> {
-  return marker.type === "bridge" || marker.type === "canal" || marker.type === "highway" || marker.type === "tunnel";
-}
-
-function isPathVisible(
-  marker: Extract<WorkspaceMarker, { type: "bridge" | "canal" | "highway" | "tunnel" }>,
-  visibility: MarkerVisibility
-): boolean {
-  if (marker.type === "bridge") {
-    return visibility.bridges;
-  }
-
-  if (marker.type === "canal") {
-    return visibility.canals;
-  }
-
-  if (marker.type === "highway") {
-    return visibility.highways;
-  }
-
-  return visibility.tunnels;
-}
-
-function getPathColor(type: "bridge" | "canal" | "highway" | "tunnel", markerColors: MarkerColors): string {
-  if (type === "bridge") {
-    return markerColors.bridges;
-  }
-
-  if (type === "canal") {
-    return markerColors.canals;
-  }
-
-  if (type === "highway") {
-    return markerColors.highways;
-  }
-
-  return markerColors.tunnels;
-}
-
-function getPathOpacity(type: "bridge" | "canal" | "highway" | "tunnel", markerOpacities: MarkerOpacities): number {
-  if (type === "bridge") {
-    return percentageToOpacity(markerOpacities.bridges);
-  }
-
-  if (type === "canal") {
-    return percentageToOpacity(markerOpacities.canals);
-  }
-
-  if (type === "highway") {
-    return percentageToOpacity(markerOpacities.highways);
-  }
-
-  return percentageToOpacity(markerOpacities.tunnels);
 }
 
 function getPathClassName(isHighlighted: boolean, canInteract: boolean): string {
@@ -775,34 +512,6 @@ function getPathClassName(isHighlighted: boolean, canInteract: boolean): string 
     isHighlighted ? "map-search-match" : "",
     canInteract ? "" : "map-path--passive"
   ].filter(Boolean).join(" ");
-}
-
-function getPathTypeLabel(type: "bridge" | "canal" | "highway" | "tunnel"): string {
-  if (type === "bridge") {
-    return "Bridge";
-  }
-
-  if (type === "canal") {
-    return "Canal";
-  }
-
-  if (type === "highway") {
-    return "Highway";
-  }
-
-  return "Tunnel";
-}
-
-function getPathSvgPoints(points: Array<{ x: number; y: number }>, width: number, view: MarkerLayerView): string {
-  const offset = getPathCoordinateOffset(width);
-
-  return points.map((point) => (
-    `${formatSvgNumber(view.x + (point.x + offset) * view.zoom)},${formatSvgNumber(view.y + (point.y + offset) * view.zoom)}`
-  )).join(" ");
-}
-
-function getPathCoordinateOffset(width: number): number {
-  return Math.round(width) % 2 === 0 ? 1 : 0.5;
 }
 
 function getLocateSoulOverlayPath(
@@ -922,10 +631,6 @@ function getPathStrokeWidth(width: number, view: MarkerLayerView): number {
   return Math.max(1, width * view.zoom);
 }
 
-function formatSvgNumber(value: number): string {
-  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
-}
-
 function getOpaqueCenterTileStyle(
   x: number,
   y: number,
@@ -936,19 +641,6 @@ function getOpaqueCenterTileStyle(
     ...getCenterTileStyle(x, y, view),
     backgroundColor: color,
     opacity: 1
-  };
-}
-
-function getOverlayStyle(
-  x: number,
-  y: number,
-  distance: number,
-  opacity: number,
-  view: MarkerLayerView
-): CSSProperties {
-  return {
-    ...getSquareStyle(x, y, distance, view),
-    opacity: percentageToOpacity(opacity)
   };
 }
 
@@ -968,12 +660,6 @@ function getTowerOverlayStyle(
   };
 }
 
-function getTowerProtectionEdgeClassName(isPlanned: boolean): string {
-  return isPlanned
-    ? "map-tower-zone-edge map-tower-zone-edge--protection is-planned"
-    : "map-tower-zone-edge map-tower-zone-edge--protection";
-}
-
 function getSquareStyle(x: number, y: number, distance: number, view: MarkerLayerView): CSSProperties {
   return getScreenRectStyle({
     height: distance * 2 + 1,
@@ -981,25 +667,6 @@ function getSquareStyle(x: number, y: number, distance: number, view: MarkerLaye
     x: x - distance,
     y: y - distance
   }, view);
-}
-
-function getScreenRectStyle(
-  rect: { height: number; width: number; x: number; y: number },
-  view: MarkerLayerView
-): CSSProperties {
-  const left = view.x + rect.x * view.zoom;
-  const top = view.y + rect.y * view.zoom;
-
-  return {
-    height: formatPixels(rect.height * view.zoom),
-    left: formatPixels(left),
-    top: formatPixels(top),
-    width: formatPixels(rect.width * view.zoom)
-  };
-}
-
-function percentageToOpacity(value: number): number {
-  return Math.min(100, Math.max(0, value)) / 100;
 }
 
 function getDeedWidth(marker: Extract<WorkspaceMarker, { type: "deed" }>): number {
@@ -1015,7 +682,7 @@ function getDeedBorderStyles(
   color: string,
   opacity: number,
   view: MarkerLayerView
-): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+): EdgeStyles {
   return getRectEdgeStyles({
     color,
     height: getDeedHeight(marker),
@@ -1032,7 +699,7 @@ function getDeedPerimeterStyles(
   color: string,
   opacity: number,
   view: MarkerLayerView
-): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+): EdgeStyles {
   return getRectEdgeStyles({
     color,
     edgeThicknessTiles: 0.5,
@@ -1054,7 +721,7 @@ function getSquareEdgeStyles(
   view: MarkerLayerView,
   edgeThicknessTiles = 1,
   isPlanned = false
-): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+): EdgeStyles {
   const size = distance * 2 + 1;
 
   return getRectEdgeStyles({
@@ -1090,7 +757,7 @@ function getRectEdgeStyles({
   width: number;
   x: number;
   y: number;
-}): Record<"bottom" | "left" | "right" | "top", CSSProperties> {
+}): EdgeStyles {
   const edgeStyle = {
     ...backgroundExtras,
     backgroundColor: color,
@@ -1181,8 +848,4 @@ function getAlphaColor(color: string, alpha: number): string {
   }
 
   return `rgba(255, 255, 255, ${alpha})`;
-}
-
-function formatPixels(value: number): string {
-  return `${Number(value.toFixed(4))}px`;
 }

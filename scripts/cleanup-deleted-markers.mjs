@@ -19,16 +19,17 @@ function singleConnectionOptions(databaseUrl) {
 }
 
 // Every soft-deletable marker table. `markerType` matches what the app writes
-// into audit metadata; paths use their stored pathType (bridge, canal, ...).
+// into audit metadata (and names the count); paths use their stored pathType
+// (bridge, canal, ...) and are counted as "path".
 const MARKER_MODELS = [
-  { countKey: "tower", markerType: "tower", model: "tower", targetType: "TOWER" },
-  { countKey: "deed", markerType: "deed", model: "deed", targetType: "DEED" },
-  { countKey: "note", markerType: "note", model: "note", targetType: "NOTE" },
-  { countKey: "rift", markerType: "rift", model: "rift", targetType: "RIFT" },
-  { countKey: "camp", markerType: "camp", model: "camp", targetType: "CAMP" },
-  { countKey: "minedoor", markerType: "minedoor", model: "minedoor", targetType: "MINEDOOR" },
-  { countKey: "locateSoul", markerType: "locateSoul", model: "locateSoul", targetType: "LOCATE_SOUL" },
-  { countKey: "path", markerType: null, model: "pathMarker", targetType: "PATH" }
+  { markerType: "tower", model: "tower", targetType: "TOWER" },
+  { markerType: "deed", model: "deed", targetType: "DEED" },
+  { markerType: "note", model: "note", targetType: "NOTE" },
+  { markerType: "rift", model: "rift", targetType: "RIFT" },
+  { markerType: "camp", model: "camp", targetType: "CAMP" },
+  { markerType: "minedoor", model: "minedoor", targetType: "MINEDOOR" },
+  { markerType: "locateSoul", model: "locateSoul", targetType: "LOCATE_SOUL" },
+  { markerType: null, model: "pathMarker", targetType: "PATH" }
 ];
 
 async function main() {
@@ -51,27 +52,17 @@ async function runCleanup() {
   const deletedCounts = {};
 
   for (const config of MARKER_MODELS) {
-    deletedCounts[config.countKey] = await cleanupMarkers(config, now);
+    deletedCounts[config.markerType ?? "path"] = await cleanupMarkers(config, now);
   }
 
-  deletedCounts.shareLink = await cleanupShareLinks(now);
-  deletedCounts.session = await cleanupSessions(now);
+  deletedCounts.shareLink = await deleteExpired("shareLink", now);
+  deletedCounts.session = await deleteExpired("session", now);
 
   console.log(JSON.stringify({ deletedCounts }));
 }
 
-async function cleanupShareLinks(now) {
-  const deleted = await prisma.shareLink.deleteMany({
-    where: {
-      expiresAt: { lte: now }
-    }
-  });
-
-  return deleted.count;
-}
-
-async function cleanupSessions(now) {
-  const deleted = await prisma.session.deleteMany({
+async function deleteExpired(model, now) {
+  const deleted = await prisma[model].deleteMany({
     where: {
       expiresAt: { lte: now }
     }

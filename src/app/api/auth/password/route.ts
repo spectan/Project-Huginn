@@ -5,6 +5,7 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createAuthDependencies } from "@/lib/auth/database";
 import { SESSION_COOKIE_NAME, hashSessionToken } from "@/lib/auth/session";
 import { getClientIp } from "@/lib/network/client-ip";
+import { readJson } from "@/lib/http/read-json";
 
 export async function PATCH(request: Request) {
   const viewer = await getCurrentViewer();
@@ -28,14 +29,6 @@ export async function PATCH(request: Request) {
   }
 
   return NextResponse.json({ ok: true });
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }
 
 async function getCurrentSessionTokenHash(): Promise<string | null> {
