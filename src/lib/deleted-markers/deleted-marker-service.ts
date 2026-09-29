@@ -1,12 +1,19 @@
-import { triggerAlertDetection } from "@/lib/alerts/alert-service";
+import { triggerAlertsSafely } from "@/lib/alerts/trigger-safely";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
-import { formatTowerCreator } from "@/lib/domain/markers";
+import { formatTowerCreator, type PathType } from "@/lib/domain/markers";
 import {
   canRestoreDeletedMarkers,
   type UserAccess
 } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
-import type { MarkerType } from "@/lib/markers/marker-types";
+import { ADMIN_ACCESS_REQUIRED, DELETED_MARKER_NOT_FOUND } from "@/lib/markers/marker-errors";
+import {
+  MARKER_AUDIT_TARGETS,
+  getMarkerKind,
+  type MarkerAuditTarget,
+  type MarkerType,
+  type PersistedMarkerType
+} from "@/lib/markers/marker-types";
 
 const DEFAULT_DELETED_MARKER_LIMIT = 100;
 const MAX_DELETED_MARKER_LIMIT = 100;
@@ -20,16 +27,13 @@ type DeletedMarkerAuditAction =
   | "MARKER_DELETED"
   | "MARKER_RESTORED";
 
-type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "SYSTEM";
-type PathMarkerType = Extract<MarkerType, "bridge" | "canal" | "highway" | "tunnel">;
-
 type DeletedMarkerAuditInput = {
   action: DeletedMarkerAuditAction;
   actorUserId: string | null;
   mapId: string | null;
   metadata: Record<string, unknown>;
   targetId: string | null;
-  targetType: DeletedMarkerAuditTarget;
+  targetType: MarkerAuditTarget | "SYSTEM";
 };
 
 type DeletedMarkerReference = {
@@ -101,7 +105,7 @@ type DeletedLocateSoulRecord = DeletedMarkerRecordBase & {
 
 type DeletedPathRecord = DeletedMarkerRecordBase & {
   name: string;
-  pathType: PathMarkerType;
+  pathType: PathType;
 };
 
 export type DeletedMarkerSummary = {
@@ -116,15 +120,13 @@ export type DeletedMarkerSummary = {
   y: number;
 };
 
+export type DeletedMarkerStore = {
+  find(id: string): Promise<DeletedMarkerReference | null>;
+  // Restoring a disbanded deed also reports the disband note it retired.
+  restore(id: string, input: RestoreInput): Promise<(RestoredMarker & { retiredNote?: RetiredNote | null }) | null>;
+};
+
 export type DeletedMarkerDependencies = {
-  findDeletedCamp(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedDeed(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedLocateSoul(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedMinedoor(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedNote(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedPath(id: string, pathType: PathMarkerType): Promise<DeletedMarkerReference | null>;
-  findDeletedRift(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedTower(id: string): Promise<DeletedMarkerReference | null>;
   listRestorableDeletedMarkers(input: {
     limit: number;
     now: Date;
@@ -138,16 +140,9 @@ export type DeletedMarkerDependencies = {
     rifts: DeletedRiftRecord[];
     towers: DeletedTowerRecord[];
   }>;
+  markers: Record<PersistedMarkerType, DeletedMarkerStore>;
   now(): Date;
   recordAudit(input: DeletedMarkerAuditInput): Promise<void>;
-  restoreCamp(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
-  restoreDeed(id: string, input: RestoreInput): Promise<(RestoredMarker & { retiredNote: RetiredNote | null }) | null>;
-  restoreLocateSoul(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
-  restoreMinedoor(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
-  restoreNote(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
-  restorePath(id: string, input: RestoreInput & { pathType: PathMarkerType }): Promise<RestoredMarker | null>;
-  restoreRift(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
-  restoreTower(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
 };
 
 export async function listRestorableDeletedMarkers(
@@ -160,7 +155,7 @@ export async function listRestorableDeletedMarkers(
       input.actor,
       "DELETED_MARKER_LIST"
     );
-    return err("Admin access is required");
+    return err(ADMIN_ACCESS_REQUIRED);
   }
 
   const limit = getLimit(input.limit);
@@ -192,12 +187,12 @@ export async function restoreDeletedMarker(
   input: {
     actor: Actor;
     markerId: string;
-    markerType: MarkerType;
+    markerType: PersistedMarkerType;
   },
   dependencies: DeletedMarkerDependencies
 ): Promise<Result<{
   markerId: string;
-  markerType: MarkerType;
+  markerType: PersistedMarkerType;
 }>> {
   if (!canRestoreDeletedMarkers(input.actor)) {
     await auditAuthorizationFailure(
@@ -205,13 +200,14 @@ export async function restoreDeletedMarker(
       input.actor,
       "MARKER_RESTORED"
     );
-    return err("Admin access is required");
+    return err(ADMIN_ACCESS_REQUIRED);
   }
 
-  const deleted = await findDeletedMarker(input.markerType, input.markerId, dependencies);
+  const store = dependencies.markers[input.markerType];
+  const deleted = await store.find(input.markerId);
 
   if (deleted === null) {
-    return err("Deleted marker was not found");
+    return err(DELETED_MARKER_NOT_FOUND);
   }
 
   const now = dependencies.now();
@@ -220,13 +216,13 @@ export async function restoreDeletedMarker(
     return err("Restore window has expired");
   }
 
-  const restored = await restoreMarker(input.markerType, input.markerId, {
+  const restored = await store.restore(input.markerId, {
     now,
     updatedByUserId: input.actor.id
-  }, dependencies);
+  });
 
   if (restored === null) {
-    return err("Deleted marker was not found");
+    return err(DELETED_MARKER_NOT_FOUND);
   }
 
   await recordAudit(dependencies, {
@@ -235,7 +231,7 @@ export async function restoreDeletedMarker(
     mapId: restored.mapId,
     metadata: { markerType: input.markerType, x: restored.x, y: restored.y },
     targetId: restored.id,
-    targetType: getAuditTargetType(input.markerType)
+    targetType: MARKER_AUDIT_TARGETS[getMarkerKind(input.markerType)]
   });
 
   // Restoring a disbanded deed retires the "Abandoned Deed" note created for it.
@@ -298,7 +294,7 @@ function serializeDeletedLocateSoul(marker: DeletedLocateSoulRecord): DeletedMar
 }
 
 function serializeDeletedPath(marker: DeletedPathRecord): DeletedMarkerSummary {
-  return serializeDeletedMarker(marker, marker.pathType, marker.name || getPathTypeTitle(marker.pathType));
+  return serializeDeletedMarker(marker, marker.pathType, marker.name || capitalize(marker.pathType));
 }
 
 function serializeDeletedMarker(
@@ -317,79 +313,6 @@ function serializeDeletedMarker(
     x: marker.x,
     y: marker.y
   };
-}
-
-async function findDeletedMarker(
-  markerType: MarkerType,
-  markerId: string,
-  dependencies: DeletedMarkerDependencies
-): Promise<DeletedMarkerReference | null> {
-  if (markerType === "tower") {
-    return dependencies.findDeletedTower(markerId);
-  }
-
-  if (markerType === "deed") {
-    return dependencies.findDeletedDeed(markerId);
-  }
-
-  if (markerType === "rift") {
-    return dependencies.findDeletedRift(markerId);
-  }
-
-  if (markerType === "camp") {
-    return dependencies.findDeletedCamp(markerId);
-  }
-
-  if (markerType === "minedoor") {
-    return dependencies.findDeletedMinedoor(markerId);
-  }
-
-  if (markerType === "locateSoul") {
-    return dependencies.findDeletedLocateSoul(markerId);
-  }
-
-  if (isPathMarkerType(markerType)) {
-    return dependencies.findDeletedPath(markerId, markerType);
-  }
-
-  return dependencies.findDeletedNote(markerId);
-}
-
-async function restoreMarker(
-  markerType: MarkerType,
-  markerId: string,
-  input: RestoreInput,
-  dependencies: DeletedMarkerDependencies
-): Promise<(RestoredMarker & { retiredNote?: RetiredNote | null }) | null> {
-  if (markerType === "tower") {
-    return dependencies.restoreTower(markerId, input);
-  }
-
-  if (markerType === "deed") {
-    return dependencies.restoreDeed(markerId, input);
-  }
-
-  if (markerType === "rift") {
-    return dependencies.restoreRift(markerId, input);
-  }
-
-  if (markerType === "camp") {
-    return dependencies.restoreCamp(markerId, input);
-  }
-
-  if (markerType === "minedoor") {
-    return dependencies.restoreMinedoor(markerId, input);
-  }
-
-  if (markerType === "locateSoul") {
-    return dependencies.restoreLocateSoul(markerId, input);
-  }
-
-  if (isPathMarkerType(markerType)) {
-    return dependencies.restorePath(markerId, { ...input, pathType: markerType });
-  }
-
-  return dependencies.restoreNote(markerId, input);
 }
 
 async function auditAuthorizationFailure(
@@ -416,62 +339,6 @@ async function recordAudit(
   await dependencies.recordAudit(input);
 }
 
-function triggerAlertsSafely(): void {
-  try {
-    triggerAlertDetection();
-  } catch {
-    // Alert detection is fire-and-forget; failures must not block the request.
-  }
-}
-
-function getAuditTargetType(markerType: MarkerType): DeletedMarkerAuditTarget {
-  if (markerType === "tower") {
-    return "TOWER";
-  }
-
-  if (markerType === "deed") {
-    return "DEED";
-  }
-
-  if (markerType === "rift") {
-    return "RIFT";
-  }
-
-  if (markerType === "camp") {
-    return "CAMP";
-  }
-
-  if (markerType === "minedoor") {
-    return "MINEDOOR";
-  }
-
-  if (markerType === "locateSoul") {
-    return "LOCATE_SOUL";
-  }
-
-  if (isPathMarkerType(markerType)) {
-    return "PATH";
-  }
-
-  return "NOTE";
-}
-
-function isPathMarkerType(markerType: MarkerType): markerType is PathMarkerType {
-  return markerType === "bridge" || markerType === "canal" || markerType === "highway" || markerType === "tunnel";
-}
-
-function getPathTypeTitle(markerType: PathMarkerType): string {
-  if (markerType === "bridge") {
-    return "Bridge";
-  }
-
-  if (markerType === "canal") {
-    return "Canal";
-  }
-
-  if (markerType === "highway") {
-    return "Highway";
-  }
-
-  return "Tunnel";
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

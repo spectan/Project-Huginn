@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { readResponseError } from "@/lib/client/request-json";
 import type { DeletedMarkerSummary } from "@/lib/deleted-markers/deleted-marker-service";
 
 type DeletedMarkersViewProps = {
@@ -89,8 +90,7 @@ async function restoreMarker(
     return;
   }
 
-  const body = (await response.json().catch(() => null)) as { error?: string } | null;
-  setError(body?.error ?? "Marker could not be restored");
+  setError((await readResponseError(response)) ?? "Marker could not be restored");
   setPendingMarkerId(null);
 }
 

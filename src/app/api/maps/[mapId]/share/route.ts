@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createShareDependencies } from "@/lib/share/database";
 import { createShareLink } from "@/lib/share/share-service";
+import { readJson } from "@/lib/http/read-json";
+import { MAP_ERROR_STATUSES, getErrorStatus } from "@/lib/http/error-status";
 
 type RouteContext = {
   params: Promise<{
@@ -16,7 +18,10 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Authentication is required" }, { status: 401 });
   }
 
-  const body = await readJson(request);
+  const json = await readJson(request);
+  const body = typeof json === "object" && json !== null && !Array.isArray(json)
+    ? json as Record<string, unknown>
+    : null;
   const { mapId } = await context.params;
   const result = await createShareLink(
     {
@@ -29,7 +34,7 @@ export async function POST(request: Request, context: RouteContext) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error) });
+    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error, MAP_ERROR_STATUSES) });
   }
 
   return NextResponse.json(
@@ -39,30 +44,4 @@ export async function POST(request: Request, context: RouteContext) {
     },
     { status: 201 }
   );
-}
-
-async function readJson(request: Request): Promise<Record<string, unknown> | null> {
-  try {
-    const body: unknown = await request.json();
-
-    if (typeof body === "object" && body !== null && !Array.isArray(body)) {
-      return body as Record<string, unknown>;
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function getErrorStatus(error: string): number {
-  if (error === "Read access is required") {
-    return 403;
-  }
-
-  if (error === "Map was not found") {
-    return 404;
-  }
-
-  return 400;
 }

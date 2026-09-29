@@ -2,6 +2,7 @@
 
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import type { AdminMapSummary, AdminUserSummary } from "@/lib/admin/users";
+import { requestJson } from "@/lib/client/request-json";
 
 type AdminAccountsViewProps = {
   maps: AdminMapSummary[];
@@ -360,23 +361,17 @@ async function updateAdminUser(
     isOperator: operatorFlags[map.id] ?? false,
     mapId: map.id
   }));
-  const response = await fetch(`/api/admin/users/${userId}`, {
-    body: JSON.stringify({
-      isAdmin: viewerCanManageGlobalAccounts ? isGlobalAdmin : false,
-      mapPermissions
-    }),
-    headers: { "content-type": "application/json" },
-    method: "PATCH"
-  });
+  const result = await patchAdminUser(
+    userId,
+    { isAdmin: viewerCanManageGlobalAccounts ? isGlobalAdmin : false, mapPermissions },
+    "Account could not be updated"
+  );
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    onError(body?.error ?? "Account could not be updated");
-    return;
+  if (result.ok) {
+    onUserChange(result.body.user);
+  } else {
+    onError(result.error);
   }
-
-  const body = (await response.json()) as { user: AdminUserSummary };
-  onUserChange(body.user);
 }
 
 async function updateAdminUserPassword(
@@ -390,22 +385,18 @@ async function updateAdminUserPassword(
 
   const form = event.currentTarget;
   const formData = new FormData(form);
-  const response = await fetch(`/api/admin/users/${userId}/password`, {
-    body: JSON.stringify({
-      password: formData.get("password")
-    }),
-    headers: { "content-type": "application/json" },
-    method: "PATCH"
-  });
+  const result = await patchAdminUser(
+    `${userId}/password`,
+    { password: formData.get("password") },
+    "Password could not be changed"
+  );
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    onError(body?.error ?? "Password could not be changed");
+  if (!result.ok) {
+    onError(result.error);
     return;
   }
 
-  const body = (await response.json()) as { user: AdminUserSummary };
-  onUserChange(body.user);
+  onUserChange(result.body.user);
   form.reset();
 }
 
@@ -416,16 +407,25 @@ async function removeAdminUser(
 ): Promise<void> {
   onError(null);
 
-  const response = await fetch(`/api/admin/users/${userId}`, { method: "DELETE" });
+  const result = await requestJson<{ userId?: string } | null>(
+    `/api/admin/users/${userId}`,
+    { method: "DELETE" },
+    "Account could not be removed"
+  );
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    onError(body?.error ?? "Account could not be removed");
-    return;
+  if (result.ok) {
+    onUserRemove(result.body?.userId ?? userId);
+  } else {
+    onError(result.error);
   }
+}
 
-  const body = (await response.json().catch(() => null)) as { userId?: string } | null;
-  onUserRemove(body?.userId ?? userId);
+function patchAdminUser(path: string, body: unknown, fallbackError: string) {
+  return requestJson<{ user: AdminUserSummary }>(
+    `/api/admin/users/${path}`,
+    { body: JSON.stringify(body), headers: { "content-type": "application/json" }, method: "PATCH" },
+    fallbackError
+  );
 }
 
 function upsertAdminUser(users: AdminUserSummary[], user: AdminUserSummary): AdminUserSummary[] {

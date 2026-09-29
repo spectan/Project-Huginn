@@ -1,10 +1,10 @@
-export type RgbColor = {
+type RgbColor = {
   b: number;
   g: number;
   r: number;
 };
 
-export type TileHighlightSelection =
+type TileHighlightSelection =
   | "Cave Entrance"
   | "Clay"
   | "Moss"
@@ -28,7 +28,7 @@ export type TileHighlightSelection =
   | "Infected Tree / Bush"
   | "Hay Drying Tile";
 
-export type TileHighlightOptionGroup = {
+type TileHighlightOptionGroup = {
   label: string;
   options: TileHighlightSelection[];
 };

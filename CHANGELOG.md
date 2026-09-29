@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.2
+
+**Maintenance**
+- Large internal cleanup: about 5,000 fewer lines of code with no feature changes
+- Removed unused database indexes (run `npm run db:migrate`)
+- Network errors in the account and Discord settings panels now show a friendly message instead of failing silently
+
 ## v1.4.1
 
 **Security**

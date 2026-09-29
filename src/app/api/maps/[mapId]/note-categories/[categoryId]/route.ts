@@ -1,8 +1,7 @@
-import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
+import { hasPrismaErrorCode } from "@/lib/db/prisma-errors";
 import { prisma } from "@/lib/db/prisma";
-import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
   DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
   DEFAULT_NOTE_CATEGORY_NAME,
@@ -10,6 +9,8 @@ import {
   validateNoteCategoryInput
 } from "@/lib/domain/note-categories";
 import { canDeleteNoteCategories, canWriteMarkers } from "@/lib/domain/permissions";
+import { readJson } from "@/lib/http/read-json";
+import { findActiveMap, recordCategoryAudit, serializeCategory } from "@/lib/note-categories/database";
 
 type RouteContext = {
   params: Promise<{
@@ -90,7 +91,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       category: serializeCategory(category)
     });
   } catch (error) {
-    if (isUniqueConstraintError(error)) {
+    if (hasPrismaErrorCode(error, "P2002")) {
       return NextResponse.json({ error: "Category name already exists" }, { status: 409 });
     }
 
@@ -169,74 +170,6 @@ export async function DELETE(_request: Request, context: RouteContext) {
     category: {
       id: existing.id,
       reassignedTo: DEFAULT_NOTE_CATEGORY_NAME
-    }
-  });
-}
-
-async function findActiveMap(mapId: string): Promise<{ id: string } | null> {
-  return prisma.map.findFirst({
-    select: { id: true },
-    where: {
-      id: mapId,
-      isActive: true
-    }
-  });
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
-}
-
-function serializeCategory(category: {
-  color: string | null;
-  id: string;
-  markerShape: string;
-  name: string;
-  pipSize: number;
-}) {
-  return {
-    color: category.color,
-    id: category.id,
-    markerShape: category.markerShape,
-    name: category.name,
-    pipSize: category.pipSize
-  };
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "P2002";
-}
-
-async function recordCategoryAudit(input: {
-  actorUserId: string;
-  categoryId: string;
-  categoryName: string;
-  changedField: string;
-  mapId: string;
-}): Promise<void> {
-  const metadata = {
-    categoryId: input.categoryId,
-    categoryName: input.categoryName,
-    changedField: input.changedField
-  };
-
-  assertNoCoordinateMetadata(metadata);
-
-  await prisma.auditEvent.create({
-    data: {
-      action: "MAP_UPDATED",
-      actorUserId: input.actorUserId,
-      mapId: input.mapId,
-      metadata: metadata as Prisma.InputJsonValue,
-      targetId: input.mapId,
-      targetType: "MAP"
     }
   });
 }

@@ -22,15 +22,41 @@ const makoUser = {
   username: "Mako"
 };
 
+type ViewProps = React.ComponentProps<typeof AdminAccountsView>;
+
+function renderView(props: Partial<ViewProps> = {}) {
+  render(
+    React.createElement(AdminAccountsView, { maps, users: [makoUser], viewerCanManageGlobalAccounts: true, ...props })
+  );
+}
+
+function stubFetchJson(body: unknown) {
+  const fetchMock = vi.fn(async () => ({ json: async () => body, ok: true })) as unknown as typeof fetch;
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function approvedUserResponse(overrides: Partial<ViewProps["users"][number]>) {
+  return { user: { ...makoUser, approvalStatus: "APPROVED", ...overrides } };
+}
+
+async function expectJsonPatch(fetchMock: typeof fetch, url: string, body: unknown) {
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(url, {
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+      method: "PATCH"
+    })
+  );
+}
+
+function showPermissions() {
+  fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+}
+
 describe("AdminAccountsView", () => {
   it("renders account management in the dark admin layout", () => {
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [makoUser],
-        viewerCanManageGlobalAccounts: true
-      })
-    );
+    renderView();
 
     expect(screen.getByRole("heading", { name: "Accounts" })).toBeTruthy();
     expect(screen.getByText("Mako")).toBeTruthy();
@@ -40,7 +66,7 @@ describe("AdminAccountsView", () => {
     expect(screen.getByRole("button", { name: "Show server permissions for Mako" })).toBeTruthy();
     expect(screen.queryByLabelText("Set all server access for Mako")).toBeNull();
     expect(screen.queryByLabelText("Access for Mako on Celebration")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    showPermissions();
     expect(screen.getByRole("group", { name: "Server permissions for Mako" })).toBeTruthy();
     expect(screen.getByLabelText("Set all server access for Mako")).toBeTruthy();
     expect(screen.getByText("Celebration")).toBeTruthy();
@@ -59,22 +85,12 @@ describe("AdminAccountsView", () => {
   });
 
   it("filters account cards by username from the search field", () => {
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [
-          makoUser,
-          {
-            ...makoUser,
-            approvedByUsername: "Root",
-            createdAt: "2026-05-11T00:00:00.000Z",
-            id: "user-2",
-            username: "Stargrace"
-          }
-        ],
-        viewerCanManageGlobalAccounts: true
-      })
-    );
+    renderView({
+      users: [
+        makoUser,
+        { ...makoUser, approvedByUsername: "Root", createdAt: "2026-05-11T00:00:00.000Z", id: "user-2", username: "Stargrace" }
+      ]
+    });
 
     fireEvent.change(screen.getByLabelText("Search users"), { target: { value: "star" } });
 
@@ -88,66 +104,35 @@ describe("AdminAccountsView", () => {
   });
 
   it("saves privilege changes through the admin users API", async () => {
-    const fetchMock = vi.fn(async () => ({
-      json: async () => ({
-        user: {
-          accessLevel: "NONE",
-          approvedByUsername: "Admin",
-          approvalStatus: "APPROVED",
-          createdAt: "2026-05-10T00:00:00.000Z",
-          id: "user-1",
-          isAdmin: true,
-          mapPermissions: [
-            { accessLevel: "WRITE", isOperator: true, mapId: "map-defiance" }
-          ],
-          username: "Mako"
-        }
-      }),
-      ok: true
-    })) as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [makoUser],
-        viewerCanManageGlobalAccounts: true
+    const fetchMock = stubFetchJson(
+      approvedUserResponse({
+        isAdmin: true,
+        mapPermissions: [{ accessLevel: "WRITE", isOperator: true, mapId: "map-defiance" }]
       })
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    renderView();
+
+    showPermissions();
     fireEvent.change(screen.getByLabelText("Access for Mako on Defiance"), { target: { value: "WRITE" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "Operator for Mako on Defiance" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Admin for Mako" }));
     fireEvent.click(screen.getByRole("button", { name: "Save Mako" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/users/user-1",
-      {
-        body: JSON.stringify({
-          isAdmin: true,
-          mapPermissions: [
-            { accessLevel: "READ", isOperator: false, mapId: "map-celebration" },
-            { accessLevel: "WRITE", isOperator: true, mapId: "map-defiance" }
-          ]
-        }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      }
-    ));
+    await expectJsonPatch(fetchMock, "/api/admin/users/user-1", {
+      isAdmin: true,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-celebration" },
+        { accessLevel: "WRITE", isOperator: true, mapId: "map-defiance" }
+      ]
+    });
     expect(screen.getByText("Approved")).toBeTruthy();
   });
 
   it("sets all server access values for a user", () => {
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [makoUser],
-        viewerCanManageGlobalAccounts: true
-      })
-    );
+    renderView();
 
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    showPermissions();
     fireEvent.change(screen.getByLabelText("Set all server access for Mako"), { target: { value: "WRITE" } });
 
     expect(screen.getByLabelText("Access for Mako on Celebration")).toHaveProperty("value", "WRITE");
@@ -155,32 +140,11 @@ describe("AdminAccountsView", () => {
   });
 
   it("locks operator controls on for global admins", async () => {
-    const fetchMock = vi.fn(async () => ({
-      json: async () => ({
-        user: {
-          accessLevel: "NONE",
-          approvedByUsername: "Admin",
-          approvalStatus: "APPROVED",
-          createdAt: "2026-05-10T00:00:00.000Z",
-          id: "user-1",
-          isAdmin: true,
-          mapPermissions: [],
-          username: "Mako"
-        }
-      }),
-      ok: true
-    })) as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetchJson(approvedUserResponse({ isAdmin: true, mapPermissions: [] }));
 
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [{ ...makoUser, isAdmin: true }],
-        viewerCanManageGlobalAccounts: true
-      })
-    );
+    renderView({ users: [{ ...makoUser, isAdmin: true }] });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    showPermissions();
 
     expect(screen.getByRole("checkbox", { name: "Operator for Mako on Celebration" })).toHaveProperty("checked", true);
     expect(screen.getByRole("checkbox", { name: "Operator for Mako on Celebration" })).toHaveProperty("disabled", true);
@@ -189,32 +153,19 @@ describe("AdminAccountsView", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Save Mako" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/users/user-1",
-      {
-        body: JSON.stringify({
-          isAdmin: true,
-          mapPermissions: [
-            { accessLevel: "READ", isOperator: false, mapId: "map-celebration" },
-            { accessLevel: "NONE", isOperator: false, mapId: "map-defiance" }
-          ]
-        }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      }
-    ));
+    await expectJsonPatch(fetchMock, "/api/admin/users/user-1", {
+      isAdmin: true,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-celebration" },
+        { accessLevel: "NONE", isOperator: false, mapId: "map-defiance" }
+      ]
+    });
   });
 
   it("hides global account controls for scoped operators", () => {
-    render(
-      React.createElement(AdminAccountsView, {
-        maps: [{ id: "map-defiance", name: "Defiance" }],
-        users: [makoUser],
-        viewerCanManageGlobalAccounts: false
-      })
-    );
+    renderView({ maps: [{ id: "map-defiance", name: "Defiance" }], viewerCanManageGlobalAccounts: false });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    showPermissions();
     expect(screen.getByLabelText("Access for Mako on Defiance")).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Admin for Mako" })).toBeNull();
     expect(screen.queryByLabelText("New password for Mako")).toBeNull();
@@ -222,63 +173,25 @@ describe("AdminAccountsView", () => {
   });
 
   it("changes a user password through the admin password API", async () => {
-    const fetchMock = vi.fn(async () => ({
-      json: async () => ({
-        user: {
-          accessLevel: "NONE",
-          approvedByUsername: "Admin",
-          approvalStatus: "APPROVED",
-          createdAt: "2026-05-10T00:00:00.000Z",
-          id: "user-1",
-          isAdmin: false,
-          mapPermissions: [],
-          username: "Mako"
-        }
-      }),
-      ok: true
-    })) as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetchJson(approvedUserResponse({ isAdmin: false, mapPermissions: [] }));
 
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [{ ...makoUser, approvalStatus: "APPROVED" }],
-        viewerCanManageGlobalAccounts: true
-      })
-    );
+    renderView({ users: [{ ...makoUser, approvalStatus: "APPROVED" }] });
 
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    showPermissions();
     fireEvent.change(screen.getByLabelText("New password for Mako"), {
       target: { value: "new-secure-password" }
     });
     fireEvent.click(screen.getByRole("button", { name: "Change password Mako" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/admin/users/user-1/password",
-      {
-        body: JSON.stringify({ password: "new-secure-password" }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      }
-    ));
-    fireEvent.click(screen.getByRole("button", { name: "Show server permissions for Mako" }));
+    await expectJsonPatch(fetchMock, "/api/admin/users/user-1/password", { password: "new-secure-password" });
+    showPermissions();
     expect(screen.getByLabelText("New password for Mako")).toHaveProperty("value", "");
   });
 
   it("removes deleted users from account management", async () => {
-    const fetchMock = vi.fn(async () => ({
-      json: async () => ({ userId: "user-1" }),
-      ok: true
-    })) as unknown as typeof fetch;
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubFetchJson({ userId: "user-1" });
 
-    render(
-      React.createElement(AdminAccountsView, {
-        maps,
-        users: [{ ...makoUser, approvalStatus: "APPROVED" }],
-        viewerCanManageGlobalAccounts: true
-      })
-    );
+    renderView({ users: [{ ...makoUser, approvalStatus: "APPROVED" }] });
 
     fireEvent.click(screen.getByRole("button", { name: "Remove Mako" }));
 

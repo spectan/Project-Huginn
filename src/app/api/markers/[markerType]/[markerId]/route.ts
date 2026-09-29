@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createMarkerDependencies } from "@/lib/markers/database";
+import { readJson } from "@/lib/http/read-json";
 import { getMarkerErrorStatus } from "@/lib/markers/marker-errors";
 import { deleteMarker, updateMarker } from "@/lib/markers/marker-service";
-import type { MarkerType } from "@/lib/markers/marker-types";
+import { isPersistedMarkerType } from "@/lib/markers/marker-types";
 import { getClientIp } from "@/lib/network/client-ip";
 
 type RouteContext = {
@@ -22,7 +23,7 @@ export async function PATCH(request: Request, context: RouteContext) {
 
   const { markerId, markerType } = await context.params;
 
-  if (!isMarkerType(markerType)) {
+  if (!isPersistedMarkerType(markerType)) {
     return NextResponse.json({ error: "Marker type is invalid" }, { status: 400 });
   }
 
@@ -48,7 +49,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
   const { markerId, markerType } = await context.params;
 
-  if (!isMarkerType(markerType)) {
+  if (!isPersistedMarkerType(markerType)) {
     return NextResponse.json({ error: "Marker type is invalid" }, { status: 400 });
   }
 
@@ -62,28 +63,4 @@ export async function DELETE(request: Request, context: RouteContext) {
   }
 
   return NextResponse.json(result.value);
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
-}
-
-function isMarkerType(value: string): value is MarkerType {
-  return (
-    value === "tower" ||
-    value === "deed" ||
-    value === "note" ||
-    value === "rift" ||
-    value === "camp" ||
-    value === "minedoor" ||
-    value === "locateSoul" ||
-    value === "bridge" ||
-    value === "canal" ||
-    value === "highway" ||
-    value === "tunnel"
-  );
 }

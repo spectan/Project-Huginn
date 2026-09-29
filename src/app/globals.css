@@ -91,8 +91,6 @@ body {
   left: 0;
   width: 2048px;
   height: 2048px;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
   image-rendering: pixelated;
   transform-origin: 0 0;
   will-change: transform;
@@ -106,8 +104,6 @@ body {
   width: 2048px;
   height: 2048px;
   max-width: none;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
   image-rendering: pixelated;
   user-select: none;
   -webkit-user-drag: none;
@@ -118,8 +114,6 @@ body {
   background-position: 0 0;
   background-repeat: no-repeat;
   background-size: 100% 100%;
-  image-rendering: -webkit-optimize-contrast;
-  image-rendering: crisp-edges;
   image-rendering: pixelated;
   pointer-events: none;
   user-select: none;
@@ -216,14 +210,6 @@ body {
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.42);
 }
 
-.map-marker--tower {
-  background: #ffffff;
-}
-
-.map-marker--note {
-  background: #ff2bd6;
-}
-
 .map-marker-group {
   position: absolute;
   inset: 0;
@@ -252,12 +238,20 @@ body {
   cursor: grabbing;
 }
 
-.map-path-svg {
+.map-path-svg,
+.map-path-draft-svg,
+.map-search-line-svg,
+.map-route-planner-svg,
+.map-locate-soul-overlay-svg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   overflow: visible;
+}
+
+.map-path-svg,
+.map-locate-soul-overlay-svg {
   pointer-events: none;
 }
 
@@ -289,14 +283,6 @@ body {
   border: 1px solid #ffffff;
   box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.65), 0 0 0 1px rgba(15, 23, 42, 0.65);
   pointer-events: none;
-}
-
-.map-path-draft-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
 }
 
 .map-path-draft-line {
@@ -335,28 +321,12 @@ body {
   pointer-events: none;
 }
 
-.map-search-line-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
 .map-search-line {
   stroke: #38bdf8;
   stroke-width: 2px;
   opacity: 0.72;
   filter: drop-shadow(0 0 4px rgba(56, 189, 248, 0.42));
   pointer-events: none;
-}
-
-.map-route-planner-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
 }
 
 .map-route-planner-line {
@@ -375,15 +345,6 @@ body {
   border-radius: 50%;
   background: #14b8a6;
   box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.6);
-}
-
-.map-locate-soul-overlay-svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-  pointer-events: none;
 }
 
 .map-locate-soul-overlay {
@@ -453,6 +414,7 @@ body {
   height: 3px;
   border: 0;
   border-radius: 50%;
+  background: #ff2bd6;
   box-shadow: none;
   transform: none;
 }
@@ -655,24 +617,6 @@ body {
   scrollbar-color: rgba(148, 163, 184, 0.6) rgba(15, 23, 42, 0.5);
 }
 
-.map-context-menu::-webkit-scrollbar {
-  width: 8px;
-}
-
-.map-context-menu::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
-  border-radius: 4px;
-}
-
-.map-context-menu::-webkit-scrollbar-thumb {
-  background: rgba(148, 163, 184, 0.6);
-  border-radius: 4px;
-}
-
-.map-context-menu::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.85);
-}
-
 .map-context-menu p {
   margin: 0;
   padding: 2px 8px 6px;
@@ -809,15 +753,7 @@ body {
   white-space: nowrap;
 }
 
-.map-context-marker-meta {
-  overflow: hidden;
-  color: #94a3b8;
-  font-size: 11px;
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+.map-context-marker-meta,
 .map-context-marker-modifier {
   overflow: hidden;
   color: #94a3b8;
@@ -1380,28 +1316,13 @@ body {
   gap: 8px;
 }
 
-.map-route-planner-button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 8px;
-  padding: 0;
-  background: rgba(15, 23, 42, 0.58);
-  color: #e5e7eb;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
-  backdrop-filter: blur(8px);
-  cursor: pointer;
-}
-
 .map-route-planner-button.is-active {
   border-color: rgba(20, 184, 166, 0.88);
   background: rgba(20, 184, 166, 0.26);
   color: #ffffff;
 }
 
+.map-route-planner-button,
 .map-legend-button,
 .map-event-feed-button,
 .map-share-button,
@@ -1421,7 +1342,8 @@ body {
   cursor: pointer;
 }
 
-.map-legend-button.is-active {
+.map-legend-button.is-active,
+.map-share-button.is-active {
   border-color: rgba(96, 165, 250, 0.88);
   background: rgba(37, 99, 235, 0.32);
   color: #ffffff;
@@ -1469,12 +1391,6 @@ body {
   background: currentColor;
   content: "";
   transform: rotate(-28deg);
-}
-
-.map-share-button.is-active {
-  border-color: rgba(96, 165, 250, 0.88);
-  background: rgba(37, 99, 235, 0.32);
-  color: #ffffff;
 }
 
 .map-route-planner-icon {
@@ -2723,85 +2639,15 @@ body {
 }
 
 /*
- * Admin design system (phase 1 contract — phase 2 pages build against these classes).
- *
- * Layout (rendered by src/app/admin/layout.tsx — pages must NOT render these):
- *   .admin-shell              Root flex wrapper; defines all --admin-* tokens. `<div className="admin-shell">`
- *   .admin-sidebar            216px sticky left sidebar (horizontal tab bar under 900px).
- *   .admin-brand              "Huginn" wordmark in the sidebar; links to the dashboard.
- *   .admin-nav                Nav link column; `.admin-nav-link` + `.admin-nav-link--active` for links.
- *   .admin-main               Right-hand column wrapping topbar + content.
- *   .admin-topbar             Slim 48px top bar; `.admin-topbar-title` holds "Admin / <Section>",
- *                             `.admin-topbar-back` right-aligns the "Back to map" button.
- *   .admin-content            Scrollable content column; direct children capped at 1100px, 12px apart.
- *
- * Page primitives (use inside admin pages):
- *   .admin-page-title         Page heading at the top of content. `<h1 className="admin-page-title">Accounts</h1>`
- *   .admin-section-title      Section heading inside an .admin-panel. `<h2 className="admin-section-title">Alerts</h2>`
- *   .admin-section-header     Flex row pairing an .admin-section-title with right-aligned trailing actions.
- *                             `<div className="admin-section-header"><h2 …>…</h2><a className="admin-btn …">…</a></div>`
- *   .admin-panel              Bordered section container (also wraps tables). `<section className="admin-panel">…</section>`
- *   .admin-toolbar            Flex row of filters/actions. `<div className="admin-toolbar">…</div>`
- *   .admin-table              Dense data table (12–13px, 1px row borders, hover). `<table className="admin-table">`
- *   .admin-btn                Button; modifiers --danger, --ghost, --small. `<button className="admin-btn admin-btn--small">`
- *   .admin-input              Text input. `<input className="admin-input" type="search">`
- *   .admin-textarea           Multi-line text area. `<textarea className="admin-textarea" …>`
- *   .admin-select             Select dropdown. `<select className="admin-select">…</select>`
- *   .admin-check              Checkbox label row. `<label className="admin-check"><input type="checkbox"><span>Admin</span></label>`
- *   .admin-card-footer        Bottom row of an expanded account card; pushes its children apart.
- *                             `<div className="admin-card-footer">…<button>Save</button></div>`
- *   .admin-password-form      Inline password-change row inside .admin-card-footer.
- *   .admin-server-grid        3-column grid of per-server permission cells (2 columns under 1100px, 1 under 720px).
- *                             `<div className="admin-server-grid">…</div>`
- *   .admin-server-cell        One server permission cell; internal grid keeps name / access select / operator
- *                             checkbox aligned across cells: `<div className="admin-server-cell">`
- *                             `<strong className="admin-server-cell__name">Celebration</strong><select …>…</select>`
- *                             `<label className="admin-check">…</label></div>`
- *   .admin-pill               Status pill; modifiers --approved/--pending/--rejected/--info/--warning/--danger.
- *                             `<span className="admin-pill admin-pill--approved">Approved</span>`
- *   .admin-empty              Empty-state / info box. `<section className="admin-empty">No alerts</section>`
- *   .admin-pagination         Pager row; links inside render as ghost buttons. `<nav className="admin-pagination"><a …>Older</a></nav>`
- *   .admin-stat-grid          Dashboard tile grid. `<div className="admin-stat-grid">`
- *   .admin-stat               Single tile: `<div className="admin-stat"><span>Open alerts</span><strong>12</strong></div>`
- *   .admin-code               Monospace metadata cell. `<code className="admin-code">{json}</code>`
- *   .admin-details            Collapsible wrapper (native <details>/<summary>, collapsed by default)
- *                             for long cell content such as metadata; the summary shows a compact
- *                             hint and expanding reveals the full `.admin-code` content.
- *                             `<details className="admin-details"><summary>…</summary><code className="admin-code">…</code></details>`
- *   .admin-preview-img        Fitted pixelated preview image. `<img className="admin-preview-img" …>`
- *   .admin-watermark-grid     Two-pane watermark layout (upload dropzone | result; 1 column under 720px).
- *   .admin-dropzone           Large dashed drop/paste zone (min-height 180px, centered column);
- *                             `.is-armed` highlights it while a file is dragged over.
- *                             `<div className="admin-dropzone">…</div>`
- *   .admin-dropzone-hint      Instruction text inside the dropzone.
- *   .admin-dropzone-file      Selected-file summary (name + size) inside the dropzone.
- *   .admin-watermark-actions  Centered action row beneath the dropzone (Reveal button).
- *   .admin-watermark-result   Result pane holding the framed preview or `.admin-watermark-placeholder`.
- *   .admin-watermark-placeholder  Dashed placeholder box for the empty / failed result states.
- *   .admin-watermark-lookup   UserID lookup row beneath the grid (pairs with .admin-toolbar);
- *                             a match renders as `.admin-pill--approved`, a miss as muted
- *                             `.admin-watermark-nomatch` text.
- *   .admin-discord-grid       Two-pane Discord settings layout (Connection | Notifications;
- *                             1 column under 900px). `<div className="admin-discord-grid">…</div>`
- *   .admin-discord-field      Labeled full-width input stack: small muted uppercase label above
- *                             the input. `<label className="admin-discord-field"><span>Webhook URL</span>`
- *                             `<input className="admin-input" …></label>`
- *   .admin-discord-enabled    Prominent bordered "Enabled" toggle row with a trailing muted hint
- *                             (`.admin-discord-enabled-hint`).
- *   .admin-discord-actions    Action row (Save / Send test message) inside the Connection panel;
- *                             pairs with .admin-toolbar.
- *   .admin-discord-feedback   Feedback row under the actions; renders .admin-pill results
- *                             (--approved for success, --danger for errors).
- *   .admin-discord-group      Notification toggle group separated from the previous group by a
- *                             top border; `.admin-discord-group__label` is the small muted
- *                             uppercase group heading.
- *   .admin-toggle-grid        2-column grid of .admin-check toggles (1 column under 720px).
- *                             `<div className="admin-toggle-grid"><label className="admin-check">…</label>…</div>`
- *   .admin-visually-hidden    Visually hidden but still focusable/labelable control
- *                             (e.g. a restyled native file input).
+ * Admin design system. Layout classes (.admin-shell, -sidebar, -brand, -nav, -main, -topbar,
+ * -content) are rendered only by src/app/admin/layout.tsx; pages build from the primitives below
+ * (.admin-page-title, -section-header/-title, -panel, -toolbar, -table, -btn, -input, -select,
+ * -check, -pill, -empty, -stat-grid, …) and page-specific blocks (accounts, watermark, discord).
+ * .admin-details is a native <details> wrapper for long cells (e.g. .admin-code metadata);
+ * .admin-visually-hidden hides a still-focusable control such as a restyled file input.
  *
  * Tokens (scoped to .admin-shell): --admin-bg, --admin-panel, --admin-panel-2, --admin-border,
- *   --admin-text, --admin-muted, --admin-accent, --admin-danger, --admin-success, --admin-warning, --admin-radius.
+ *   --admin-text, --admin-muted, --admin-accent, --admin-radius.
  */
 .admin-shell {
   --admin-bg: #0b1220;
@@ -2811,9 +2657,6 @@ body {
   --admin-text: #e5e7eb;
   --admin-muted: #94a3b8;
   --admin-accent: #3b82f6;
-  --admin-danger: #ef4444;
-  --admin-success: #22c55e;
-  --admin-warning: #f59e0b;
   --admin-radius: 6px;
   display: flex;
   height: 100dvh;
@@ -3171,12 +3014,6 @@ body {
   }
 }
 
-@media (max-width: 720px) {
-  .admin-server-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .admin-pill {
   display: inline-flex;
   align-items: center;
@@ -3469,18 +3306,6 @@ body {
   gap: 6px 12px;
 }
 
-@media (max-width: 900px) {
-  .admin-discord-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 720px) {
-  .admin-toggle-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 .admin-visually-hidden {
   position: absolute;
   width: 1px;
@@ -3492,12 +3317,18 @@ body {
 }
 
 @media (max-width: 720px) {
+  .admin-server-grid,
+  .admin-toggle-grid,
   .admin-watermark-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 900px) {
+  .admin-discord-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .admin-shell {
     flex-direction: column;
   }

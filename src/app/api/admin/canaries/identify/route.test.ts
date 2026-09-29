@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 import { ok } from "@/lib/domain/result";
 
 const mocks = vi.hoisted(() => ({
@@ -37,11 +38,7 @@ vi.mock("@/lib/db/prisma", () => ({
 
 import { POST } from "./route";
 
-function createRequest(body: unknown): Request {
-  return {
-    json: async () => body
-  } as unknown as Request;
-}
+const createRequest = (body: unknown) => jsonRequest("http://localhost/api/admin/canaries/identify", "POST", body);
 
 function createInvalidJsonRequest(): Request {
   return {

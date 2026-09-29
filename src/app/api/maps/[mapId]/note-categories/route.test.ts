@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 
 const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(async () => ({})),
@@ -57,6 +58,8 @@ vi.mock("@/lib/db/prisma", () => ({
 }));
 
 import { POST } from "./route";
+
+const approvedAdmin = { accessLevel: "WRITE", approvalStatus: "APPROVED", id: "admin-1", isAdmin: true } as const;
 
 describe("POST /api/maps/[mapId]/note-categories", () => {
   beforeEach(() => {
@@ -120,12 +123,7 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
   });
 
   it("returns 200 without a created audit when the category already exists", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
     mocks.noteCategoryFindUnique.mockResolvedValueOnce({
       color: "#ff0000",
       id: "category-existing",
@@ -145,12 +143,7 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
   });
 
   it("returns 200 without a created audit when a concurrent request created the category", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
     mocks.noteCategoryCreate.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }));
     mocks.noteCategoryFindUnique
       .mockResolvedValueOnce(null)
@@ -172,12 +165,7 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
   });
 
   it("returns 404 instead of creating categories for inactive or missing maps", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
     mocks.map = null;
 
     const response = await POST(createCategoryRequest({ name: "Landmarks" }), {
@@ -190,12 +178,4 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
   });
 });
 
-function createCategoryRequest(body: unknown): Request {
-  return new Request("http://localhost/api/maps/map-1/note-categories", {
-    body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
-}
+const createCategoryRequest = (body: unknown) => jsonRequest("http://localhost/api/maps/map-1/note-categories", "POST", body);

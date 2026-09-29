@@ -3,30 +3,12 @@ import {
   extractDeedNameFromDisbandMessage,
   extractDeedRenameFromMessage
 } from "./event-feed-messages.mjs";
+import { OFFICIAL_EVENT_FEED_URLS, parseEventFeedEntries } from "./event-feed-shared.mjs";
 
 const prisma = new PrismaClient();
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15 * 1000;
-
-const OFFICIAL_EVENT_FEED_URLS = {
-  Affliction: "http://affliction.wurmonline.com/battles/server_feed.xml",
-  Cadence: "https://cadence.game.wurmonline.com/battles/server_feed.xml",
-  Celebration: "https://celebration.wurmonline.com/battles/server_feed.xml",
-  Chaos: "http://chaos.game.wurmonline.com/battles/server_feed.xml",
-  Defiance: "https://defiance.game.wurmonline.com/battles/server_feed.xml",
-  Deliverance: "http://deliverance.game.wurmonline.com/battles/server_feed.xml",
-  Desertion: "http://desertion.wurmonline.com/battles/server_feed.xml",
-  Elevation: "http://elevation.wurmonline.com/battles/server_feed.xml",
-  Exodus: "http://exodus.game.wurmonline.com/battles/server_feed.xml",
-  Harmony: "https://harmony.game.wurmonline.com/battles/server_feed.xml",
-  Independence: "https://independence.game.wurmonline.com/battles/server_feed.xml",
-  Melody: "https://melody.game.wurmonline.com/battles/server_feed.xml",
-  Pristine: "http://pristine.game.wurmonline.com/battles/server_feed.xml",
-  Release: "http://release.game.wurmonline.com/battles/server_feed.xml",
-  Serenity: "http://serenity.wurmonline.com/battles/server_feed.xml",
-  Xanadu: "http://xanadu.game.wurmonline.com/battles/server_feed.xml"
-};
 
 const MAX_EVENTS_PER_SERVER = 100;
 // Keep in sync with ABANDONED_DEED_CATEGORY_NAME in src/lib/domain/note-categories.ts.
@@ -200,25 +182,7 @@ async function handleDisbandEvents(mapId, events) {
 }
 
 function parseEventFeedXml(xml) {
-  const events = [];
-  const messageRegex = /<message\s+text="([^"]*)"\s+time="(\d+)"\s*\/>/g;
-  let match;
-
-  while ((match = messageRegex.exec(xml)) !== null) {
-    const message = match[1]
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&amp;/g, "&");
-    const timestamp = Number.parseInt(match[2], 10);
-
-    if (message !== "" && Number.isFinite(timestamp)) {
-      events.push({ message, timestamp });
-    }
-  }
-
-  return events.sort((a, b) => b.timestamp - a.timestamp);
+  return parseEventFeedEntries(xml).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 // An event is new only if it is not stored yet and is no older than the newest

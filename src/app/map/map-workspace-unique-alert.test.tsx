@@ -1,48 +1,11 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MapWorkspace from "./map-workspace";
+import { activeMap, approvedViewer, renderWorkspace, sharedViewer } from "./test-helpers";
 
 const UNIQUE_ALERT_DISMISSED_STORAGE_KEY = "huginn:unique-alert-dismissed";
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-const approvedViewer = {
-  approvalStatus: "APPROVED",
-  isAdmin: true,
-  mapPermissions: [],
-  pendingApprovalCount: 0,
-  permissions: "WRITE",
-  username: "Admin"
-} as const;
-
-const sharedViewer = {
-  approvalStatus: "APPROVED",
-  isAdmin: false,
-  mapPermissions: [
-    { accessLevel: "READ", isOperator: false, mapId: "map-1" }
-  ],
-  pendingApprovalCount: 0,
-  permissions: "READ",
-  username: "Shared view"
-} as const;
-
-const activeMap = {
-  heightPx: 2048,
-  id: "map-1",
-  imageSrc: "/maps/wurm-map.png",
-  layers: [
-    {
-      heightPx: 2048,
-      id: "layer-terrain",
-      imageSrc: "/maps/wurm-map.png",
-      isDefault: true,
-      name: "Terrain",
-      widthPx: 2048
-    }
-  ],
-  name: "Celebration",
-  widthPx: 2048
-} as const;
 
 function daysAgo(days: number): string {
   return new Date(Date.now() - days * DAY_MS).toISOString();
@@ -64,23 +27,13 @@ describe("MapWorkspace unique-alive alert", () => {
   });
 
   it("is hidden when the last slain is recent (under 14 days)", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: daysAgo(5),
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ lastUniqueSlainAt: daysAgo(5) })
 
     expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("shows the day count when the last slain is 14+ days old", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: daysAgo(23.5),
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ lastUniqueSlainAt: daysAgo(23.5) })
 
     const alert = screen.getByRole("status");
     expect(alert.textContent).toContain("Potentially a unique alive — last slain 23 days ago");
@@ -88,12 +41,7 @@ describe("MapWorkspace unique-alive alert", () => {
   });
 
   it("shows the no-kill message when the map has never recorded a slain", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: null,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ lastUniqueSlainAt: null })
 
     expect(screen.getByRole("status").textContent).toContain(
       "Potentially a unique alive — no kill recorded"
@@ -101,25 +49,14 @@ describe("MapWorkspace unique-alive alert", () => {
   });
 
   it("is hidden in share mode even when a unique may be alive", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: daysAgo(30),
-      map: activeMap,
-      shareToken: "share-token",
-      viewer: sharedViewer
-    }));
+    renderWorkspace({ lastUniqueSlainAt: daysAgo(30), shareToken: "share-token", viewer: sharedViewer })
 
     expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("dismissal hides the alert and persists across remounts", () => {
     const slainAt = daysAgo(20);
-    const { unmount } = render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: slainAt,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    const { unmount } = renderWorkspace({ lastUniqueSlainAt: slainAt })
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss unique alert" }));
 
@@ -129,24 +66,14 @@ describe("MapWorkspace unique-alive alert", () => {
 
     unmount();
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: slainAt,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ lastUniqueSlainAt: slainAt })
 
     expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("reappears when a newer slain ages out after a dismissal", () => {
     const firstSlainAt = daysAgo(20);
-    const { rerender } = render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: firstSlainAt,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    const { rerender } = renderWorkspace({ lastUniqueSlainAt: firstSlainAt })
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss unique alert" }));
     expect(screen.queryByRole("status")).toBeNull();
@@ -167,12 +94,7 @@ describe("MapWorkspace unique-alive alert", () => {
     vi.useFakeTimers({ now: Date.now() });
 
     try {
-      render(React.createElement(MapWorkspace, {
-        initialMarkers: [],
-        lastUniqueSlainAt: new Date(Date.now() - 14 * DAY_MS + 30 * 1000).toISOString(),
-        map: activeMap,
-        viewer: approvedViewer
-      }));
+      renderWorkspace({ lastUniqueSlainAt: new Date(Date.now() - 14 * DAY_MS + 30 * 1000).toISOString() })
 
       expect(screen.queryByRole("status")).toBeNull();
 
@@ -189,12 +111,7 @@ describe("MapWorkspace unique-alive alert", () => {
   });
 
   it("reappears for the never-slain message once a real slain has aged out", () => {
-    const { rerender } = render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      lastUniqueSlainAt: null,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    const { rerender } = renderWorkspace({ lastUniqueSlainAt: null })
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss unique alert" }));
     expect(screen.queryByRole("status")).toBeNull();

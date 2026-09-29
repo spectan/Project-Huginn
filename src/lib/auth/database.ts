@@ -1,6 +1,7 @@
 import argon2 from "argon2";
-import type { Prisma } from "@prisma/client";
+import { createAuditRecorder } from "@/lib/db/audit-recorder";
 import { prisma } from "@/lib/db/prisma";
+import { hasPrismaErrorCode } from "@/lib/db/prisma-errors";
 import { getSessionExpiry, createSessionToken, hashSessionToken } from "./session";
 import type { AuthServiceDependencies } from "./auth-service";
 import { createFailureRateLimiter } from "./failure-rate-limiter";
@@ -58,7 +59,7 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
           });
         });
       } catch (error) {
-        if (isUniqueConstraintError(error)) {
+        if (hasPrismaErrorCode(error, "P2002")) {
           return null;
         }
 
@@ -84,20 +85,7 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
       });
     },
     hashPassword: async (password) => argon2.hash(password),
-    recordAudit: async (input) => {
-      const metadata = clientIp !== undefined && clientIp.length > 0
-        ? { ...input.metadata, clientIp }
-        : input.metadata;
-      await prisma.auditEvent.create({
-        data: {
-          action: input.action,
-          actorUserId: input.actorUserId,
-          metadata: metadata as Prisma.InputJsonValue,
-          targetId: input.targetId,
-          targetType: input.targetType
-        }
-      });
-    },
+    recordAudit: createAuditRecorder(clientIp),
     registrationRateLimiter,
     updateUserPassword: async ({ currentSessionTokenHash, passwordHash, userId }) => {
       return prisma.$transaction(async (tx) => {
@@ -130,11 +118,4 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
     },
     verifyPassword: async (hash, password) => argon2.verify(hash, password)
   };
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "P2002";
 }

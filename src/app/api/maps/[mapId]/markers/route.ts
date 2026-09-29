@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createMarkerDependencies } from "@/lib/markers/database";
+import { readJson } from "@/lib/http/read-json";
 import { getMarkerErrorStatus } from "@/lib/markers/marker-errors";
 import { createMarker } from "@/lib/markers/marker-service";
 import { getClientIp } from "@/lib/network/client-ip";
@@ -30,12 +31,4 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   return NextResponse.json({ marker: result.value }, { status: 201 });
-}
-
-async function readJson(request: Request): Promise<unknown> {
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
 }

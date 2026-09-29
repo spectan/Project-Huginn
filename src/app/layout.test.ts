@@ -7,20 +7,8 @@ describe("root metadata", () => {
   it("uses Project Huginn browser and link metadata", () => {
     expect(metadata.title).toBe("Project Huginn");
     expect(metadata.description).toBe("Huginn - A shared Wurm Online mapping utility");
-    expect(metadata.icons).toEqual({
-      icon: [
-        {
-          sizes: "16x16",
-          type: "image/x-icon",
-          url: "/favicon.ico"
-        },
-        {
-          sizes: "16x16",
-          type: "image/png",
-          url: "/logos/huginn-16-dark.png"
-        }
-      ]
-    });
+    // Browser-tab icons come from the App Router favicon.ico / icon.png files below.
+    expect(metadata.icons).toBeUndefined();
   });
 
   it("provides App Router icon metadata files for browser tabs", () => {

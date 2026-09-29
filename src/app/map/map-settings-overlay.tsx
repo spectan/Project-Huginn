@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import {
   DEFAULT_NOTE_CATEGORY_MARKER_SHAPE,
   DEFAULT_NOTE_CATEGORY_PIP_SIZE,
@@ -22,6 +22,8 @@ import type {
   NoteCategory,
   TileHighlightSettings
 } from "@/lib/markers/marker-types";
+import { DialogHeader } from "./dialog-header";
+import { jsonRequest } from "./map-helpers";
 
 type MapSettingsOverlayProps = {
   isOpen: boolean;
@@ -58,6 +60,62 @@ type MapSettingsOverlayProps = {
 };
 
 type LayerCategoryId = "markers" | "misc" | "roadways";
+
+type LayerRow = {
+  color?: keyof MarkerColors;
+  label: string;
+  opacity?: keyof MarkerOpacities;
+  visibility: keyof MarkerVisibility;
+};
+
+// A row whose visibility, colour and opacity all share one settings key.
+function styledLayer<K extends keyof MarkerVisibility & keyof MarkerColors & keyof MarkerOpacities>(label: string, key: K): LayerRow {
+  return { color: key, label, opacity: key, visibility: key };
+}
+
+const TOP_LAYER_ROWS: LayerRow[] = [
+  { label: "Overlays", visibility: "overlays" },
+  styledLayer("Unique Spawn Area", "wildernessOverlay"),
+  { label: "Tower Names", visibility: "towerNames" },
+  { label: "Deed Names", visibility: "deedNames" },
+  styledLayer("Sector Grid", "sectorGrid"),
+  styledLayer("Mission Grid", "missionGrid")
+];
+
+const LAYER_CATEGORIES: Array<{ id: LayerCategoryId; label: string; rows: LayerRow[] }> = [
+  {
+    id: "markers",
+    label: "Markers",
+    rows: [
+      styledLayer("Annotations", "annotations"),
+      styledLayer("Towers", "towers"),
+      { label: "Planned Towers", visibility: "plannedTowers" },
+      styledLayer("Deeds", "deeds"),
+      { label: "Deed Perimeters", visibility: "deedPerimeters" },
+      styledLayer("Notes", "notes")
+    ]
+  },
+  {
+    id: "roadways",
+    label: "Roadways",
+    rows: [
+      styledLayer("Bridges", "bridges"),
+      styledLayer("Canals", "canals"),
+      styledLayer("Highways", "highways"),
+      styledLayer("Tunnels", "tunnels")
+    ]
+  },
+  {
+    id: "misc",
+    label: "Misc",
+    rows: [
+      { color: "rifts", label: "Rifts", opacity: "riftOverlays", visibility: "riftOverlays" },
+      { color: "camps", label: "Camps", visibility: "camps" },
+      { color: "minedoors", label: "Minedoors", visibility: "minedoors" },
+      styledLayer("Locate Souls", "locateSouls")
+    ]
+  }
+];
 
 type NoteCategoryFormInput = {
   name: string;
@@ -121,6 +179,21 @@ export function MapSettingsOverlay({
     });
   };
 
+  const renderLayerRow = ({ color, label, opacity, visibility }: LayerRow) => (
+    <LayerControlRow
+      checked={markerVisibility[visibility]}
+      colorLabel={color === undefined ? undefined : `${label} color`}
+      colorValue={color === undefined ? undefined : markerColors[color]}
+      key={label}
+      label={label}
+      opacityLabel={opacity === undefined ? undefined : `${label} opacity`}
+      opacityValue={opacity === undefined ? undefined : markerOpacities[opacity]}
+      onColorChange={color === undefined ? undefined : (value) => onMarkerColorsChange({ ...markerColors, [color]: value })}
+      onOpacityChange={opacity === undefined ? undefined : (value) => onMarkerOpacitiesChange({ ...markerOpacities, [opacity]: value })}
+      onToggle={() => onMarkerVisibilityChange({ ...markerVisibility, [visibility]: !markerVisibility[visibility] })}
+    />
+  );
+
   return (
     <div className="map-settings">
       <button
@@ -135,295 +208,25 @@ export function MapSettingsOverlay({
       </button>
       {isOpen ? (
         <section className="map-settings-panel" role="dialog" aria-label="Settings">
-          <div className="map-account-panel-header">
-            <strong>Settings</strong>
-            <button
-              aria-label="Close settings"
-              className="map-account-close"
-              onClick={() => onOpenChange(false)}
-              type="button"
-            >
-              x
-            </button>
-          </div>
+          <DialogHeader closeLabel="Close settings" onClose={() => onOpenChange(false)} title="Settings" />
           <fieldset className="map-layer-controls">
             <legend>Map Layers</legend>
-            <LayerControlRow
-              checked={markerVisibility.overlays}
-              label="Overlays"
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                overlays: !markerVisibility.overlays
-              })}
-            />
-            <LayerControlRow
-              checked={markerVisibility.wildernessOverlay}
-              colorLabel="Unique Spawn Area color"
-              colorValue={markerColors.wildernessOverlay}
-              label="Unique Spawn Area"
-              opacityLabel="Unique Spawn Area opacity"
-              opacityValue={markerOpacities.wildernessOverlay}
-              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, wildernessOverlay: value })}
-              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, wildernessOverlay: value })}
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                wildernessOverlay: !markerVisibility.wildernessOverlay
-              })}
-            />
-            <LayerControlRow
-              checked={markerVisibility.towerNames}
-              label="Tower Names"
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                towerNames: !markerVisibility.towerNames
-              })}
-            />
-            <LayerControlRow
-              checked={markerVisibility.deedNames}
-              label="Deed Names"
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                deedNames: !markerVisibility.deedNames
-              })}
-            />
-            <LayerControlRow
-              checked={markerVisibility.sectorGrid}
-              colorLabel="Sector Grid color"
-              colorValue={markerColors.sectorGrid}
-              label="Sector Grid"
-              opacityLabel="Sector Grid opacity"
-              opacityValue={markerOpacities.sectorGrid}
-              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, sectorGrid: value })}
-              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, sectorGrid: value })}
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                sectorGrid: !markerVisibility.sectorGrid
-              })}
-            />
-            <LayerControlRow
-              checked={markerVisibility.missionGrid}
-              colorLabel="Mission Grid color"
-              colorValue={markerColors.missionGrid}
-              label="Mission Grid"
-              opacityLabel="Mission Grid opacity"
-              opacityValue={markerOpacities.missionGrid}
-              onColorChange={(value) => onMarkerColorsChange({ ...markerColors, missionGrid: value })}
-              onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, missionGrid: value })}
-              onToggle={() => onMarkerVisibilityChange({
-                ...markerVisibility,
-                missionGrid: !markerVisibility.missionGrid
-              })}
-            />
+            {TOP_LAYER_ROWS.map(renderLayerRow)}
             <LayerControlRow
               checked={searchLinesEnabled}
               label="Search Lines"
               onToggle={() => onSearchLinesEnabledChange(!searchLinesEnabled)}
             />
-            <LayerCategory
-              isExpanded={isLayerCategoryExpanded("markers")}
-              label="Markers"
-              onToggle={() => toggleLayerCategory("markers")}
-            />
-            {isLayerCategoryExpanded("markers") ? (
-              <>
-                <LayerControlRow
-                  checked={markerVisibility.annotations}
-                  colorLabel="Annotations color"
-                  colorValue={markerColors.annotations}
-                  label="Annotations"
-                  opacityLabel="Annotations opacity"
-                  opacityValue={markerOpacities.annotations}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, annotations: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, annotations: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    annotations: !markerVisibility.annotations
-                  })}
+            {LAYER_CATEGORIES.map(({ id, label, rows }) => (
+              <Fragment key={id}>
+                <LayerCategory
+                  isExpanded={isLayerCategoryExpanded(id)}
+                  label={label}
+                  onToggle={() => toggleLayerCategory(id)}
                 />
-                <LayerControlRow
-                  checked={markerVisibility.towers}
-                  colorLabel="Towers color"
-                  colorValue={markerColors.towers}
-                  label="Towers"
-                  opacityLabel="Towers opacity"
-                  opacityValue={markerOpacities.towers}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, towers: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, towers: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    towers: !markerVisibility.towers
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.plannedTowers}
-                  label="Planned Towers"
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    plannedTowers: !markerVisibility.plannedTowers
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.deeds}
-                  colorLabel="Deeds color"
-                  colorValue={markerColors.deeds}
-                  label="Deeds"
-                  opacityLabel="Deeds opacity"
-                  opacityValue={markerOpacities.deeds}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, deeds: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, deeds: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    deeds: !markerVisibility.deeds
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.deedPerimeters}
-                  label="Deed Perimeters"
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    deedPerimeters: !markerVisibility.deedPerimeters
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.notes}
-                  colorLabel="Notes color"
-                  colorValue={markerColors.notes}
-                  label="Notes"
-                  opacityLabel="Notes opacity"
-                  opacityValue={markerOpacities.notes}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, notes: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, notes: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    notes: !markerVisibility.notes
-                  })}
-                />
-              </>
-            ) : null}
-            <LayerCategory
-              isExpanded={isLayerCategoryExpanded("roadways")}
-              label="Roadways"
-              onToggle={() => toggleLayerCategory("roadways")}
-            />
-            {isLayerCategoryExpanded("roadways") ? (
-              <>
-                <LayerControlRow
-                  checked={markerVisibility.bridges}
-                  colorLabel="Bridges color"
-                  colorValue={markerColors.bridges}
-                  label="Bridges"
-                  opacityLabel="Bridges opacity"
-                  opacityValue={markerOpacities.bridges}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, bridges: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, bridges: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    bridges: !markerVisibility.bridges
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.canals}
-                  colorLabel="Canals color"
-                  colorValue={markerColors.canals}
-                  label="Canals"
-                  opacityLabel="Canals opacity"
-                  opacityValue={markerOpacities.canals}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, canals: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, canals: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    canals: !markerVisibility.canals
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.highways}
-                  colorLabel="Highways color"
-                  colorValue={markerColors.highways}
-                  label="Highways"
-                  opacityLabel="Highways opacity"
-                  opacityValue={markerOpacities.highways}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, highways: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, highways: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    highways: !markerVisibility.highways
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.tunnels}
-                  colorLabel="Tunnels color"
-                  colorValue={markerColors.tunnels}
-                  label="Tunnels"
-                  opacityLabel="Tunnels opacity"
-                  opacityValue={markerOpacities.tunnels}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, tunnels: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, tunnels: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    tunnels: !markerVisibility.tunnels
-                  })}
-                />
-              </>
-            ) : null}
-            <LayerCategory
-              isExpanded={isLayerCategoryExpanded("misc")}
-              label="Misc"
-              onToggle={() => toggleLayerCategory("misc")}
-            />
-            {isLayerCategoryExpanded("misc") ? (
-              <>
-                <LayerControlRow
-                  checked={markerVisibility.riftOverlays}
-                  colorLabel="Rifts color"
-                  colorValue={markerColors.rifts}
-                  label="Rifts"
-                  opacityLabel="Rifts opacity"
-                  opacityValue={markerOpacities.riftOverlays}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, rifts: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, riftOverlays: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    riftOverlays: !markerVisibility.riftOverlays
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.camps}
-                  colorLabel="Camps color"
-                  colorValue={markerColors.camps}
-                  label="Camps"
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, camps: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    camps: !markerVisibility.camps
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.minedoors}
-                  colorLabel="Minedoors color"
-                  colorValue={markerColors.minedoors}
-                  label="Minedoors"
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, minedoors: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    minedoors: !markerVisibility.minedoors
-                  })}
-                />
-                <LayerControlRow
-                  checked={markerVisibility.locateSouls}
-                  colorLabel="Locate Souls color"
-                  colorValue={markerColors.locateSouls}
-                  label="Locate Souls"
-                  opacityLabel="Locate Souls opacity"
-                  opacityValue={markerOpacities.locateSouls}
-                  onColorChange={(value) => onMarkerColorsChange({ ...markerColors, locateSouls: value })}
-                  onOpacityChange={(value) => onMarkerOpacitiesChange({ ...markerOpacities, locateSouls: value })}
-                  onToggle={() => onMarkerVisibilityChange({
-                    ...markerVisibility,
-                    locateSouls: !markerVisibility.locateSouls
-                  })}
-                />
-              </>
-            ) : null}
+                {isLayerCategoryExpanded(id) ? rows.map(renderLayerRow) : null}
+              </Fragment>
+            ))}
           </fieldset>
           <NoteCategorySettings
             markerColors={markerColors}
@@ -502,8 +305,7 @@ export function MapSettingsOverlay({
           {isConfirmingReset ? (
             <MapConfirmDialog
               confirmLabel="Revert"
-              danger
-              message="Revert all map settings to their defaults? Your current settings will be overwritten."
+                message="Revert all map settings to their defaults? Your current settings will be overwritten."
               title="Revert to defaults"
               onCancel={() => setIsConfirmingReset(false)}
               onConfirm={() => {
@@ -554,14 +356,12 @@ const MAX_PROFILE_NAME_LENGTH = 40;
 
 function MapConfirmDialog({
   confirmLabel,
-  danger = false,
   message,
   title,
   onCancel,
   onConfirm
 }: {
   confirmLabel: string;
-  danger?: boolean;
   message: string;
   title: string;
   onCancel(): void;
@@ -601,7 +401,7 @@ function MapConfirmDialog({
             Cancel
           </button>
           <button
-            className={danger ? "map-confirm-confirm is-danger" : "map-confirm-confirm"}
+            className="map-confirm-confirm is-danger"
             onClick={onConfirm}
             ref={confirmButtonRef}
             type="button"
@@ -628,78 +428,71 @@ function ProfileSettings({
   const [draftNames, setDraftNames] = useState<string[]>(["", "", ""]);
   const [editingSlot, setEditingSlot] = useState<number | null>(null);
   const [editingName, setEditingName] = useState("");
+  // Bumped to re-run the profile list fetch after a save or rename.
+  const [profilesVersion, setProfilesVersion] = useState(0);
   const profilesUrl = `/api/maps/${encodeURIComponent(mapId)}/settings/profiles`;
-
-  const fetchProfiles = useCallback(async (): Promise<MapSettingsProfileSummary[]> => {
-    const response = await fetch(profilesUrl);
-
-    if (!response.ok) {
-      throw new Error("Profiles could not be loaded");
-    }
-
-    const body = (await response.json()) as { profiles?: MapSettingsProfileSummary[] };
-
-    return Array.isArray(body.profiles) ? body.profiles : [];
-  }, [profilesUrl]);
 
   useEffect(() => {
     let isCurrent = true;
+    const showProfiles = (loadedProfiles: MapSettingsProfileSummary[], loadError: string | null) => {
+      if (isCurrent) {
+        setProfiles(loadedProfiles);
+        setError(loadError);
+      }
+    };
 
-    fetchProfiles()
-      .then((loadedProfiles) => {
-        if (isCurrent) {
-          setProfiles(loadedProfiles);
-          setError(null);
+    void (async () => {
+      try {
+        const response = await fetch(profilesUrl);
+
+        if (!response.ok) {
+          throw new Error("Profiles could not be loaded");
         }
-      })
-      .catch(() => {
-        if (isCurrent) {
-          setProfiles([]);
-          setError("Profiles could not be loaded");
-        }
-      });
+
+        const body = (await response.json()) as { profiles?: MapSettingsProfileSummary[] };
+
+        showProfiles(Array.isArray(body.profiles) ? body.profiles : [], null);
+      } catch {
+        showProfiles([], "Profiles could not be loaded");
+      }
+    })();
 
     return () => {
       isCurrent = false;
     };
-  }, [fetchProfiles]);
+  }, [profilesUrl, profilesVersion]);
 
-  const refreshProfiles = useCallback(async () => {
+  const refreshProfiles = () => setProfilesVersion((version) => version + 1);
+  // Runs a profile request, showing `errorMessage` when it throws or reports failure by returning false.
+  const runProfileAction = async (errorMessage: string, action: () => Promise<boolean>) => {
     try {
-      const loadedProfiles = await fetchProfiles();
-      setProfiles(loadedProfiles);
-      setError(null);
+      if (!(await action())) {
+        setError(errorMessage);
+      }
     } catch {
-      setProfiles([]);
-      setError("Profiles could not be loaded");
+      setError(errorMessage);
     }
-  }, [fetchProfiles]);
+  };
 
-  const saveProfile = useCallback(async (slot: number, name: string) => {
+  const saveProfile = (slot: number, name: string) => {
     const trimmedName = name.trim().slice(0, MAX_PROFILE_NAME_LENGTH);
 
-    try {
+    return runProfileAction("Profile could not be saved", async () => {
       // The server snapshots the stored settings, so push any debounced change first.
       await onFlushPendingSettings?.();
-      const response = await fetch(`${profilesUrl}/${slot}`, {
-        body: JSON.stringify(trimmedName.length > 0 ? { name: trimmedName } : {}),
-        headers: { "content-type": "application/json" },
-        method: "PUT"
-      });
+      const response = await fetch(`${profilesUrl}/${slot}`, jsonRequest("PUT", trimmedName.length > 0 ? { name: trimmedName } : {}));
 
       if (!response.ok) {
-        setError("Profile could not be saved");
-        return;
+        return false;
       }
 
       setDraftNames((currentNames) => currentNames.map((currentName, index) => (index === slot ? "" : currentName)));
-      await refreshProfiles();
-    } catch {
-      setError("Profile could not be saved");
-    }
-  }, [onFlushPendingSettings, profilesUrl, refreshProfiles]);
+      refreshProfiles();
+      return true;
+    });
+  };
 
-  const renameProfile = useCallback(async (slot: number, name: string) => {
+  const renameProfile = async (slot: number, name: string) => {
     const trimmedName = name.trim().slice(0, MAX_PROFILE_NAME_LENGTH);
 
     if (trimmedName.length === 0) {
@@ -707,47 +500,36 @@ function ProfileSettings({
       return;
     }
 
-    try {
-      const response = await fetch(`${profilesUrl}/${slot}`, {
-        body: JSON.stringify({ name: trimmedName }),
-        headers: { "content-type": "application/json" },
-        method: "PATCH"
-      });
+    await runProfileAction("Profile could not be renamed", async () => {
+      const response = await fetch(`${profilesUrl}/${slot}`, jsonRequest("PATCH", { name: trimmedName }));
 
       if (!response.ok) {
-        setError("Profile could not be renamed");
-        return;
+        return false;
       }
 
       setEditingSlot(null);
-      await refreshProfiles();
-    } catch {
-      setError("Profile could not be renamed");
+      refreshProfiles();
+      return true;
+    });
+  };
+
+  const loadProfile = (slot: number) => runProfileAction("Profile could not be loaded", async () => {
+    const response = await fetch(`${profilesUrl}/${slot}`);
+
+    if (!response.ok) {
+      return false;
     }
-  }, [profilesUrl, refreshProfiles]);
 
-  const loadProfile = useCallback(async (slot: number) => {
-    try {
-      const response = await fetch(`${profilesUrl}/${slot}`);
+    const body = (await response.json()) as { profile?: { settings?: unknown } };
 
-      if (!response.ok) {
-        setError("Profile could not be loaded");
-        return;
-      }
-
-      const body = (await response.json()) as { profile?: { settings?: unknown } };
-
-      if (body.profile === undefined) {
-        setError("Profile could not be loaded");
-        return;
-      }
-
-      onLoadSettings(parseUserMapSettings(body.profile.settings));
-      setError(null);
-    } catch {
-      setError("Profile could not be loaded");
+    if (body.profile === undefined) {
+      return false;
     }
-  }, [onLoadSettings, profilesUrl]);
+
+    onLoadSettings(parseUserMapSettings(body.profile.settings));
+    setError(null);
+    return true;
+  });
 
   const setDraftName = (slot: number, name: string) => {
     setDraftNames((currentNames) => currentNames.map((currentName, index) => (index === slot ? name : currentName)));
@@ -1066,7 +848,6 @@ function NoteCategoryRow({
         {isConfirmingDelete ? (
           <MapConfirmDialog
             confirmLabel="Delete"
-            danger
             message={`Delete the ${category.name} note category? Notes in this category will move to General.`}
             title="Delete note category"
             onCancel={() => setIsConfirmingDelete(false)}
@@ -1111,7 +892,7 @@ function NoteCategoryRow({
             value={markerShape}
           >
             {NOTE_CATEGORY_MARKER_SHAPES.map((shape) => (
-              <option key={shape} value={shape}>{formatNoteCategoryMarkerShape(shape)}</option>
+              <option key={shape} value={shape}>{shape.charAt(0).toUpperCase() + shape.slice(1)}</option>
             ))}
           </select>
         </label>
@@ -1199,16 +980,4 @@ function parsePipSize(value: string): number {
 
 function parseNoteCategoryMarkerShape(value: string): NoteCategoryMarkerShape {
   return NOTE_CATEGORY_MARKER_SHAPES.find((shape) => shape === value) ?? DEFAULT_NOTE_CATEGORY_MARKER_SHAPE;
-}
-
-function formatNoteCategoryMarkerShape(shape: NoteCategoryMarkerShape): string {
-  if (shape === "x") {
-    return "X";
-  }
-
-  if (shape === "o") {
-    return "O";
-  }
-
-  return shape.charAt(0).toUpperCase() + shape.slice(1);
 }

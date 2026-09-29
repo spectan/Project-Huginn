@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 import { hashSessionToken } from "@/lib/auth/session";
 
 const mocks = vi.hoisted(() => ({
@@ -98,12 +99,4 @@ describe("PATCH /api/auth/password", () => {
   });
 });
 
-function createPasswordRequest(body: unknown): Request {
-  return new Request("http://localhost/api/auth/password", {
-    body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "PATCH"
-  });
-}
+const createPasswordRequest = (body: unknown) => jsonRequest("http://localhost/api/auth/password", "PATCH", body);

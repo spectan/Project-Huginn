@@ -1,10 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { createDiscordDependencies } from "@/lib/discord/database";
-import {
-  dispatchDiscordNotification,
-  type DiscordNotificationMessage
-} from "@/lib/discord/discord-service";
+import { hasPrismaErrorCode } from "@/lib/db/prisma-errors";
+import { dispatchDiscordSafely } from "@/lib/discord/dispatch-safely";
 import { err, ok, type Result } from "@/lib/domain/result";
 import type {
   AlertRule,
@@ -16,11 +13,7 @@ import type {
 
 const ALERT_DEDUP_WINDOW_MS = 60 * 60 * 1000;
 const DEFAULT_LOOKBACK_MS = 60 * 60 * 1000;
-const DELETE_WINDOW_MS = 15 * 60 * 1000;
-const AUTH_FAILURE_WINDOW_MS = 5 * 60 * 1000;
-const MAP_DATA_ACCESS_WINDOW_MS = 10 * 60 * 1000;
 const NEW_IP_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
-const REGISTRATION_WINDOW_MS = 60 * 60 * 1000;
 const TRIGGER_LOOKBACK_MS = 15 * 60 * 1000;
 const WEBHOOK_TIMEOUT_MS = 5000;
 /**
@@ -139,18 +132,12 @@ export async function detectAlerts(
   // Rules run one after another: each alert write is a short locked
   // transaction, and running them concurrently would hold several pooled
   // connections per detection run.
-  createdAlerts.push(...(await detectDeleteSpikes(events, getWindowStart(since, until, DELETE_WINDOW_MS))));
-  createdAlerts.push(
-    ...(await detectMapDataAccessSpikes(events, getWindowStart(since, until, MAP_DATA_ACCESS_WINDOW_MS)))
-  );
+  createdAlerts.push(...(await detectSpikes(events, since, until, DELETE_SPIKE)));
+  createdAlerts.push(...(await detectSpikes(events, since, until, MAP_DATA_ACCESS_SPIKE)));
   createdAlerts.push(...(await detectNewIpLogins(events)));
   createdAlerts.push(...(await detectOffHoursAdminActivity(events)));
-  createdAlerts.push(
-    ...(await detectRegistrationSpikes(events, getWindowStart(since, until, REGISTRATION_WINDOW_MS)))
-  );
-  createdAlerts.push(
-    ...(await detectRepeatedAuthFailures(events, getWindowStart(since, until, AUTH_FAILURE_WINDOW_MS)))
-  );
+  createdAlerts.push(...(await detectSpikes(events, since, until, REGISTRATION_SPIKE)));
+  createdAlerts.push(...(await detectSpikes(events, since, until, REPEATED_AUTH_FAILURES)));
 
   return ok({
     alerts: createdAlerts,
@@ -224,7 +211,7 @@ export async function deleteAlert(alertId: string, actorUserId: string): Promise
       });
     });
   } catch (error) {
-    if (isRecordNotFoundError(error)) {
+    if (hasPrismaErrorCode(error, "P2025")) {
       return err("Alert was not found");
     }
 
@@ -232,14 +219,6 @@ export async function deleteAlert(alertId: string, actorUserId: string): Promise
   }
 
   return ok(null);
-}
-
-function isRecordNotFoundError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as { code?: unknown }).code === "P2025"
-  );
 }
 
 async function sendWebhook(alert: AlertWithActor): Promise<void> {
@@ -287,97 +266,135 @@ function sendWebhookSafely(alert: AlertWithActor): void {
   }
 }
 
-async function detectDeleteSpikes(
+/** A rule that alerts when matching events in its window, grouped by key, reach a severity threshold. */
+type SpikeRule = {
+  groupKey(event: AuditEventWithActor): string | null;
+  matches(event: AuditEventWithActor): boolean;
+  severity(count: number): AlertSeverity | null;
+  toAlert(key: string, count: number, firstEvent: AuditEventWithActor): Omit<AlertInput, "severity">;
+  windowMinutes: number;
+};
+
+function tieredSeverity(high: number, medium: number): (count: number) => AlertSeverity | null {
+  return (count) => (count >= high ? "HIGH" : count >= medium ? "MEDIUM" : null);
+}
+
+function actorSpikeRule(input: {
+  action: AuditEventWithActor["action"];
+  noun: string;
+  rule: AlertRule;
+  severity: (count: number) => AlertSeverity | null;
+  titlePrefix: string;
+  windowMinutes: number;
+}): SpikeRule {
+  return {
+    groupKey: (event) => event.actorUserId,
+    matches: (event) => event.action === input.action,
+    severity: input.severity,
+    toAlert: (userId, count, firstEvent) => ({
+      actorUserId: userId,
+      description: `${count} ${input.noun} in the last ${input.windowMinutes} minutes`,
+      mapId: firstEvent.mapId ?? null,
+      metadata: { count, windowMinutes: input.windowMinutes },
+      rule: input.rule,
+      title: `${input.titlePrefix} ${firstEvent.actor?.username ?? "unknown user"}`
+    }),
+    windowMinutes: input.windowMinutes
+  };
+}
+
+function clientIpSpikeRule(input: {
+  actions: readonly AuditEventWithActor["action"][];
+  noun: string;
+  rule: AlertRule;
+  severity: (count: number) => AlertSeverity | null;
+  title: (ip: string) => string;
+  windowMinutes: number;
+}): SpikeRule {
+  return {
+    groupKey: (event) => extractClientIp(event.metadata),
+    matches: (event) => input.actions.includes(event.action),
+    severity: input.severity,
+    toAlert: (ip, count) => ({
+      actorUserId: null,
+      description: `${count} ${input.noun} from ${ip} in the last ${input.windowMinutes} minutes`,
+      mapId: null,
+      metadata: { clientIp: ip, count, windowMinutes: input.windowMinutes },
+      rule: input.rule,
+      title: input.title(ip)
+    }),
+    windowMinutes: input.windowMinutes
+  };
+}
+
+const DELETE_SPIKE = actorSpikeRule({
+  action: "MARKER_DELETED",
+  noun: "markers deleted",
+  rule: "DELETE_SPIKE",
+  severity: tieredSeverity(50, 20),
+  titlePrefix: "High marker deletion rate for",
+  windowMinutes: 15
+});
+
+const MAP_DATA_ACCESS_SPIKE = actorSpikeRule({
+  action: "MAP_DATA_ACCESSED",
+  noun: "map data access events",
+  rule: "MAP_DATA_ACCESS_SPIKE",
+  severity: tieredSeverity(15, 5),
+  titlePrefix: "Bulk map data access for",
+  windowMinutes: 10
+});
+
+const REGISTRATION_SPIKE = clientIpSpikeRule({
+  actions: ["REGISTRATION"],
+  noun: "registrations",
+  rule: "REGISTRATION_SPIKE",
+  severity: (count) => (count >= 3 ? "MEDIUM" : null),
+  title: (ip) => `Multiple registrations from ${ip}`,
+  windowMinutes: 60
+});
+
+const REPEATED_AUTH_FAILURES = clientIpSpikeRule({
+  actions: ["FAILED_LOGIN", "FAILED_AUTHORIZATION"],
+  noun: "failed login/authorization attempts",
+  rule: "REPEATED_AUTH_FAILURES",
+  severity: tieredSeverity(15, 5),
+  title: (ip) => `Repeated authentication failures from ${ip}`,
+  windowMinutes: 5
+});
+
+async function detectSpikes(
   events: AuditEventWithActor[],
-  windowStart: Date
+  since: Date,
+  until: Date,
+  rule: SpikeRule
 ): Promise<AlertWithActor[]> {
-  const deleteEvents = events.filter(
-    (event) =>
-      event.actorUserId !== null &&
-      event.createdAt >= windowStart &&
-      event.action === "MARKER_DELETED"
-  );
+  const windowStart = getWindowStart(since, until, rule.windowMinutes * 60 * 1000);
+  const groups = new Map<string, { count: number; firstEvent: AuditEventWithActor }>();
 
-  const countsByUser = groupByUser(deleteEvents);
-  const results: AlertWithActor[] = [];
+  for (const event of events) {
+    const key = event.createdAt >= windowStart && rule.matches(event) ? rule.groupKey(event) : null;
 
-  for (const [userId, count] of countsByUser.entries()) {
-    let severity: AlertSeverity | null = null;
-
-    if (count >= 50) {
-      severity = "HIGH";
-    } else if (count >= 20) {
-      severity = "MEDIUM";
-    }
-
-    if (severity === null) {
+    if (key === null) {
       continue;
     }
 
-    const event = deleteEvents.find((e) => e.actorUserId === userId);
-    const user = event?.actor ?? null;
-    const alert = await createAlert({
-      actorUserId: userId,
-      description: `${count} markers deleted in the last 15 minutes`,
-      mapId: event?.mapId ?? null,
-      metadata: {
-        count,
-        windowMinutes: 15
-      },
-      rule: "DELETE_SPIKE",
-      severity,
-      title: `High marker deletion rate for ${user?.username ?? "unknown user"}`
-    });
+    const group = groups.get(key);
 
-    if (alert !== null) {
-      results.push(alert);
+    if (group === undefined) {
+      groups.set(key, { count: 1, firstEvent: event });
+    } else {
+      group.count += 1;
     }
   }
 
-  return results;
-}
-
-async function detectMapDataAccessSpikes(
-  events: AuditEventWithActor[],
-  windowStart: Date
-): Promise<AlertWithActor[]> {
-  const accessEvents = events.filter(
-    (event) =>
-      event.actorUserId !== null &&
-      event.createdAt >= windowStart &&
-      event.action === "MAP_DATA_ACCESSED"
-  );
-
-  const countsByUser = groupByUser(accessEvents);
   const results: AlertWithActor[] = [];
 
-  for (const [userId, count] of countsByUser.entries()) {
-    let severity: AlertSeverity | null = null;
-
-    if (count >= 15) {
-      severity = "HIGH";
-    } else if (count >= 5) {
-      severity = "MEDIUM";
-    }
-
-    if (severity === null) {
-      continue;
-    }
-
-    const event = accessEvents.find((e) => e.actorUserId === userId);
-    const user = event?.actor ?? null;
-    const alert = await createAlert({
-      actorUserId: userId,
-      description: `${count} map data access events in the last 10 minutes`,
-      mapId: event?.mapId ?? null,
-      metadata: {
-        count,
-        windowMinutes: 10
-      },
-      rule: "MAP_DATA_ACCESS_SPIKE",
-      severity,
-      title: `Bulk map data access for ${user?.username ?? "unknown user"}`
-    });
+  for (const [key, { count, firstEvent }] of groups.entries()) {
+    const severity = rule.severity(count);
+    const alert = severity === null
+      ? null
+      : await createAlert({ ...rule.toAlert(key, count, firstEvent), severity });
 
     if (alert !== null) {
       results.push(alert);
@@ -508,114 +525,6 @@ async function detectOffHoursAdminActivity(
       rule: "OFF_HOURS_ADMIN_ACTIVITY",
       severity: "LOW",
       title: `Off-hours admin activity by ${actor.username}`
-    });
-
-    if (alert !== null) {
-      results.push(alert);
-    }
-  }
-
-  return results;
-}
-
-async function detectRegistrationSpikes(
-  events: AuditEventWithActor[],
-  windowStart: Date
-): Promise<AlertWithActor[]> {
-  const registrationEvents = events.filter(
-    (event) => event.action === "REGISTRATION" && event.createdAt >= windowStart
-  );
-
-  const countsByIp = new Map<string, number>();
-
-  for (const event of registrationEvents) {
-    const ip = extractClientIp(event.metadata);
-
-    if (ip === null) {
-      continue;
-    }
-
-    countsByIp.set(ip, (countsByIp.get(ip) ?? 0) + 1);
-  }
-
-  const results: AlertWithActor[] = [];
-
-  for (const [ip, count] of countsByIp.entries()) {
-    if (count < 3) {
-      continue;
-    }
-
-    const alert = await createAlert({
-      actorUserId: null,
-      description: `${count} registrations from ${ip} in the last 60 minutes`,
-      mapId: null,
-      metadata: {
-        clientIp: ip,
-        count,
-        windowMinutes: 60
-      },
-      rule: "REGISTRATION_SPIKE",
-      severity: "MEDIUM",
-      title: `Multiple registrations from ${ip}`
-    });
-
-    if (alert !== null) {
-      results.push(alert);
-    }
-  }
-
-  return results;
-}
-
-async function detectRepeatedAuthFailures(
-  events: AuditEventWithActor[],
-  windowStart: Date
-): Promise<AlertWithActor[]> {
-  const failureEvents = events.filter(
-    (event) =>
-      (event.action === "FAILED_LOGIN" || event.action === "FAILED_AUTHORIZATION") &&
-      event.createdAt >= windowStart
-  );
-
-  const countsByIp = new Map<string, number>();
-
-  for (const event of failureEvents) {
-    const ip = extractClientIp(event.metadata);
-
-    if (ip === null) {
-      continue;
-    }
-
-    countsByIp.set(ip, (countsByIp.get(ip) ?? 0) + 1);
-  }
-
-  const results: AlertWithActor[] = [];
-
-  for (const [ip, count] of countsByIp.entries()) {
-    let severity: AlertSeverity | null = null;
-
-    if (count >= 15) {
-      severity = "HIGH";
-    } else if (count >= 5) {
-      severity = "MEDIUM";
-    }
-
-    if (severity === null) {
-      continue;
-    }
-
-    const alert = await createAlert({
-      actorUserId: null,
-      description: `${count} failed login/authorization attempts from ${ip} in the last 5 minutes`,
-      mapId: null,
-      metadata: {
-        clientIp: ip,
-        count,
-        windowMinutes: 5
-      },
-      rule: "REPEATED_AUTH_FAILURES",
-      severity,
-      title: `Repeated authentication failures from ${ip}`
     });
 
     if (alert !== null) {
@@ -757,30 +666,8 @@ async function createAlert(input: AlertInput): Promise<AlertWithActor | null> {
   return serialized;
 }
 
-function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
-  try {
-    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
-  } catch {
-    // Discord notifications are fire-and-forget; failures must not block alert creation.
-  }
-}
-
 function getWindowStart(since: Date, until: Date, windowMs: number): Date {
   return new Date(Math.max(since.getTime(), until.getTime() - windowMs));
-}
-
-function groupByUser(events: AuditEventWithActor[]): Map<string, number> {
-  const counts = new Map<string, number>();
-
-  for (const event of events) {
-    if (event.actorUserId === null) {
-      continue;
-    }
-
-    counts.set(event.actorUserId, (counts.get(event.actorUserId) ?? 0) + 1);
-  }
-
-  return counts;
 }
 
 function extractClientIp(metadata: unknown): string | null {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 import type { ShareDependencies } from "@/lib/share/share-service";
 
 const mocks = vi.hoisted(() => {
@@ -162,12 +163,4 @@ describe("POST /api/maps/[mapId]/share", () => {
   });
 });
 
-function createShareRequest(body: unknown): Request {
-  return new Request("http://localhost/api/maps/map-1/share", {
-    body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
-}
+const createShareRequest = (body: unknown) => jsonRequest("http://localhost/api/maps/map-1/share", "POST", body);

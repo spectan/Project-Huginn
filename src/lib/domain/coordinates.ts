@@ -5,7 +5,7 @@ export type MapBounds = {
   heightPx: number;
 };
 
-export type Coordinate = {
+type Coordinate = {
   x: number;
   y: number;
 };

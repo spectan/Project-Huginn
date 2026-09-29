@@ -1,9 +1,5 @@
-import { triggerAlertDetection } from "@/lib/alerts/alert-service";
-import { createDiscordDependencies } from "@/lib/discord/database";
-import {
-  dispatchDiscordNotification,
-  type DiscordNotificationMessage
-} from "@/lib/discord/discord-service";
+import { triggerAlertsSafely } from "@/lib/alerts/trigger-safely";
+import { dispatchDiscordSafely } from "@/lib/discord/dispatch-safely";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import { err, ok, type Result } from "@/lib/domain/result";
 import { parseAuthCredentials } from "./credentials";
@@ -307,20 +303,4 @@ async function recordAudit(
 ): Promise<void> {
   assertNoCoordinateMetadata(input.metadata);
   await dependencies.recordAudit(input);
-}
-
-function triggerAlertsSafely(): void {
-  try {
-    triggerAlertDetection();
-  } catch {
-    // Alert detection is fire-and-forget; failures must not block the request.
-  }
-}
-
-function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
-  try {
-    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
-  } catch {
-    // Discord notifications are fire-and-forget; failures must not block the request.
-  }
 }

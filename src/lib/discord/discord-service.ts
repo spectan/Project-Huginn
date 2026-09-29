@@ -15,7 +15,7 @@ export type DiscordConfigData = {
   notifyShareLinks: boolean;
 };
 
-export type DiscordMarkerAction = "created" | "updated" | "deleted";
+type DiscordMarkerAction = "created" | "updated" | "deleted";
 
 export type DiscordNotificationMessage =
   | { kind: "alert"; alert: AlertWithActor }
@@ -29,7 +29,7 @@ export type DiscordNotificationMessage =
     }
   | { kind: "share"; username: string; mapName: string; expiresInHours: number };
 
-export type DiscordEmbedField = {
+type DiscordEmbedField = {
   name: string;
   value: string;
   inline: boolean;

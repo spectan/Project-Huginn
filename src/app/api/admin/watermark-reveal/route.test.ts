@@ -20,6 +20,8 @@ vi.mock("@/lib/watermark/enhance", () => ({
 
 import { POST } from "./route";
 
+const approvedAdmin = { accessLevel: "WRITE", approvalStatus: "APPROVED", id: "admin-1", isAdmin: true } as const;
+
 describe("POST /api/admin/watermark-reveal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,12 +63,7 @@ describe("POST /api/admin/watermark-reveal", () => {
   });
 
   it("rejects an oversized content-length before reading the body", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
     const request = createRevealRequest(true, { contentLength: String(25 * 1024 * 1024) });
 
     const response = await POST(request);
@@ -77,12 +74,7 @@ describe("POST /api/admin/watermark-reveal", () => {
   });
 
   it("rejects an image file larger than 20 MB", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
 
     const response = await POST(createRevealRequest(true, { imageBytes: 20 * 1024 * 1024 + 1 }));
 
@@ -92,12 +84,7 @@ describe("POST /api/admin/watermark-reveal", () => {
   });
 
   it("rejects requests without an image", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
 
     const response = await POST(createRevealRequest(false));
 
@@ -107,12 +94,7 @@ describe("POST /api/admin/watermark-reveal", () => {
   });
 
   it("returns the enhanced preview as a data URL", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
 
     const response = await POST(createRevealRequest(true));
 
@@ -125,12 +107,7 @@ describe("POST /api/admin/watermark-reveal", () => {
   });
 
   it("returns a null preview when enhancement fails", async () => {
-    mocks.currentViewer = {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      id: "admin-1",
-      isAdmin: true
-    };
+    mocks.currentViewer = approvedAdmin;
     mocks.isolateChromaImage.mockRejectedValue(new Error("not an image"));
 
     const response = await POST(createRevealRequest(true));

@@ -2,7 +2,17 @@
 
 import { useState, type FormEvent } from "react";
 import { APP_VERSION_LABEL } from "@/lib/app-version";
-import { canAdminister, canManageAccounts, canReadMap, canWriteMarkers, type MapPermission } from "@/lib/domain/permissions";
+import { requestJson } from "@/lib/client/request-json";
+import {
+  canAdminister,
+  canManageAccounts,
+  canReadMap,
+  canWriteMarkers,
+  type MapPermission,
+  type UserAccess
+} from "@/lib/domain/permissions";
+import { DialogHeader } from "./dialog-header";
+import { jsonRequest } from "./map-helpers";
 
 export type AccountViewer = {
   approvalStatus: "PENDING" | "APPROVED" | "REJECTED";
@@ -64,24 +74,9 @@ export function AccountOverlay({ isOpen, onOpenChange, servers = [], viewer }: A
       </button>
       {isOpen ? (
         <section className="map-account-panel" role="dialog" aria-label="Account settings">
-          <div className="map-account-panel-header">
-            <strong>{viewer.username}</strong>
-            <button
-              aria-label="Close account settings"
-              className="map-account-close"
-              onClick={() => onOpenChange(false)}
-              type="button"
-            >
-              x
-            </button>
-          </div>
+          <DialogHeader closeLabel="Close account settings" onClose={() => onOpenChange(false)} title={viewer.username} />
           <AccountPermissions servers={servers} viewer={viewer} />
-          {canManageAccounts({
-            accessLevel: viewer.permissions,
-            approvalStatus: viewer.approvalStatus,
-            isAdmin: viewer.isAdmin,
-            mapPermissions: viewer.mapPermissions ?? []
-          }) ? (
+          {canManageAccounts(getViewerAccess(viewer)) ? (
             <a
               aria-label={
                 viewer.pendingApprovalCount > 0
@@ -133,13 +128,7 @@ function AccountPermissions({
   viewer: AccountViewer;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const access = {
-    accessLevel: viewer.permissions,
-    approvalStatus: viewer.approvalStatus,
-    isAdmin: viewer.isAdmin,
-    mapPermissions: viewer.mapPermissions ?? []
-  };
-  const permissionRows = getAccountPermissionRows(access, servers);
+  const permissionRows = getAccountPermissionRows(getViewerAccess(viewer), servers);
 
   return (
     <div className="map-account-permissions" role="group" aria-label="Permissions">
@@ -158,52 +147,49 @@ function AccountPermissions({
         ].join(" ").trim()}
       >
         {permissionRows.map((row) => (
-          <PermissionRow
-            allowed={row.allowed}
-            key={row.label}
-            label={row.label}
-            value={row.value}
-          />
+          <div key={row.label}>
+            <dt>{row.label}</dt>
+            <dd className="map-account-permission--allowed">{row.value}</dd>
+          </div>
         ))}
       </dl>
     </div>
   );
 }
 
+function getViewerAccess(viewer: AccountViewer): UserAccess {
+  return {
+    accessLevel: viewer.permissions,
+    approvalStatus: viewer.approvalStatus,
+    isAdmin: viewer.isAdmin,
+    mapPermissions: viewer.mapPermissions ?? []
+  };
+}
+
 function getAccountPermissionRows(
-  access: {
-    accessLevel: AccountViewer["permissions"];
-    approvalStatus: AccountViewer["approvalStatus"];
-    isAdmin: boolean;
-    mapPermissions: readonly MapPermission[];
-  },
+  access: UserAccess,
   servers: readonly AccountPermissionServer[]
-): Array<{ allowed: boolean; label: string; value: string }> {
+): Array<{ label: string; value: string }> {
   if (servers.length > 0) {
     const perServer = servers
-      .map((server) => ({ label: server.name, value: getServerPermissionLabel(access, server.id) }))
-      .filter((row) => row.value !== null);
-
+      .map((server) => ({ label: server.name, value: getPermissionLabel(access, server.id) }))
+      .filter((row): row is { label: string; value: string } => row.value !== null);
     const firstRow = perServer[0];
 
     if (firstRow !== undefined && perServer.every((row) => row.value === firstRow.value)) {
-      return [{ allowed: true, label: "Global", value: firstRow.value! }];
+      return [{ label: "Global", value: firstRow.value }];
     }
 
-    return perServer.map((row) => ({ allowed: true, label: row.label, value: row.value! }));
+    return perServer;
   }
 
-  const fallbackValue = getFallbackPermissionLabel(access);
+  const fallbackValue = getPermissionLabel(access);
 
-  return fallbackValue === null ? [] : [{ allowed: true, label: "Global", value: fallbackValue }];
+  return fallbackValue === null ? [] : [{ label: "Global", value: fallbackValue }];
 }
 
-function getServerPermissionLabel(access: {
-  accessLevel: AccountViewer["permissions"];
-  approvalStatus: AccountViewer["approvalStatus"];
-  isAdmin: boolean;
-  mapPermissions: readonly MapPermission[];
-}, mapId: string): string | null {
+// Without a mapId only admins can administer, so the fallback label is always "Admin" there.
+function getPermissionLabel(access: UserAccess, mapId?: string): string | null {
   if (canAdminister(access, mapId)) {
     return access.isAdmin ? "Admin" : "Operator";
   }
@@ -217,46 +203,6 @@ function getServerPermissionLabel(access: {
   }
 
   return null;
-}
-
-function getFallbackPermissionLabel(access: {
-  accessLevel: AccountViewer["permissions"];
-  approvalStatus: AccountViewer["approvalStatus"];
-  isAdmin: boolean;
-  mapPermissions: readonly MapPermission[];
-}): string | null {
-  if (canAdminister(access)) {
-    return "Admin";
-  }
-
-  if (canWriteMarkers(access)) {
-    return "Read/Write";
-  }
-
-  if (canReadMap(access)) {
-    return "Read";
-  }
-
-  return null;
-}
-
-function PermissionRow({
-  allowed,
-  label,
-  value
-}: {
-  allowed: boolean;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd className={allowed ? "map-account-permission--allowed" : "map-account-permission--denied"}>
-        {value}
-      </dd>
-    </div>
-  );
 }
 
 function PasswordChangeForm({
@@ -308,17 +254,7 @@ function AuthDialog({
 
   return (
     <section className="map-account-panel" role="dialog" aria-label={title}>
-      <div className="map-account-panel-header">
-        <strong>{title}</strong>
-        <button
-          aria-label="Close login"
-          className="map-account-close"
-          onClick={onClose}
-          type="button"
-        >
-          x
-        </button>
-      </div>
+      <DialogHeader closeLabel="Close login" onClose={onClose} title={title} />
       <form className="map-auth-form" onSubmit={onSubmit}>
         <label>
           <span>Username</span>
@@ -365,20 +301,13 @@ async function submitAuthForm(
   setAuthError(null);
 
   const formData = new FormData(event.currentTarget);
-  const response = await fetch(`/api/auth/${mode === "login" ? "login" : "register"}`, {
-    body: JSON.stringify({
-      password: formData.get("password"),
-      username: formData.get("username")
-    }),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "POST"
-  });
+  const result = await requestJson(`/api/auth/${mode}`, jsonRequest("POST", {
+    password: formData.get("password"),
+    username: formData.get("username")
+  }), "Authentication failed");
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setAuthError(body?.error ?? "Authentication failed");
+  if (!result.ok) {
+    setAuthError(result.error);
     return;
   }
 
@@ -396,21 +325,14 @@ async function submitPasswordChangeForm(
 
   const form = event.currentTarget;
   const formData = new FormData(form);
-  const response = await fetch("/api/auth/password", {
-    body: JSON.stringify({
-      confirmPassword: formData.get("confirmPassword"),
-      currentPassword: formData.get("currentPassword"),
-      newPassword: formData.get("newPassword")
-    }),
-    headers: {
-      "content-type": "application/json"
-    },
-    method: "PATCH"
-  });
+  const result = await requestJson("/api/auth/password", jsonRequest("PATCH", {
+    confirmPassword: formData.get("confirmPassword"),
+    currentPassword: formData.get("currentPassword"),
+    newPassword: formData.get("newPassword")
+  }), "Password change failed");
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setPasswordError(body?.error ?? "Password change failed");
+  if (!result.ok) {
+    setPasswordError(result.error);
     return;
   }
 

@@ -1,18 +1,23 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import React from "react";
 import { renderToString } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_USER_MAP_SETTINGS } from "@/lib/map-settings/map-settings";
 import MapWorkspace from "./map-workspace";
-
-const approvedViewer = {
-  approvalStatus: "APPROVED",
-  isAdmin: true,
-  mapPermissions: [],
-  pendingApprovalCount: 0,
-  permissions: "WRITE",
-  username: "Admin"
-} as const;
+import {
+  activeMap,
+  approvedViewer,
+  makeCamp,
+  makeDeed,
+  makeLocateSoul,
+  makeMinedoor,
+  makeNote,
+  makePath,
+  makeRift,
+  makeTower,
+  mockClipboardWrite,
+  renderWorkspace
+} from "./test-helpers";
 
 const readOnlyViewer = {
   ...approvedViewer,
@@ -33,47 +38,10 @@ const writerViewer = {
   username: "Writer"
 } as const;
 
-const activeMap = {
-  heightPx: 2048,
-  id: "map-1",
-  imageSrc: "/maps/wurm-map.png",
-  layers: [
-    {
-      heightPx: 2048,
-      id: "layer-terrain",
-      imageSrc: "/maps/wurm-map.png",
-      isDefault: true,
-      name: "Terrain",
-      widthPx: 2048
-    },
-    {
-      heightPx: 2048,
-      id: "layer-topographical",
-      imageSrc: "/maps/celebration-topo.png",
-      isDefault: false,
-      name: "Topographical",
-      widthPx: 2048
-    }
-  ],
-  name: "Celebration",
-  widthPx: 2048
-} as const;
-
 const noteCategories = [
   { color: null, id: "category-general", markerShape: "circle", name: "General", pipSize: 3 },
   { color: "#00ffaa", id: "category-landmarks", markerShape: "triangle", name: "Landmarks", pipSize: 6 }
 ] as const;
-
-function mockClipboardWrite() {
-  const writeText = vi.fn(async () => undefined);
-
-  Object.defineProperty(navigator, "clipboard", {
-    configurable: true,
-    value: { writeText }
-  });
-
-  return writeText;
-}
 
 function getLayerControls() {
   return within(screen.getByRole("group", { name: "Map Layers" }));
@@ -152,12 +120,7 @@ describe("MapPage", () => {
   });
 
   it("renders a full-page map workspace with quiet account and settings controls", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     expect(screen.queryByRole("heading")).toBeNull();
     expect(screen.queryByText("Cursor")).toBeNull();
@@ -179,12 +142,7 @@ describe("MapPage", () => {
   });
 
   it("renders an unobtrusive support link for hosting and development costs", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const supportLink = screen.getByRole("link", { name: "support me and hosting/development costs" });
 
@@ -197,12 +155,7 @@ describe("MapPage", () => {
     vi.useFakeTimers();
 
     try {
-      render(React.createElement(MapWorkspace, {
-        initialMarkers: [],
-        initialNoteCategories: noteCategories,
-        map: activeMap,
-        viewer: approvedViewer
-      }));
+      renderWorkspace({ initialNoteCategories: noteCategories })
 
       expect(screen.getByText("Tip: You can quick-plan deeds by holding down shift and click-dragging a box of whatever size.")).toBeTruthy();
 
@@ -235,12 +188,7 @@ describe("MapPage", () => {
   });
 
   it("shows account permissions without the status row", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
 
@@ -253,16 +201,11 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.4.1")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.4.2")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: readOnlyViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories, viewer: readOnlyViewer })
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
 
@@ -279,12 +222,7 @@ describe("MapPage", () => {
 
   it("keeps the Celebration event feed minimized until the events button is opened", async () => {
     stubEventFeedFetch(35);
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const controls = screen.getByTestId("map-bottom-left-controls");
     expect(Array.from(controls.children).map((child) => child.className)).toEqual([
@@ -337,25 +275,19 @@ describe("MapPage", () => {
     }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Celebration events" }));
 
     expect(screen.getByText("Loading events")).toBeTruthy();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/maps/map-1/events"));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/maps/map-1/events", undefined));
     expect(await screen.findByText("Celebration event loaded from API")).toBeTruthy();
   });
 
   it("renders saved event feed size and saves resize changes", async () => {
     const fetchMock = stubEventFeedFetch(8);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialNoteCategories: noteCategories,
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
@@ -363,10 +295,8 @@ describe("MapPage", () => {
           height: 300,
           width: 460
         }
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Celebration events" }));
 
@@ -418,12 +348,7 @@ describe("MapPage", () => {
   it("sends a pending settings save with keepalive when the page is hidden", () => {
     const fetchMock = stubEventFeedFetch(0);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
@@ -451,13 +376,10 @@ describe("MapPage", () => {
       y: 10
     }));
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialNoteCategories: noteCategories,
-      initialSettings: { ...DEFAULT_USER_MAP_SETTINGS, annotations },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      initialSettings: { ...DEFAULT_USER_MAP_SETTINGS, annotations }
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
@@ -488,12 +410,7 @@ describe("MapPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
@@ -519,12 +436,7 @@ describe("MapPage", () => {
         : new Response(JSON.stringify({ ok: true }), { status: 200 })
     )));
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
@@ -545,12 +457,7 @@ describe("MapPage", () => {
       y: 1000 + Math.floor(index / 20)
     }));
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialSettings: { ...DEFAULT_USER_MAP_SETTINGS, annotations },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialSettings: { ...DEFAULT_USER_MAP_SETTINGS, annotations } })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -574,12 +481,7 @@ describe("MapPage", () => {
   });
 
   it("ignores horizontal wheel scrolls and scales zoom by the wheel delta", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -596,8 +498,7 @@ describe("MapPage", () => {
 
   it("resizes the event feed from a top corner while bottom-aligned", () => {
     stubEventFeedFetch(8);
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialNoteCategories: noteCategories,
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
@@ -605,10 +506,8 @@ describe("MapPage", () => {
           height: 300,
           width: 460
         }
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Celebration events" }));
 
@@ -634,22 +533,14 @@ describe("MapPage", () => {
   });
 
   it("does not render the map image for anonymous users", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: null,
-      viewer: null
-    }));
+    renderWorkspace({ map: null, viewer: null })
 
     expect(screen.queryByAltText("Wurm Online map")).toBeNull();
     expect(screen.getByRole("button", { name: "Log in" })).toBeTruthy();
   });
 
   it("renders the configured map image at natural map dimensions", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const mapImage = screen.getByAltText("Wurm Online map");
 
@@ -659,29 +550,17 @@ describe("MapPage", () => {
   });
 
   it("switches visual map layers without changing the selected server data", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          planned: true,
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
+        makeTower({ damage: "0.25", planned: true, ql: "89.50" })
       ],
-      map: activeMap,
       servers: [
         {
           id: "map-1",
           name: "Celebration"
         }
-      ],
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     expect(screen.getByRole("combobox", { name: "Server" }).textContent).toContain("Celebration");
     fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
@@ -703,9 +582,7 @@ describe("MapPage", () => {
   });
 
   it("groups server choices by cluster and alphabetizes each cluster", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
+    renderWorkspace({
       servers: [
         { id: "map-xanadu", name: "Xanadu" },
         { id: "map-cadence", name: "Cadence" },
@@ -713,9 +590,8 @@ describe("MapPage", () => {
         { id: "map-celebration", name: "Celebration" },
         { id: "map-affliction", name: "Affliction" },
         { id: "map-harmony", name: "Harmony" }
-      ],
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
 
@@ -742,20 +618,17 @@ describe("MapPage", () => {
   });
 
   it("shows a favorite server at the top while keeping it in its cluster", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
         favoriteServerId: "map-harmony"
       },
-      map: activeMap,
       servers: [
         { id: "map-cadence", name: "Cadence" },
         { id: "map-harmony", name: "Harmony" },
         { id: "map-celebration", name: "Celebration" }
-      ],
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
 
@@ -783,15 +656,12 @@ describe("MapPage", () => {
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
+    renderWorkspace({
       servers: [
         { id: "map-1", name: "Celebration" },
         { id: "map-harmony", name: "Harmony" }
-      ],
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     fireEvent.click(screen.getByRole("combobox", { name: "Server" }));
     fireEvent.click(screen.getByRole("button", { name: "Set Celebration as favorite server" }));
@@ -813,11 +683,7 @@ describe("MapPage", () => {
   });
 
   it("prevents native image dragging so pointer panning owns the interaction", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const mapImage = screen.getByAltText("Wurm Online map");
 
@@ -834,11 +700,7 @@ describe("MapPage", () => {
       value: 1024
     });
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -854,12 +716,7 @@ describe("MapPage", () => {
   });
 
   it("zooms the map with a two finger pinch gesture", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const viewport = screen.getByLabelText("Map image area");
     const stage = screen.getByTestId("map-stage");
@@ -905,12 +762,7 @@ describe("MapPage", () => {
     vi.useFakeTimers();
 
     try {
-      render(React.createElement(MapWorkspace, {
-        initialMarkers: [],
-        initialNoteCategories: noteCategories,
-        map: activeMap,
-        viewer: approvedViewer
-      }));
+      renderWorkspace({ initialNoteCategories: noteCategories })
 
       const viewport = screen.getByLabelText("Map image area");
 
@@ -945,11 +797,7 @@ describe("MapPage", () => {
       value: 1024
     });
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
     const mapImage = screen.getByAltText("Wurm Online map");
@@ -973,23 +821,11 @@ describe("MapPage", () => {
       value: 1024
     });
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          lastModifiedBy: "Sam",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", lastModifiedBy: "Sam", ql: "89.50" })
+      ]
+    })
 
     const stage = screen.getByTestId("map-stage");
     const markerLayer = screen.getByTestId("map-marker-layer");
@@ -1028,11 +864,7 @@ describe("MapPage", () => {
   it("centers the initial view on valid coordinate URL parameters", async () => {
     window.history.replaceState(null, "", "/map?x=1070&y=278");
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1041,11 +873,7 @@ describe("MapPage", () => {
   });
 
   it("supports dragging the map to pan", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1070,22 +898,11 @@ describe("MapPage", () => {
   });
 
   it("keeps the map image and marker layer aligned during a pan before the next render", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", ql: "89.50" })
+      ]
+    })
 
     const stage = screen.getByTestId("map-stage");
     const mapImage = screen.getByAltText("Wurm Online map");
@@ -1117,26 +934,11 @@ describe("MapPage", () => {
   });
 
   it("supports dragging the map to pan from marker overlays", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     const stage = screen.getByTestId("map-stage");
     const deedOverlay = screen.getByTestId("deed-overlay-deed-1");
@@ -1162,22 +964,11 @@ describe("MapPage", () => {
   });
 
   it("supports dragging the map to pan from marker pips", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", ql: "89.50" })
+      ]
+    })
 
     const stage = screen.getByTestId("map-stage");
     const towerPip = screen.getByTestId("tower-center-tower-1");
@@ -1203,11 +994,7 @@ describe("MapPage", () => {
   });
 
   it("zooms back out to the full fitted map after panning", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1244,11 +1031,7 @@ describe("MapPage", () => {
   it("opens a right-click add menu for write users", async () => {
     const clipboardWrite = mockClipboardWrite();
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1308,11 +1091,7 @@ describe("MapPage", () => {
       value: 844
     });
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1331,11 +1110,7 @@ describe("MapPage", () => {
   it("updates the browser URL for read-only map context with coordinate copying only", async () => {
     const clipboardWrite = mockClipboardWrite();
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: readOnlyViewer
-    }));
+    renderWorkspace({ viewer: readOnlyViewer })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1369,15 +1144,12 @@ describe("MapPage", () => {
   it("copies a coordinate link that includes the current server when the URL has no server", async () => {
     const clipboardWrite = mockClipboardWrite();
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
         favoriteServerId: "map-1"
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1394,11 +1166,7 @@ describe("MapPage", () => {
   });
 
   it("persists the active map id to localStorage for the admin back link", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1408,82 +1176,17 @@ describe("MapPage", () => {
   });
 
   it("renders square marker overlays and tower centers", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          planned: true,
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 7,
-          foundingDate: "2026-05-10",
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 10,
-          south: 8,
-          type: "deed",
-          west: 6,
-          x: 500,
-          y: 600
-        },
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 700,
-          y: 800
-        },
-        {
-          arrivalDate: "2026-05-10",
-          estimatedRiftTime: "2026-05-10T18:30",
-          id: "rift-1",
-          notes: "Bring cotton",
-          type: "rift",
-          x: 900,
-          y: 1000
-        },
-        {
-          campType: "Goblin",
-          id: "camp-1",
-          notes: "",
-          type: "camp",
-          x: 910,
-          y: 1010
-        },
-        {
-          id: "minedoor-1",
-          notes: "Hidden entrance",
-          strength: "73ql",
-          type: "minedoor",
-          x: 920,
-          y: 1020
-        },
-        {
-          casterFacing: "north",
-          direction: "aheadLeft",
-          distanceBand: "50-199",
-          id: "locate-soul-1",
-          notes: "Corpse result",
-          targetName: "Funkiey",
-          type: "locateSoul",
-          x: 930,
-          y: 1030
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", planned: true, ql: "89.50" }),
+        makeDeed({ east: 7, foundingDate: "2026-05-10", perimeter: 10, south: 8, west: 6 }),
+        makeNote(),
+        makeRift(),
+        makeCamp(),
+        makeMinedoor(),
+        makeLocateSoul()
+      ]
+    })
 
     const tower = screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" });
     expect(tower).toBeTruthy();
@@ -1659,11 +1362,7 @@ describe("MapPage", () => {
   });
 
   it("opens a deed create form with name, mayor, and 5-tile default directional dimensions", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1687,11 +1386,7 @@ describe("MapPage", () => {
   });
 
   it("opens a deed create form from shift-dragged map bounds", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1742,27 +1437,11 @@ describe("MapPage", () => {
   });
 
   it("opens a quick deed create form when shift-dragging over marker overlays", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          lastModifiedBy: "Kichi",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed({ lastModifiedBy: "Kichi" })
+      ]
+    })
 
     await waitFor(() => expect(screen.getByTestId("map-stage").dataset.zoom).toBe("1"));
 
@@ -1796,11 +1475,7 @@ describe("MapPage", () => {
   });
 
   it("opens a tower create form with one creator field", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1847,12 +1522,7 @@ describe("MapPage", () => {
   });
 
   it("opens a note create form with title and category dropdown", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1888,11 +1558,7 @@ describe("MapPage", () => {
       }
     });
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -1947,27 +1613,14 @@ describe("MapPage", () => {
   });
 
   it("saves notes without text", async () => {
-    const savedNote = {
-      category: "General",
-      id: "note-1",
-      text: "",
-      title: "Mine entrance",
-      type: "note",
-      x: 125,
-      y: 140
-    } as const;
+    const savedNote = makeNote({ text: "", title: "Mine entrance", x: 125, y: 140 });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedNote }),
       ok: true
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2009,11 +1662,7 @@ describe("MapPage", () => {
   });
 
   it("opens a rift create form with optional date, time, and notes fields", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2033,11 +1682,7 @@ describe("MapPage", () => {
   });
 
   it("opens a locate soul create form with caster facing and pasted output fields", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2060,28 +1705,22 @@ describe("MapPage", () => {
   });
 
   it("saves locate soul casts by parsing pasted event output", async () => {
-    const savedLocateSoul = {
+    const savedLocateSoul = makeLocateSoul({
       casterFacing: "east",
       direction: "behindRight",
       distanceBand: "2000+",
-      id: "locate-soul-1",
       notes: "",
       targetName: "Itsumo",
-      type: "locateSoul",
       x: 125,
       y: 140
-    } as const;
+    });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedLocateSoul }),
       ok: true
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2133,23 +1772,19 @@ describe("MapPage", () => {
   });
 
   it("renders an off-map direction indicator when a locate soul shadow has no visible tiles", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          casterFacing: "north",
+        makeLocateSoul({
           direction: "behindRight",
           distanceBand: "2000+",
           id: "locate-soul-off-map",
           notes: "",
           targetName: "Itsumo",
-          type: "locateSoul",
           x: 1092,
           y: 703
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        })
+      ]
+    })
 
     expect(screen.getByRole("button", { name: "Locate Soul Itsumo at 1092, 703" })).toBeTruthy();
     expect(screen.queryByTestId("locate-soul-overlay-locate-soul-off-map")).toBeNull();
@@ -2160,11 +1795,7 @@ describe("MapPage", () => {
   });
 
   it("opens a camp create form with a camp type dropdown and optional notes", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2185,11 +1816,7 @@ describe("MapPage", () => {
   });
 
   it("opens a minedoor create form with optional strength and notes", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2208,12 +1835,7 @@ describe("MapPage", () => {
   });
 
   it("hides note category creation for non-admin writers", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: writerViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories, viewer: writerViewer })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2230,12 +1852,7 @@ describe("MapPage", () => {
   });
 
   it("hides note category creation from the note form for admins", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -2252,38 +1869,12 @@ describe("MapPage", () => {
   });
 
   it("shows cursor-following dark hover details instead of inline hover cards", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          lastModifiedBy: "Sam",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 5,
-          foundingDate: "2026-05-10",
-          founder: "Founder",
-          id: "deed-1",
-          lastModifiedBy: "Kichi",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ lastModifiedBy: "Sam" }),
+        makeDeed({ foundingDate: "2026-05-10", lastModifiedBy: "Kichi" })
+      ]
+    })
 
     const tower = screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" });
 
@@ -2327,22 +1918,11 @@ describe("MapPage", () => {
   });
 
   it("keeps hover and tap details inside viewport edges", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower()
+      ]
+    })
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 2040,
@@ -2355,39 +1935,12 @@ describe("MapPage", () => {
   });
 
   it("shows stacked hover pills for markers underneath an overlay", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          lastModifiedBy: "Sam",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
-        {
-          damage: "0.25",
-          id: "tower-1",
-          lastModifiedBy: "Alyeska",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          towerType: "Mol-Rehan",
-          type: "tower",
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed({ lastModifiedBy: "Sam" }),
+        makeTower({ damage: "0.25", lastModifiedBy: "Alyeska", ql: "89.50", towerType: "Mol-Rehan", x: 500, y: 600 })
+      ]
+    })
 
     fireEvent.mouseMove(screen.getByTestId("deed-overlay-deed-1"), {
       clientX: 500,
@@ -2412,27 +1965,14 @@ describe("MapPage", () => {
   });
 
   it("displays incomplete tower creator numbers as unknown", async () => {
-    const savedTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "",
-      ql: "88.50",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const savedTower = makeTower({ makerNumber: "" });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedTower }),
       ok: true
     })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [savedTower],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialMarkers: [savedTower] })
 
     const tower = screen.getByRole("button", { name: "Tower by Mako - ??? at 250, 300" });
     fireEvent.mouseMove(tower, {
@@ -2472,33 +2012,22 @@ describe("MapPage", () => {
   });
 
   it("relocates an edited marker by dragging its center pip before saving", async () => {
-    const savedTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "945",
-      ql: "88.50",
-      type: "tower",
-      x: 280,
-      y: 335
-    } as const;
+    const savedTower = makeTower({ x: 280, y: 335 });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedTower }),
       ok: true
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
         {
           ...savedTower,
           x: 250,
           y: 300
         }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -2551,37 +2080,22 @@ describe("MapPage", () => {
   });
 
   it("resizes an edited deed by shift-dragging its overlay before saving", async () => {
-    const savedDeed = {
-      east: 5,
-      foundingDate: null,
-      founder: "Founder",
-      id: "deed-1",
-      name: "Oak Harbour",
-      north: 10,
-      perimeter: 5,
-      south: 5,
-      type: "deed",
-      west: 10,
-      x: 500,
-      y: 600
-    } as const;
+    const savedDeed = makeDeed({ north: 10, west: 10 });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedDeed }),
       ok: true
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
         {
           ...savedDeed,
           north: 5,
           west: 5
         }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
       clientX: 500,
@@ -2644,26 +2158,11 @@ describe("MapPage", () => {
   });
 
   it("updates the edited deed overlay while directional dimension fields change", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
       clientX: 500,
@@ -2688,27 +2187,14 @@ describe("MapPage", () => {
   });
 
   it("preserves single digit tower creator numbers from the combined creator field", async () => {
-    const savedTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Kichi",
-      makerNumber: "1",
-      ql: "88.50",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const savedTower = makeTower({ makerName: "Kichi", makerNumber: "1" });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedTower }),
       ok: true
     })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [savedTower],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialMarkers: [savedTower] })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Kichi 1 at 250, 300" }), {
       clientX: 250,
@@ -2740,34 +2226,21 @@ describe("MapPage", () => {
   });
 
   it("saves the planned tower flag from the edit dialog", async () => {
-    const savedTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "945",
-      planned: true,
-      ql: "88.50",
-      towerType: "Mol-Rehan",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const savedTower = makeTower({ planned: true, towerType: "Mol-Rehan" });
     const fetchMock = vi.fn(async () => ({
       json: async () => ({ marker: savedTower }),
       ok: true
     })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
         {
           ...savedTower,
           planned: false
         }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -2805,17 +2278,7 @@ describe("MapPage", () => {
   });
 
   it("keeps the original edited tower as the autoplanner source after creating a planned tower", async () => {
-    const sourceTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "945",
-      planned: true,
-      ql: "88.50",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const sourceTower = makeTower({ planned: true });
     let plannedTowerCount = 1;
     const fetchMock = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
       plannedTowerCount += 1;
@@ -2833,11 +2296,7 @@ describe("MapPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [sourceTower],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialMarkers: [sourceTower] })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -2912,17 +2371,7 @@ describe("MapPage", () => {
   });
 
   it("autoplans a new planned tower 100 tiles vertically from an edited planned tower", async () => {
-    const sourceTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "945",
-      planned: true,
-      ql: "88.50",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const sourceTower = makeTower({ planned: true });
     const plannedTower = {
       damage: "",
       id: "tower-2",
@@ -2940,11 +2389,7 @@ describe("MapPage", () => {
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [sourceTower],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialMarkers: [sourceTower] })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -2979,17 +2424,7 @@ describe("MapPage", () => {
   });
 
   it("does not autoplan directly on top of another tower", async () => {
-    const sourceTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "945",
-      planned: true,
-      ql: "88.50",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const sourceTower = makeTower({ planned: true });
     const existingTower = {
       damage: "0.00",
       id: "tower-2",
@@ -3004,11 +2439,7 @@ describe("MapPage", () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [sourceTower, existingTower],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialMarkers: [sourceTower, existingTower] })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -3036,25 +2467,11 @@ describe("MapPage", () => {
   });
 
   it("does not autoplan from an edited tower that is not planned", () => {
-    const sourceTower = {
-      damage: "1.25",
-      id: "tower-1",
-      makerName: "Mako",
-      makerNumber: "945",
-      planned: false,
-      ql: "88.50",
-      type: "tower",
-      x: 250,
-      y: 300
-    } as const;
+    const sourceTower = makeTower({ planned: false });
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [sourceTower],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialMarkers: [sourceTower] })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -3081,22 +2498,12 @@ describe("MapPage", () => {
   });
 
   it("shows note hover details with the grouped marker interface", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "Landmarks",
-          id: "note-1",
-          text: "Scout here",
-          title: "Mine entrance",
-          type: "note",
-          x: 700,
-          y: 800
-        }
+        makeNote({ category: "Landmarks", title: "Mine entrance" })
       ],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      initialNoteCategories: noteCategories
+    })
 
     const note = screen.getByRole("button", { name: "Note Landmarks - Mine entrance at 700, 800" });
 
@@ -3114,17 +2521,9 @@ describe("MapPage", () => {
   });
 
   it("renders note pips with category-specific color, size, and shape", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "Landmarks",
-          id: "note-1",
-          text: "Scout here",
-          title: "Mine entrance",
-          type: "note",
-          x: 700,
-          y: 800
-        }
+        makeNote({ category: "Landmarks", title: "Mine entrance" })
       ],
       initialNoteCategories: noteCategories,
       initialSettings: {
@@ -3138,10 +2537,8 @@ describe("MapPage", () => {
         noteCategoryPipSizes: {
           "category-landmarks": 8
         }
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     const note = screen.getByTestId("note-center-note-1");
 
@@ -3152,48 +2549,14 @@ describe("MapPage", () => {
   });
 
   it("shows hover details for rifts, camps, and minedoors", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          arrivalDate: "2026-05-10",
-          estimatedRiftTime: "2026-05-10T18:30",
-          id: "rift-1",
-          notes: "Bring cotton",
-          type: "rift",
-          x: 900,
-          y: 1000
-        },
-        {
-          campType: "Goblin",
-          id: "camp-1",
-          notes: "Needs scouts",
-          type: "camp",
-          x: 910,
-          y: 1010
-        },
-        {
-          id: "minedoor-1",
-          notes: "Hidden entrance",
-          strength: "73ql",
-          type: "minedoor",
-          x: 920,
-          y: 1020
-        },
-        {
-          casterFacing: "north",
-          direction: "aheadLeft",
-          distanceBand: "50-199",
-          id: "locate-soul-1",
-          notes: "Corpse result",
-          targetName: "Funkiey",
-          type: "locateSoul",
-          x: 930,
-          y: 1030
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeRift(),
+        makeCamp({ notes: "Needs scouts" }),
+        makeMinedoor(),
+        makeLocateSoul()
+      ]
+    })
 
     fireEvent.mouseMove(screen.getByRole("button", { name: "Rift at 900, 1000" }), {
       clientX: 900,
@@ -3239,45 +2602,13 @@ describe("MapPage", () => {
   });
 
   it("moves compact map layer controls into the settings cog", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 700,
-          y: 800
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower(),
+        makeDeed(),
+        makeNote()
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
     expect(screen.getByRole("dialog", { name: "Account settings" })).toBeTruthy();
@@ -3425,11 +2756,7 @@ describe("MapPage", () => {
   });
 
   it("closes the settings overlay when a marker dialog opens", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -3446,19 +2773,9 @@ describe("MapPage", () => {
   });
 
   it("can hide planned towers without hiding built towers", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "",
-          id: "tower-built",
-          makerName: "Kichi",
-          makerNumber: "1",
-          planned: false,
-          ql: "",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
+        makeTower({ damage: "", id: "tower-built", makerName: "Kichi", makerNumber: "1", planned: false, ql: "" }),
         {
           damage: "",
           id: "tower-planned",
@@ -3470,10 +2787,8 @@ describe("MapPage", () => {
           x: 350,
           y: 400
         }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     expect(screen.getByTestId("tower-center-tower-built")).toBeTruthy();
     expect(screen.getByTestId("tower-center-tower-planned")).toBeTruthy();
@@ -3516,17 +2831,9 @@ describe("MapPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "Landmarks",
-          id: "note-1",
-          text: "Scout here",
-          title: "Mine entrance",
-          type: "note",
-          x: 700,
-          y: 800
-        }
+        makeNote({ category: "Landmarks", title: "Mine entrance" })
       ],
       initialNoteCategories: noteCategories,
       initialSettings: {
@@ -3541,9 +2848,8 @@ describe("MapPage", () => {
           "category-landmarks": 6
         }
       },
-      map: activeMap,
       viewer: writerViewer
-    }));
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const categoryControls = expandNoteCategories();
@@ -3628,22 +2934,12 @@ describe("MapPage", () => {
     }));
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "Landmarks",
-          id: "note-1",
-          text: "Scout here",
-          title: "Mine entrance",
-          type: "note",
-          x: 700,
-          y: 800
-        }
+        makeNote({ category: "Landmarks", title: "Mine entrance" })
       ],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      initialNoteCategories: noteCategories
+    })
     const confirmSpy = vi.spyOn(window, "confirm");
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
@@ -3673,12 +2969,7 @@ describe("MapPage", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
 
@@ -3705,12 +2996,7 @@ describe("MapPage", () => {
   });
 
   it("prevents read-only users from changing note categories in settings", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: readOnlyViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories, viewer: readOnlyViewer })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const categoryControls = expandNoteCategories();
@@ -3722,11 +3008,7 @@ describe("MapPage", () => {
   });
 
   it("toggles the WurmMaps sector grid separately from the mission grid", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     expect(screen.queryByTestId("sector-grid-overlay")).toBeNull();
     expect(screen.queryByTestId("mission-grid-overlay")).toBeNull();
@@ -3763,11 +3045,7 @@ describe("MapPage", () => {
   });
 
   it("moves tile highlighting controls to the bottom of settings", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     expect(screen.queryByRole("group", { name: "Tile Highlighting" })).toBeNull();
 
@@ -3826,11 +3104,7 @@ describe("MapPage", () => {
   });
 
   it("keeps tile highlighting and roadway edit controls off the map surface", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     expect(document.querySelector(".map-right-side-controls")).toBeNull();
     expect(screen.queryByRole("group", { name: "Tile Highlighting" })).toBeNull();
@@ -3851,8 +3125,7 @@ describe("MapPage", () => {
   });
 
   it("renders saved user map settings from the server", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
         markerColors: {
@@ -3900,10 +3173,8 @@ describe("MapPage", () => {
           left: 72,
           top: 44
         }
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     expect(screen.queryByRole("group", { name: "Tile Highlighting" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Roadway Edit Mode" })).toBeNull();
@@ -3947,8 +3218,7 @@ describe("MapPage", () => {
   });
 
   it("resets user map settings to defaults from the settings menu", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
         markerColors: {
@@ -3987,10 +3257,8 @@ describe("MapPage", () => {
           left: 72,
           top: 44
         }
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     expect(screen.queryByRole("group", { name: "Tile Highlighting" })).toBeNull();
     expect(screen.queryByRole("group", { name: "Roadway Edit Mode" })).toBeNull();
@@ -4052,11 +3320,7 @@ describe("MapPage", () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const settings = screen.getByRole("dialog", { name: "Settings" });
@@ -4095,62 +3359,15 @@ describe("MapPage", () => {
   });
 
   it("applies opacity sliders to overlays and keeps center pips opaque", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 700,
-          y: 800
-        },
-        {
-          arrivalDate: null,
-          estimatedRiftTime: null,
-          id: "rift-1",
-          notes: "",
-          type: "rift",
-          x: 900,
-          y: 1000
-        },
-        {
-          campType: "Goblin",
-          id: "camp-1",
-          notes: "",
-          type: "camp",
-          x: 910,
-          y: 1010
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower(),
+        makeDeed(),
+        makeNote(),
+        makeRift({ arrivalDate: null, estimatedRiftTime: null, notes: "" }),
+        makeCamp()
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Sector Grid" }));
@@ -4196,28 +3413,12 @@ describe("MapPage", () => {
   });
 
   it("toggles and recolors camp and minedoor marker layers", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          campType: "Goblin",
-          id: "camp-1",
-          notes: "",
-          type: "camp",
-          x: 910,
-          y: 1010
-        },
-        {
-          id: "minedoor-1",
-          notes: "",
-          strength: "",
-          type: "minedoor",
-          x: 920,
-          y: 1020
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeCamp(),
+        makeMinedoor({ notes: "", strength: "" })
+      ]
+    })
 
     const camp = screen.getByRole("button", { name: "Camp Goblin at 910, 1010" });
     const minedoor = screen.getByRole("button", { name: "Minedoor at 920, 1020" });
@@ -4244,29 +3445,12 @@ describe("MapPage", () => {
   });
 
   it("renders a toggleable and recolorable 51x51 outlined overlay for rifts only", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          arrivalDate: null,
-          estimatedRiftTime: null,
-          id: "rift-1",
-          notes: "",
-          type: "rift",
-          x: 900,
-          y: 1000
-        },
-        {
-          campType: "Goblin",
-          id: "camp-1",
-          notes: "",
-          type: "camp",
-          x: 910,
-          y: 1010
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeRift({ arrivalDate: null, estimatedRiftTime: null, notes: "" }),
+        makeCamp()
+      ]
+    })
 
     const overlay = screen.getByTestId("rift-overlay-rift-1");
     expect(overlay.style.left).toBe("875px");
@@ -4298,26 +3482,11 @@ describe("MapPage", () => {
   });
 
   it("toggles deed perimeters independently from deed overlays", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     expect(screen.getByTestId("deed-overlay-deed-1")).toBeTruthy();
     expect(screen.getByTestId("deed-perimeter-top-deed-1")).toBeTruthy();
@@ -4336,38 +3505,22 @@ describe("MapPage", () => {
   });
 
   it("renders toggleable and recolorable infrastructure paths", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "path-1",
-          name: "Cedar Bridge",
-          notes: "Two lanes",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        },
-        {
+        makePath("bridge", { id: "path-1", notes: "Two lanes" }),
+        makePath("tunnel", {
           id: "path-2",
-          name: "North Tunnel",
           notes: "Underground",
           points: [
             { x: 150, y: 160 },
             { x: 155, y: 160 }
           ],
-          type: "tunnel",
           width: 1,
           x: 150,
           y: 160
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        })
+      ]
+    })
 
     const bridge = screen.getByTestId("path-marker-path-1");
     expect(bridge.getAttribute("stroke")).toBe("#cc00cc");
@@ -4403,29 +3556,13 @@ describe("MapPage", () => {
   it("draws a bridge path by clicking map points and saves it", async () => {
     const fetchMock = vi.fn(async () => ({
       json: async () => ({
-        marker: {
-          id: "path-1",
-          name: "Cedar Bridge",
-          notes: "Two lanes",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        }
+        marker: makePath("bridge", { id: "path-1", notes: "Two lanes" })
       }),
       ok: true
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const viewport = screen.getByLabelText("Map image area");
     fireEvent.contextMenu(viewport, {
@@ -4493,11 +3630,7 @@ describe("MapPage", () => {
   });
 
   it("does not add path points from pointer events outside the map viewport", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const viewport = screen.getByLabelText("Map image area");
     fireEvent.contextMenu(viewport, {
@@ -4521,26 +3654,11 @@ describe("MapPage", () => {
   });
 
   it("starts roadway paths at the clicked coordinate when a deed overlay is under the cursor", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
       clientX: 503,
@@ -4557,34 +3675,21 @@ describe("MapPage", () => {
   });
 
   it("opens roadway marker actions from map right-clicks when roadway edit mode is active", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          estimatedRiftTime: null,
-          id: "rift-1",
-          arrivalDate: null,
-          notes: "",
-          type: "rift",
-          x: 503,
-          y: 604
-        },
-        {
-          id: "bridge-1",
+        makeRift({ estimatedRiftTime: null, arrivalDate: null, notes: "", x: 503, y: 604 }),
+        makePath("bridge", {
           name: "Hidden Bridge",
           notes: "Runs under the rift",
           points: [
             { x: 500, y: 604 },
             { x: 510, y: 604 }
           ],
-          type: "bridge",
-          width: 2,
           x: 500,
           y: 604
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        })
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
@@ -4609,19 +3714,7 @@ describe("MapPage", () => {
     const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       if (url === "/api/markers/bridge/bridge-1" && init?.method === "PATCH") {
         return new Response(JSON.stringify({
-          marker: {
-            id: "bridge-1",
-            name: "Cedar Bridge",
-            notes: "River crossing",
-            points: [
-              { x: 130, y: 150 },
-              { x: 140, y: 120 }
-            ],
-            type: "bridge",
-            width: 2,
-            x: 130,
-            y: 150
-          }
+          marker: makePath("bridge", { points: [{ x: 130, y: 150 }, { x: 140, y: 120 }], x: 130, y: 150 })
         }), { status: 200 });
       }
 
@@ -4629,25 +3722,11 @@ describe("MapPage", () => {
     });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "bridge-1",
-          name: "Cedar Bridge",
-          notes: "River crossing",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("bridge")
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
@@ -4717,25 +3796,11 @@ describe("MapPage", () => {
   });
 
   it("hides an edited highway while its draft route is active", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "highway-1",
-          name: "East Road",
-          notes: "Main route",
-          points: [
-            { x: 120, y: 130 },
-            { x: 180, y: 130 }
-          ],
-          type: "highway",
-          width: 2,
-          x: 120,
-          y: 130
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("highway")
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
@@ -4754,27 +3819,11 @@ describe("MapPage", () => {
   });
 
   it("keeps prior highway draft connections visible while moving later points", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "highway-1",
-          name: "East Road",
-          notes: "Main route",
-          points: [
-            { x: 120, y: 130 },
-            { x: 150, y: 130 },
-            { x: 180, y: 130 },
-            { x: 210, y: 130 }
-          ],
-          type: "highway",
-          width: 2,
-          x: 120,
-          y: 130
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("highway", { points: [{ x: 120, y: 130 }, { x: 150, y: 130 }, { x: 180, y: 130 }, { x: 210, y: 130 }] })
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const roadwayEditPanel = within(screen.getByRole("dialog", { name: "Settings" }))
@@ -4818,25 +3867,11 @@ describe("MapPage", () => {
   });
 
   it("centers even-width roadway paths across whole tiles", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "bridge-1",
-          name: "Two Tile Bridge",
-          notes: "",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("bridge", { name: "Two Tile Bridge", notes: "" })
+      ]
+    })
 
     expect(screen.getByTestId("path-marker-bridge-1").getAttribute("points")).toBe("101,121 141,121");
   });
@@ -4847,7 +3882,7 @@ describe("MapPage", () => {
       value: 500
     });
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: Array.from({ length: 14 }, (_, index) => ({
         category: "General",
         id: `note-${index}`,
@@ -4856,10 +3891,8 @@ describe("MapPage", () => {
         type: "note" as const,
         x: 250,
         y: 300
-      })),
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }))
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Note General - Stacked note 0 at 250, 300" }), {
       clientX: 250,
@@ -4872,51 +3905,13 @@ describe("MapPage", () => {
   });
 
   it("shows bridge, canal, and tunnel hover details in normal mode while keeping marker actions behind roadway edit mode", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "bridge-1",
-          name: "Cedar Bridge",
-          notes: "River crossing",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        },
-        {
-          id: "canal-1",
-          name: "West Canal",
-          notes: "Boat route",
-          points: [
-            { x: 110, y: 150 },
-            { x: 150, y: 150 }
-          ],
-          type: "canal",
-          width: 2,
-          x: 110,
-          y: 150
-        },
-        {
-          id: "tunnel-1",
-          name: "North Tunnel",
-          notes: "Mine route",
-          points: [
-            { x: 130, y: 180 },
-            { x: 170, y: 180 }
-          ],
-          type: "tunnel",
-          width: 2,
-          x: 130,
-          y: 180
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("bridge"),
+        makePath("canal"),
+        makePath("tunnel")
+      ]
+    })
 
     const bridge = screen.getByTestId("path-marker-bridge-1");
     const canal = screen.getByTestId("path-marker-canal-1");
@@ -4954,51 +3949,13 @@ describe("MapPage", () => {
   });
 
   it("uses roadway edit mode before paths expose marker actions", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "bridge-1",
-          name: "Cedar Bridge",
-          notes: "River crossing",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        },
-        {
-          id: "canal-1",
-          name: "West Canal",
-          notes: "Boat route",
-          points: [
-            { x: 110, y: 150 },
-            { x: 150, y: 150 }
-          ],
-          type: "canal",
-          width: 2,
-          x: 110,
-          y: 150
-        },
-        {
-          id: "highway-1",
-          name: "East Road",
-          notes: "Main route",
-          points: [
-            { x: 120, y: 130 },
-            { x: 180, y: 130 }
-          ],
-          type: "highway",
-          width: 2,
-          x: 120,
-          y: 130
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("bridge"),
+        makePath("canal"),
+        makePath("highway")
+      ]
+    })
 
     expect(screen.queryByRole("checkbox", { name: "Highway Details" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
@@ -5069,22 +4026,11 @@ describe("MapPage", () => {
   });
 
   it("shows tower name labels until the tower is hovered for details", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower()
+      ]
+    })
 
     expect(screen.queryByTestId("tower-name-label-tower-1")).toBeNull();
 
@@ -5110,26 +4056,11 @@ describe("MapPage", () => {
   });
 
   it("shows deed name labels until the deed is hovered for details", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     expect(screen.queryByTestId("deed-name-label-deed-1")).toBeNull();
 
@@ -5157,11 +4088,7 @@ describe("MapPage", () => {
   it("renders a selected-coordinate reticule from shared coordinate links", async () => {
     window.history.replaceState(null, "", "/map?x=1070&y=278");
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     await waitFor(() => expect(screen.getByTestId("map-stage").dataset.zoom).toBe("1"));
 
@@ -5172,11 +4099,7 @@ describe("MapPage", () => {
   });
 
   it("selects a coordinate with a left click and updates the current link", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -5209,11 +4132,7 @@ describe("MapPage", () => {
       value: 1024
     });
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -5240,11 +4159,7 @@ describe("MapPage", () => {
   it("anchors wheel zoom on the displayed coordinate URL view", async () => {
     window.history.replaceState(null, "", "/map?x=1070&y=278");
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -5266,11 +4181,7 @@ describe("MapPage", () => {
   });
 
   it("plans one temporary route with tile and meter distance", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -5330,22 +4241,11 @@ describe("MapPage", () => {
   });
 
   it("measures route segments using Wurm tile range semantics", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 100,
-          y: 100
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ x: 100, y: 100 })
+      ]
+    })
 
     const stage = screen.getByTestId("map-stage");
     await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
@@ -5377,15 +4277,12 @@ describe("MapPage", () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
         routePlannerSpeedKmh: 8
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     const stage = screen.getByTestId("map-stage");
     await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
@@ -5441,26 +4338,11 @@ describe("MapPage", () => {
   });
 
   it("plans routes over map marker overlays", async () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     const stage = screen.getByTestId("map-stage");
 
@@ -5491,11 +4373,7 @@ describe("MapPage", () => {
   });
 
   it("clears the planned route when the planner is toggled off", async () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     const stage = screen.getByTestId("map-stage");
 
@@ -5517,8 +4395,7 @@ describe("MapPage", () => {
   });
 
   it("shows a map legend with the current marker colors", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
+    renderWorkspace({
       initialSettings: {
         ...DEFAULT_USER_MAP_SETTINGS,
         markerColors: {
@@ -5534,10 +4411,8 @@ describe("MapPage", () => {
           rifts: "#dc2626",
           towers: "#ffffff"
         }
-      },
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      }
+    })
 
     const legendButton = screen.getByRole("button", { name: "Map legend" });
     expect(legendButton.getAttribute("aria-expanded")).toBe("false");
@@ -5584,32 +4459,17 @@ describe("MapPage", () => {
       y: 800
     } as const;
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
         { ...tower, id: "tower-1" },
         { ...tower, id: "tower-2" },
         { ...tower, id: "tower-3", planned: true },
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
+        makeDeed(),
         { ...note, id: "note-1" },
         { ...note, id: "note-2" },
         { ...note, id: "note-3" }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      ]
+    })
 
     const countersButton = screen.getByRole("button", { name: "Map counters" });
     expect(countersButton.getAttribute("aria-expanded")).toBe("false");
@@ -5626,11 +4486,7 @@ describe("MapPage", () => {
   });
 
   it("renders only bottom-left map tools on the map surface", () => {
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace()
 
     expect(document.querySelector(".map-right-side-controls")).toBeNull();
     expect(screen.queryByRole("group", { name: "Tile Highlighting" })).toBeNull();
@@ -5647,46 +4503,14 @@ describe("MapPage", () => {
   });
 
   it("filters markers by search and highlights matching centers", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
-        {
-          category: "Landmarks",
-          id: "note-1",
-          text: "Scout here",
-          title: "Mine entrance",
-          type: "note",
-          x: 700,
-          y: 800
-        }
+        makeTower(),
+        makeDeed(),
+        makeNote({ category: "Landmarks", title: "Mine entrance" })
       ],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      initialNoteCategories: noteCategories
+    })
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search map" }), {
       target: { value: "mine" }
@@ -5702,46 +4526,14 @@ describe("MapPage", () => {
     const fetchMock = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "1.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "88.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
-        {
-          category: "Landmarks",
-          id: "note-1",
-          text: "Oak mine",
-          title: "Oak mine",
-          type: "note",
-          x: 700,
-          y: 800
-        }
+        makeTower(),
+        makeDeed(),
+        makeNote({ category: "Landmarks", text: "Oak mine", title: "Oak mine" })
       ],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      initialNoteCategories: noteCategories
+    })
 
     expect(screen.queryByRole("checkbox", { name: "Search Lines" })).toBeNull();
 
@@ -5780,48 +4572,14 @@ describe("MapPage", () => {
   });
 
   it("searches rifts, camps, and minedoors by type aliases and details", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          arrivalDate: "2026-05-10",
-          estimatedRiftTime: "2026-05-10T18:30",
-          id: "rift-1",
-          notes: "Bring cotton",
-          type: "rift",
-          x: 900,
-          y: 1000
-        },
-        {
-          campType: "Goblin",
-          id: "camp-1",
-          notes: "Needs scouts",
-          type: "camp",
-          x: 910,
-          y: 1010
-        },
-        {
-          id: "minedoor-1",
-          notes: "Hidden entrance",
-          strength: "73ql",
-          type: "minedoor",
-          x: 920,
-          y: 1020
-        },
-        {
-          casterFacing: "north",
-          direction: "aheadLeft",
-          distanceBand: "50-199",
-          id: "locate-soul-1",
-          notes: "Corpse result",
-          targetName: "Funkiey",
-          type: "locateSoul",
-          x: 930,
-          y: 1030
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeRift(),
+        makeCamp({ notes: "Needs scouts" }),
+        makeMinedoor(),
+        makeLocateSoul()
+      ]
+    })
 
     const searchbox = screen.getByRole("searchbox", { name: "Search map" });
 
@@ -5850,60 +4608,14 @@ describe("MapPage", () => {
   });
 
   it("does not search infrastructure paths by type, name, notes, or coordinates", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          id: "bridge-1",
-          name: "Cedar Bridge",
-          notes: "River crossing 777",
-          points: [
-            { x: 100, y: 120 },
-            { x: 140, y: 120 }
-          ],
-          type: "bridge",
-          width: 2,
-          x: 100,
-          y: 120
-        },
-        {
-          id: "canal-1",
-          name: "West Canal",
-          notes: "Boat route",
-          points: [
-            { x: 110, y: 150 },
-            { x: 150, y: 150 }
-          ],
-          type: "canal",
-          width: 2,
-          x: 110,
-          y: 150
-        },
-        {
-          id: "highway-1",
-          name: "East Road",
-          notes: "Main route",
-          points: [
-            { x: 120, y: 130 },
-            { x: 180, y: 130 }
-          ],
-          type: "highway",
-          width: 2,
-          x: 120,
-          y: 130
-        },
-        {
-          category: "General",
-          id: "note-1",
-          text: "Cedar Bridge reminder",
-          title: "Roadway note",
-          type: "note",
-          x: 700,
-          y: 800
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makePath("bridge", { notes: "River crossing 777" }),
+        makePath("canal"),
+        makePath("highway"),
+        makeNote({ text: "Cedar Bridge reminder", title: "Roadway note" })
+      ]
+    })
 
     const searchbox = screen.getByRole("searchbox", { name: "Search map" });
 
@@ -5921,26 +4633,11 @@ describe("MapPage", () => {
   });
 
   it("keeps deed centers visible when overlays are hidden", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed()
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Overlays" }));
@@ -5961,21 +4658,11 @@ describe("MapPage", () => {
   });
 
   it("does not open the old top-right details dialog when markers are clicked", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 700,
-          y: 800
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeNote()
+      ]
+    })
 
     fireEvent.click(screen.getByRole("button", { name: "Note General - Scout note at 700, 800" }));
 
@@ -5987,23 +4674,11 @@ describe("MapPage", () => {
   it("opens edit and delete commands from an existing marker context menu", () => {
     const clipboardWrite = mockClipboardWrite();
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          lastModifiedBy: "Alyeska",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", lastModifiedBy: "Alyeska", ql: "89.50" })
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 320,
@@ -6035,45 +4710,13 @@ describe("MapPage", () => {
   });
 
   it("lists every marker at the same coordinate from the marker context menu", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        },
-        {
-          east: 5,
-          foundingDate: "2026-05-10",
-          founder: "Mayor",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 250,
-          y: 300
-        },
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", ql: "89.50" }),
+        makeDeed({ foundingDate: "2026-05-10", founder: "Mayor", x: 250, y: 300 }),
+        makeNote({ x: 250, y: 300 })
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -6104,35 +4747,12 @@ describe("MapPage", () => {
   });
 
   it("lists overlay-covered marker pips from the marker context menu", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: null,
-          founder: "Founder",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        },
-        {
-          category: "General",
-          id: "note-1",
-          text: "Hidden under the deed overlay",
-          title: "Buried note",
-          type: "note",
-          x: 503,
-          y: 604
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeDeed(),
+        makeNote({ text: "Hidden under the deed overlay", title: "Buried note", x: 503, y: 604 })
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByTestId("deed-overlay-deed-1"), {
       clientX: 504,
@@ -6161,9 +4781,8 @@ describe("MapPage", () => {
           name: "Abandoned Deed"
         },
         deletedMarkerId: "deed-1",
-        marker: {
+        marker: makeNote({
           category: "Abandoned Deed",
-          id: "note-1",
           text: [
             "Former deed: Oak Harbour",
             "Mayor: Mayor",
@@ -6172,36 +4791,20 @@ describe("MapPage", () => {
             "Perimeter: 5 tiles"
           ].join("\n"),
           title: "Oak Harbour",
-          type: "note",
           x: 500,
           y: 600
-        }
+        })
       }),
       ok: true
     })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          east: 5,
-          foundingDate: "2026-05-10",
-          founder: "Mayor",
-          id: "deed-1",
-          name: "Oak Harbour",
-          north: 5,
-          perimeter: 5,
-          south: 5,
-          type: "deed",
-          west: 5,
-          x: 500,
-          y: 600
-        }
+        makeDeed({ foundingDate: "2026-05-10", founder: "Mayor" })
       ],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+      initialNoteCategories: noteCategories
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Deed Oak Harbour at 500, 600" }), {
       clientX: 500,
@@ -6220,22 +4823,11 @@ describe("MapPage", () => {
   });
 
   it("can add another marker at an occupied coordinate from the marker context menu", () => {
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          damage: "0.25",
-          id: "tower-1",
-          makerName: "Mako",
-          makerNumber: "945",
-          ql: "89.50",
-          type: "tower",
-          x: 250,
-          y: 300
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeTower({ damage: "0.25", ql: "89.50" })
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Tower by Mako 945 at 250, 300" }), {
       clientX: 250,
@@ -6253,21 +4845,11 @@ describe("MapPage", () => {
       throw new TypeError("Failed to fetch");
     }));
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 700,
-          y: 800
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeNote()
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Note General - Scout note at 700, 800" }), {
       clientX: 300,
@@ -6284,12 +4866,7 @@ describe("MapPage", () => {
       throw new TypeError("Failed to fetch");
     }));
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const categoryControls = expandNoteCategories();
@@ -6305,12 +4882,7 @@ describe("MapPage", () => {
         : new Response(JSON.stringify({ ok: true }), { status: 200 })
     )));
 
-    render(React.createElement(MapWorkspace, {
-      initialMarkers: [],
-      initialNoteCategories: noteCategories,
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+    renderWorkspace({ initialNoteCategories: noteCategories })
 
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
     const categoryControls = expandNoteCategories();
@@ -6324,24 +4896,14 @@ describe("MapPage", () => {
   });
 
   it("deletes an existing marker from its context menu", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true })) as unknown as typeof fetch;
+    const fetchMock = vi.fn(async () => ({ json: async () => ({}), ok: true })) as unknown as typeof fetch;
     vi.stubGlobal("fetch", fetchMock);
 
-    render(React.createElement(MapWorkspace, {
+    renderWorkspace({
       initialMarkers: [
-        {
-          category: "General",
-          id: "note-1",
-          text: "Scout here",
-          title: "Scout note",
-          type: "note",
-          x: 700,
-          y: 800
-        }
-      ],
-      map: activeMap,
-      viewer: approvedViewer
-    }));
+        makeNote()
+      ]
+    })
 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Note General - Scout note at 700, 800" }), {
       clientX: 300,

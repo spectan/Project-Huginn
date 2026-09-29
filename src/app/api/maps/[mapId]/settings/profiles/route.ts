@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createSettingsProfilesDependencies } from "@/lib/map-settings/database";
 import { listSettingsProfiles } from "@/lib/map-settings/map-settings-service";
+import { MAP_ERROR_STATUSES, getErrorStatus } from "@/lib/http/error-status";
 
 type RouteContext = {
   params: Promise<{
@@ -23,20 +24,8 @@ export async function GET(_request: Request, context: RouteContext) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error) });
+    return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error, MAP_ERROR_STATUSES) });
   }
 
   return NextResponse.json({ profiles: result.value });
-}
-
-function getErrorStatus(error: string): number {
-  if (error === "Read access is required") {
-    return 403;
-  }
-
-  if (error === "Map was not found" || error === "Profile was not found") {
-    return 404;
-  }
-
-  return 400;
 }

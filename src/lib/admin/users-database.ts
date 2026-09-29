@@ -1,6 +1,8 @@
 import argon2 from "argon2";
 import type { Prisma } from "@prisma/client";
+import { createAuditRecorder } from "@/lib/db/audit-recorder";
 import { prisma } from "@/lib/db/prisma";
+import { hasPrismaErrorCode } from "@/lib/db/prisma-errors";
 import { ok } from "@/lib/domain/result";
 import type { AdminUserDependencies } from "./users";
 
@@ -53,20 +55,7 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
       ],
       select: USER_SELECT
     }),
-    recordAudit: async (input) => {
-      const metadata = clientIp !== undefined && clientIp.length > 0
-        ? { ...input.metadata, clientIp }
-        : input.metadata;
-      await prisma.auditEvent.create({
-        data: {
-          action: input.action,
-          actorUserId: input.actorUserId,
-          metadata: metadata as Prisma.InputJsonValue,
-          targetId: input.targetId,
-          targetType: input.targetType
-        }
-      });
-    },
+    recordAudit: createAuditRecorder(clientIp),
     removeUser: async ({ userId }) => nullIfRecordNotFound(async () => {
       const [, deletedUser] = await prisma.$transaction([
         prisma.session.deleteMany({
@@ -182,17 +171,10 @@ async function nullIfRecordNotFound<T>(operation: () => Promise<T>): Promise<T |
   try {
     return await operation();
   } catch (error) {
-    if (isRecordNotFoundError(error)) {
+    if (hasPrismaErrorCode(error, "P2025")) {
       return null;
     }
 
     throw error;
   }
-}
-
-function isRecordNotFoundError(error: unknown): boolean {
-  return typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "P2025";
 }

@@ -48,16 +48,10 @@ vi.mock("@/lib/db/prisma", () => ({
 import AdminDashboardPage from "./page";
 
 describe("AdminDashboardPage", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.viewer = { approvalStatus: "APPROVED", isAdmin: true };
-    fetchMock = vi.fn(async () => ({
-      json: async () => ({ alerts: [] }),
-      ok: true
-    }));
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({ alerts: [] }), ok: true })));
   });
 
   it("renders stat tiles with the admin overview counts", async () => {
@@ -87,19 +81,11 @@ describe("AdminDashboardPage", () => {
     expect(links[0]?.getAttribute("href")).toBe("/admin/security");
   });
 
-  it("renders the read-only alerts section", async () => {
+  it("renders the alerts section (covered in detail by alerts-section.test.tsx)", async () => {
     render(await AdminDashboardPage());
 
     expect(screen.getByRole("heading", { name: "Alerts" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "View all →" }).getAttribute("href")).toBe("/admin/security");
-    expect(screen.queryByRole("button", { name: "Run detection now" })).toBeNull();
-    expect(screen.queryByRole("combobox")).toBeNull();
     expect(await screen.findByText("No alerts.")).toBeTruthy();
-
-    const url = new URL(String(fetchMock.mock.calls[0]?.[0]), "http://localhost");
-    expect(url.pathname).toBe("/api/admin/alerts");
-    expect(url.searchParams.get("status")).toBe("OPEN");
-    expect(url.searchParams.get("limit")).toBe("10");
   });
 
   it("does not render the watermark or canary sections — they live on the security page", async () => {
@@ -111,8 +97,12 @@ describe("AdminDashboardPage", () => {
     expect(screen.queryByRole("heading", { name: "Canaries" })).toBeNull();
   });
 
-  it("renders access denied for anonymous viewers", async () => {
-    mocks.viewer = null;
+  it.each([
+    ["anonymous viewers", null],
+    ["unapproved admins", { approvalStatus: "PENDING", isAdmin: true }],
+    ["non-admin viewers", { approvalStatus: "APPROVED", isAdmin: false }]
+  ] as const)("renders access denied for %s", async (_label, viewer) => {
+    mocks.viewer = viewer;
 
     render(await AdminDashboardPage());
 
@@ -130,22 +120,5 @@ describe("AdminDashboardPage", () => {
 
     await expect(AdminDashboardPage()).rejects.toThrow("NEXT_REDIRECT:/admin/accounts");
     expect(mocks.userCount).not.toHaveBeenCalled();
-  });
-
-  it("renders access denied for unapproved admins", async () => {
-    mocks.viewer = { approvalStatus: "PENDING", isAdmin: true };
-
-    render(await AdminDashboardPage());
-
-    expect(screen.getByText("Admin access is required")).toBeTruthy();
-  });
-
-  it("renders access denied for non-admin viewers", async () => {
-    mocks.viewer = { approvalStatus: "APPROVED", isAdmin: false };
-
-    render(await AdminDashboardPage());
-
-    expect(screen.getByText("Admin access is required")).toBeTruthy();
-    expect(screen.queryByText("Pending accounts")).toBeNull();
   });
 });

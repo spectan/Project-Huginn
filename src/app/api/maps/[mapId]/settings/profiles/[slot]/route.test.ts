@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 import type { SettingsProfilesDependencies } from "@/lib/map-settings/map-settings-service";
 
 const mocks = vi.hoisted(() => {
@@ -79,15 +80,8 @@ function createContext(slot: string) {
   };
 }
 
-function createJsonRequest(method: string, slot: string, body: unknown): Request {
-  return new Request(`http://localhost/api/maps/map-1/settings/profiles/${slot}`, {
-    body: JSON.stringify(body),
-    headers: {
-      "content-type": "application/json"
-    },
-    method
-  });
-}
+const createJsonRequest = (method: string, slot: string, body: unknown) =>
+  jsonRequest(`http://localhost/api/maps/map-1/settings/profiles/${slot}`, method, body);
 
 describe("GET /api/maps/[mapId]/settings/profiles/[slot]", () => {
   beforeEach(() => {

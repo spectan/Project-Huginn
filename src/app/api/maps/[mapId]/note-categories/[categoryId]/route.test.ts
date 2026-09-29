@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonRequest } from "@/test/http";
 
 const mocks = vi.hoisted(() => ({
   auditCreate: vi.fn(async () => ({})),
@@ -152,7 +153,7 @@ describe("DELETE /api/maps/[mapId]/note-categories/[categoryId]", () => {
   });
 
   it("requires admin access to delete note categories", async () => {
-    const response = await DELETE(createCategoryRequest(null, "DELETE"), {
+    const response = await DELETE(createCategoryRequest(undefined, "DELETE"), {
       params: Promise.resolve({ categoryId: "category-landmarks", mapId: "map-1" })
     });
 
@@ -169,7 +170,7 @@ describe("DELETE /api/maps/[mapId]/note-categories/[categoryId]", () => {
       isAdmin: true
     };
 
-    const response = await DELETE(createCategoryRequest(null, "DELETE"), {
+    const response = await DELETE(createCategoryRequest(undefined, "DELETE"), {
       params: Promise.resolve({ categoryId: "category-landmarks", mapId: "map-1" })
     });
 
@@ -195,12 +196,5 @@ describe("DELETE /api/maps/[mapId]/note-categories/[categoryId]", () => {
   });
 });
 
-function createCategoryRequest(body: unknown, method: "DELETE" | "PATCH"): Request {
-  return new Request("http://localhost/api/maps/map-1/note-categories/category-landmarks", {
-    body: body === null ? undefined : JSON.stringify(body),
-    headers: {
-      "content-type": "application/json"
-    },
-    method
-  });
-}
+const createCategoryRequest = (body: unknown, method: "DELETE" | "PATCH") =>
+  jsonRequest("http://localhost/api/maps/map-1/note-categories/category-landmarks", method, body);
