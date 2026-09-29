@@ -24,8 +24,12 @@ describe("getClientIp", () => {
     }))).toBe("203.0.113.7");
   });
 
-  it("uses the leftmost entry when the chain is shorter than the configured hops", () => {
-    expect(getClientIp(requestWith({ "x-forwarded-for": "203.0.113.7" }), 3)).toBe("203.0.113.7");
+  it("treats a chain shorter than the configured hops as untrusted", () => {
+    expect(getClientIp(requestWith({ "x-forwarded-for": "203.0.113.7" }), 3)).toBeUndefined();
+    expect(getClientIp(requestWith({
+      "x-forwarded-for": "6.6.6.6, 203.0.113.7",
+      "x-real-ip": "198.51.100.4"
+    }), 3)).toBe("198.51.100.4");
   });
 
   it("ignores forwarding headers entirely when TRUSTED_PROXY_HOPS is 0", () => {

@@ -31,8 +31,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
 
+  // Detection runs once the access is recorded, so the run counts it.
   recordMapDataAccess(viewer.id, map.id, request);
-  triggerAlertDetection();
 
   return NextResponse.json(result.value);
 }
@@ -51,8 +51,10 @@ function recordMapDataAccess(actorUserId: string, mapId: string, request: Reques
           targetType: "MAP"
         }
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .then(() => triggerAlertDetection());
   } catch {
     // Auditing must never break this data-serving route.
+    triggerAlertDetection();
   }
 }

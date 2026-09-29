@@ -47,9 +47,9 @@ type MapSettingsOverlayProps = {
   onNoteCategoryColorChange(categoryId: string, color: string | null): void;
   onNoteCategoryMarkerShapeChange(categoryId: string, markerShape: NoteCategoryMarkerShape): void;
   onNoteCategoryPipSizeChange(categoryId: string, pipSize: number): void;
-  onNoteCategoryCreate(input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onNoteCategoryCreate(input: NoteCategoryFormInput): Promise<NoteCategoryMutationResult>;
   onNoteCategoryDelete(categoryId: string): Promise<boolean>;
-  onNoteCategoryUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onNoteCategoryUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategoryMutationResult>;
   onOpenChange(isOpen: boolean): void;
   onResetSettings(): void;
   onRoadwayEditModeChange(enabled: boolean): void;
@@ -62,6 +62,14 @@ type LayerCategoryId = "markers" | "misc" | "roadways";
 type NoteCategoryFormInput = {
   name: string;
 };
+
+// `error` carries the server's message when it sent one; the overlay falls back to a generic message.
+export type NoteCategoryMutationResult =
+  | { category: NoteCategory; ok: true }
+  | { error: string | null; ok: false };
+
+// Mirrors the server's category name limit (MAX_NAME_LENGTH in src/lib/domain/constants.ts).
+const MAX_NOTE_CATEGORY_NAME_LENGTH = 80;
 
 export function MapSettingsOverlay({
   isOpen,
@@ -858,11 +866,11 @@ function NoteCategorySettings({
   viewerCanWrite: boolean;
   viewerIsAdmin: boolean;
   onColorChange(categoryId: string, color: string | null): void;
-  onCreate(input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onCreate(input: NoteCategoryFormInput): Promise<NoteCategoryMutationResult>;
   onDelete(categoryId: string): Promise<boolean>;
   onMarkerShapeChange(categoryId: string, markerShape: NoteCategoryMarkerShape): void;
   onPipSizeChange(categoryId: string, pipSize: number): void;
-  onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategoryMutationResult>;
 }) {
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -870,13 +878,13 @@ function NoteCategorySettings({
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const handleUpdate = useCallback(async (categoryId: string, input: NoteCategoryFormInput) => {
     setCategoryError(null);
-    const category = await onUpdate(categoryId, input);
+    const result = await onUpdate(categoryId, input);
 
-    if (category === null) {
-      setCategoryError("Note category could not be saved");
+    if (!result.ok) {
+      setCategoryError(result.error ?? "Note category could not be saved");
     }
 
-    return category;
+    return result;
   }, [onUpdate]);
   const handleDelete = useCallback(async (categoryId: string) => {
     setCategoryError(null);
@@ -926,9 +934,9 @@ function NoteCategorySettings({
                     setCategoryError(null);
                     void onCreate({
                       name: newCategoryName
-                    }).then((category) => {
-                      if (category === null) {
-                        setCategoryError("Note category could not be created");
+                    }).then((result) => {
+                      if (!result.ok) {
+                        setCategoryError(result.error ?? "Note category could not be created");
                         return;
                       }
 
@@ -941,6 +949,7 @@ function NoteCategorySettings({
                     <span>Name</span>
                     <input
                       aria-label="New note category name"
+                      maxLength={MAX_NOTE_CATEGORY_NAME_LENGTH}
                       onChange={(event) => setNewCategoryName(event.target.value)}
                       value={newCategoryName}
                     />
@@ -986,7 +995,7 @@ function NoteCategoryRow({
   onDelete(categoryId: string): Promise<boolean>;
   onMarkerShapeChange(categoryId: string, markerShape: NoteCategoryMarkerShape): void;
   onPipSizeChange(categoryId: string, pipSize: number): void;
-  onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategory | null>;
+  onUpdate(categoryId: string, input: NoteCategoryFormInput): Promise<NoteCategoryMutationResult>;
 }) {
   const [name, setName] = useState(category.name);
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
@@ -1030,6 +1039,7 @@ function NoteCategoryRow({
           <input
             aria-label={`${category.name} name`}
             disabled={!viewerCanWrite}
+            maxLength={MAX_NOTE_CATEGORY_NAME_LENGTH}
             onChange={(event) => setName(event.target.value)}
             value={name}
           />

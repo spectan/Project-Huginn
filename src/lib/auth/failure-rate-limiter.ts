@@ -1,56 +1,97 @@
 export type FailureRateLimiter = {
-  isLimited(key: string): boolean;
-  recordFailure(key: string): void;
+  /**
+   * Atomically checks and counts an attempt. Returns false (and records
+   * nothing) when the key is already at the limit, otherwise records the
+   * attempt and returns true. Because the check and the increment happen in
+   * the same synchronous step, concurrent requests cannot all slip past the
+   * check before any failure is recorded.
+   */
+  tryAcquire(key: string): boolean;
+  /**
+   * Removes the most recent attempt counted for the key, for attempts that
+   * turned out not to be failures (e.g. a successful login).
+   */
+  release(key: string): void;
 };
 
-const DEFAULT_MAX_FAILURES = 10;
+const DEFAULT_MAX_ATTEMPTS = 10;
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
-const MAX_TRACKED_KEYS = 10_000;
+const DEFAULT_MAX_TRACKED_KEYS = 10_000;
 
 /**
- * In-memory sliding-window limiter for failed credential checks. State is
- * per-process, which is sufficient for the single-instance deployment.
+ * In-memory sliding-window limiter for credential attempts. State is
+ * per-process, which is sufficient for the single-instance deployment. The
+ * number of tracked keys is hard-capped: once expired entries are pruned, the
+ * least recently used keys are evicted.
  */
 export function createFailureRateLimiter(options: {
-  maxFailures?: number;
+  maxAttempts?: number;
+  maxTrackedKeys?: number;
   now?: () => number;
   windowMs?: number;
 } = {}): FailureRateLimiter {
-  const maxFailures = options.maxFailures ?? DEFAULT_MAX_FAILURES;
+  const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const maxTrackedKeys = options.maxTrackedKeys ?? DEFAULT_MAX_TRACKED_KEYS;
   const windowMs = options.windowMs ?? DEFAULT_WINDOW_MS;
   const now = options.now ?? Date.now;
-  const failures = new Map<string, number[]>();
+  // Map iteration order is insertion order; keys are re-inserted on every
+  // attempt, so the first keys are the least recently used.
+  const attempts = new Map<string, number[]>();
 
-  function recentFailures(key: string, at: number): number[] {
-    const recent = (failures.get(key) ?? []).filter((timestamp) => timestamp > at - windowMs);
-
-    if (recent.length === 0) {
-      failures.delete(key);
-    } else {
-      failures.set(key, recent);
-    }
-
-    return recent;
+  function recentAttempts(key: string, at: number): number[] {
+    return (attempts.get(key) ?? []).filter((timestamp) => timestamp > at - windowMs);
   }
 
-  function pruneExpired(at: number): void {
-    for (const key of Array.from(failures.keys())) {
-      recentFailures(key, at);
+  function makeRoom(at: number): void {
+    if (attempts.size < maxTrackedKeys) {
+      return;
+    }
+
+    for (const key of Array.from(attempts.keys())) {
+      if (recentAttempts(key, at).length === 0) {
+        attempts.delete(key);
+      }
+    }
+
+    for (const key of attempts.keys()) {
+      if (attempts.size < maxTrackedKeys) {
+        break;
+      }
+
+      attempts.delete(key);
     }
   }
 
   return {
-    isLimited(key) {
-      return recentFailures(key, now()).length >= maxFailures;
-    },
-    recordFailure(key) {
-      const at = now();
+    release(key) {
+      const current = attempts.get(key);
 
-      if (failures.size >= MAX_TRACKED_KEYS) {
-        pruneExpired(at);
+      if (current === undefined) {
+        return;
       }
 
-      failures.set(key, [...recentFailures(key, at), at].slice(-maxFailures));
+      const remaining = current.slice(0, -1);
+
+      if (remaining.length === 0) {
+        attempts.delete(key);
+      } else {
+        attempts.set(key, remaining);
+      }
+    },
+    tryAcquire(key) {
+      const at = now();
+      const recent = recentAttempts(key, at);
+
+      attempts.delete(key);
+
+      if (recent.length >= maxAttempts) {
+        attempts.set(key, recent);
+        return false;
+      }
+
+      makeRoom(at);
+      attempts.set(key, [...recent, at]);
+      return true;
     }
   };
 }

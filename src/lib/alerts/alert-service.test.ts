@@ -47,8 +47,8 @@ type AuditFindManyArgs = {
 type AuditFindFirstArgs = {
   where: {
     action: string;
-    actorUserId: string;
-    createdAt: { gte: Date; lt: Date };
+    actorUserId?: string;
+    createdAt: { gte: Date; lt?: Date };
     metadata: { path: string[]; equals: string };
   };
 };
@@ -119,14 +119,23 @@ const mocks = vi.hoisted(() => {
   });
 
   const auditEventFindFirst = vi.fn(async (args: AuditFindFirstArgs) => {
-    return state.auditEvents.find(
-      (event) =>
-        event.action === args.where.action &&
-        event.actorUserId === args.where.actorUserId &&
-        event.createdAt >= args.where.createdAt.gte &&
-        event.createdAt < args.where.createdAt.lt &&
-        metadataClientIp(event.metadata) === args.where.metadata.equals
-    ) ?? null;
+    const { where } = args;
+    const [pathKey] = where.metadata.path;
+
+    return state.auditEvents.find((event) => {
+      const metadata = typeof event.metadata === "object" && event.metadata !== null
+        ? (event.metadata as Record<string, unknown>)
+        : {};
+
+      return (
+        event.action === where.action &&
+        (where.actorUserId === undefined || event.actorUserId === where.actorUserId) &&
+        event.createdAt >= where.createdAt.gte &&
+        (where.createdAt.lt === undefined || event.createdAt < where.createdAt.lt) &&
+        pathKey !== undefined &&
+        metadata[pathKey] === where.metadata.equals
+      );
+    }) ?? null;
   });
 
   const alertFindFirst = vi.fn(async (args: AlertFindFirstArgs) => {
@@ -183,7 +192,17 @@ const mocks = vi.hoisted(() => {
     return alert;
   });
 
-  const auditEventCreate = vi.fn(async (args: { data: unknown }) => args.data);
+  const auditEventCreate = vi.fn(async (args: { data: unknown }) => {
+    const data = args.data as Omit<TestAuditEvent, "actor" | "createdAt" | "id" | "mapId">;
+    state.auditEvents.push({
+      mapId: null,
+      ...data,
+      actor: null,
+      createdAt: new Date(),
+      id: `event-${state.nextEventId++}`
+    });
+    return args.data;
+  });
   const alertDelete = vi.fn(async (args: { where: { id: string } }) => {
     const index = state.alerts.findIndex((alert) => alert.id === args.where.id);
 
@@ -1354,5 +1373,84 @@ describe("deleteAlert", () => {
     mocks.alertDelete.mockRejectedValueOnce(new Error("database unavailable"));
 
     await expect(deleteAlert("alert-x", "admin-1")).rejects.toThrow("database unavailable");
+  });
+
+  it("records the alert's dedup key in the deletion audit metadata under the dedup lock", async () => {
+    mocks.state.alerts.push(seededAlert({
+      actor: null,
+      actorUserId: null,
+      id: "alert-ip",
+      mapId: null,
+      metadata: { clientIp: "203.0.113.9", count: 5 },
+      rule: "REPEATED_AUTH_FAILURES"
+    }));
+
+    await deleteAlert("alert-ip", "admin-1");
+
+    const key = "alert:REPEATED_AUTH_FAILURES:::203.0.113.9";
+    expect(mocks.auditEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        metadata: { dedupKey: key, rule: "REPEATED_AUTH_FAILURES", severity: "MEDIUM" }
+      })
+    });
+    expect(mocks.executeRaw.mock.calls[0]?.[1]).toBe(key);
+  });
+});
+
+describe("deleted alerts and dedup", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.state.alerts = [];
+    mocks.state.auditEvents = [];
+    mocks.state.failAuditFindMany = false;
+    mocks.state.usernames = new Map([[userActor.id, userActor.username]]);
+  });
+
+  it("does not re-create or re-notify an alert an admin deleted within the dedup window", async () => {
+    addEvents(20, { action: "MARKER_DELETED" });
+    await detectAlerts();
+    expect(mocks.state.alerts).toHaveLength(1);
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+
+    await deleteAlert(mocks.state.alerts[0]?.id ?? "", "admin-1");
+    const result = await detectAlerts();
+
+    expect(result.ok && result.value.alerts).toEqual([]);
+    expect(mocks.state.alerts).toHaveLength(0);
+    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("only suppresses the deleted alert's own dedup key", async () => {
+    addEvents(20, { action: "MARKER_DELETED" });
+    await detectAlerts();
+    await deleteAlert(mocks.state.alerts[0]?.id ?? "", "admin-1");
+
+    addEvents(20, { action: "MARKER_DELETED", mapId: "map-2" });
+    mocks.state.auditEvents = mocks.state.auditEvents.filter(
+      (event) => event.action !== "MARKER_DELETED" || event.mapId === "map-2"
+    );
+    await detectAlerts();
+
+    expect(mocks.state.alerts).toHaveLength(1);
+    expect(mocks.state.alerts[0]?.mapId).toBe("map-2");
+  });
+
+  it("creates the alert again once the deletion is older than the dedup window", async () => {
+    addEvents(20, { action: "MARKER_DELETED" });
+    mocks.state.auditEvents.push({
+      action: "ALERT_DELETED",
+      actor: null,
+      actorUserId: "admin-1",
+      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+      id: "event-old-delete",
+      mapId: null,
+      metadata: { dedupKey: "alert:DELETE_SPIKE:user-1:map-1:" },
+      targetId: "alert-old",
+      targetType: "SYSTEM"
+    });
+
+    await detectAlerts();
+
+    expect(mocks.state.alerts).toHaveLength(1);
   });
 });

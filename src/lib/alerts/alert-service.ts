@@ -136,18 +136,21 @@ export async function detectAlerts(
 
   const createdAlerts: AlertWithActor[] = [];
 
-  const ruleResults = await Promise.all([
-    detectDeleteSpikes(events, getWindowStart(since, until, DELETE_WINDOW_MS)),
-    detectMapDataAccessSpikes(events, getWindowStart(since, until, MAP_DATA_ACCESS_WINDOW_MS)),
-    detectNewIpLogins(events),
-    detectOffHoursAdminActivity(events),
-    detectRegistrationSpikes(events, getWindowStart(since, until, REGISTRATION_WINDOW_MS)),
-    detectRepeatedAuthFailures(events, getWindowStart(since, until, AUTH_FAILURE_WINDOW_MS))
-  ]);
-
-  for (const alerts of ruleResults) {
-    createdAlerts.push(...alerts);
-  }
+  // Rules run one after another: each alert write is a short locked
+  // transaction, and running them concurrently would hold several pooled
+  // connections per detection run.
+  createdAlerts.push(...(await detectDeleteSpikes(events, getWindowStart(since, until, DELETE_WINDOW_MS))));
+  createdAlerts.push(
+    ...(await detectMapDataAccessSpikes(events, getWindowStart(since, until, MAP_DATA_ACCESS_WINDOW_MS)))
+  );
+  createdAlerts.push(...(await detectNewIpLogins(events)));
+  createdAlerts.push(...(await detectOffHoursAdminActivity(events)));
+  createdAlerts.push(
+    ...(await detectRegistrationSpikes(events, getWindowStart(since, until, REGISTRATION_WINDOW_MS)))
+  );
+  createdAlerts.push(
+    ...(await detectRepeatedAuthFailures(events, getWindowStart(since, until, AUTH_FAILURE_WINDOW_MS)))
+  );
 
   return ok({
     alerts: createdAlerts,
@@ -187,6 +190,9 @@ export async function deleteAlert(alertId: string, actorUserId: string): Promise
     await prisma.$transaction(async (transaction) => {
       const deleted = await transaction.alert.delete({
         select: {
+          actorUserId: true,
+          mapId: true,
+          metadata: true,
           rule: true,
           severity: true
         },
@@ -194,11 +200,21 @@ export async function deleteAlert(alertId: string, actorUserId: string): Promise
           id: alertId
         }
       });
+      // The dedup key lets detection recognise the deletion as "handled" so
+      // the same alert is not re-created (and re-notified) within the window.
+      const dedupKey = buildDedupKey({
+        actorUserId: deleted.actorUserId,
+        clientIp: deleted.actorUserId === null ? extractClientIp(deleted.metadata) : null,
+        mapId: deleted.mapId,
+        rule: deleted.rule
+      });
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dedupKey}))`;
       await transaction.auditEvent.create({
         data: {
           action: "ALERT_DELETED",
           actorUserId,
           metadata: {
+            dedupKey,
             rule: deleted.rule,
             severity: deleted.severity
           },
@@ -628,8 +644,13 @@ function getDedupClientIp(input: AlertInput): string | null {
   return input.actorUserId === null ? extractClientIp(input.metadata) : null;
 }
 
-function buildDedupKey(input: AlertInput, clientIp: string | null): string {
-  return ["alert", input.rule, input.actorUserId ?? "", input.mapId ?? "", clientIp ?? ""].join(":");
+function buildDedupKey(input: {
+  actorUserId: string | null;
+  clientIp: string | null;
+  mapId: string | null;
+  rule: string;
+}): string {
+  return ["alert", input.rule, input.actorUserId ?? "", input.mapId ?? "", input.clientIp ?? ""].join(":");
 }
 
 /**
@@ -637,16 +658,20 @@ function buildDedupKey(input: AlertInput, clientIp: string | null): string {
  * window. A detection more severe than the open duplicate escalates it in
  * place (and notifies again). Returns null when nothing changed.
  *
+ * An equivalent alert deleted by an admin within the window also suppresses
+ * the detection.
+ *
  * The check-and-write runs under a transaction-scoped advisory lock on the
  * dedup key so concurrent detection runs (other processes included) cannot
  * both create the same alert.
  */
 async function createAlert(input: AlertInput): Promise<AlertWithActor | null> {
   const clientIp = getDedupClientIp(input);
-  const dedupKey = buildDedupKey(input, clientIp);
+  const dedupKey = buildDedupKey({ ...input, clientIp });
 
   const alert = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dedupKey}))`;
+    const windowStart = new Date(Date.now() - ALERT_DEDUP_WINDOW_MS);
 
     const existing = await tx.alert.findFirst({
       orderBy: {
@@ -655,7 +680,7 @@ async function createAlert(input: AlertInput): Promise<AlertWithActor | null> {
       where: {
         actorUserId: input.actorUserId,
         createdAt: {
-          gte: new Date(Date.now() - ALERT_DEDUP_WINDOW_MS)
+          gte: windowStart
         },
         mapId: input.mapId,
         ...(clientIp === null ? {} : { metadata: { path: ["clientIp"], equals: clientIp } }),
@@ -665,6 +690,26 @@ async function createAlert(input: AlertInput): Promise<AlertWithActor | null> {
     });
 
     if (existing === null) {
+      // An admin deleted an equivalent alert within the window: treat the
+      // detection as already handled rather than re-creating it.
+      const recentDeletion = await tx.auditEvent.findFirst({
+        select: { id: true },
+        where: {
+          action: "ALERT_DELETED",
+          createdAt: {
+            gte: windowStart
+          },
+          metadata: {
+            path: ["dedupKey"],
+            equals: dedupKey
+          }
+        }
+      });
+
+      if (recentDeletion !== null) {
+        return null;
+      }
+
       return tx.alert.create({
         data: {
           actorUserId: input.actorUserId,

@@ -271,10 +271,6 @@ function parseAnnotations(input: unknown, fallback: UserAnnotation[]): UserAnnot
   const seenIds = new Set<string>();
 
   for (const entry of input) {
-    if (annotations.length >= MAX_ANNOTATIONS) {
-      break;
-    }
-
     if (!isRecord(entry)) {
       continue;
     }
@@ -354,7 +350,7 @@ function parseNoteCategoryColors(input: unknown, fallback: NoteCategoryColors): 
   const colors = { ...fallback };
 
   for (const [categoryId, value] of Object.entries(source)) {
-    if (!canStoreNoteCategoryKey(colors, categoryId)) {
+    if (!isValidNoteCategoryKey(categoryId)) {
       continue;
     }
 
@@ -376,7 +372,7 @@ function parseNoteCategoryMarkerShapes(
   const markerShapes = { ...fallback };
 
   for (const [categoryId, value] of Object.entries(source)) {
-    if (!canStoreNoteCategoryKey(markerShapes, categoryId)) {
+    if (!isValidNoteCategoryKey(categoryId)) {
       continue;
     }
 
@@ -396,7 +392,7 @@ function parseNoteCategoryPipSizes(input: unknown, fallback: NoteCategoryPipSize
 
   for (const [categoryId, value] of Object.entries(source)) {
     if (
-      !canStoreNoteCategoryKey(pipSizes, categoryId) ||
+      !isValidNoteCategoryKey(categoryId) ||
       typeof value !== "number" ||
       !Number.isFinite(value)
     ) {
@@ -413,16 +409,60 @@ function parseNoteCategoryPipSizes(input: unknown, fallback: NoteCategoryPipSize
   return pipSizes;
 }
 
+/** Category keys (note category ids) must be non-empty and short. */
+function isValidNoteCategoryKey(categoryId: string): boolean {
+  return categoryId.length > 0 && categoryId.length <= MAX_NOTE_CATEGORY_KEY_LENGTH;
+}
+
+function pickKeys<T>(record: Record<string, T>, keep: ReadonlySet<string>): Record<string, T> {
+  return Object.fromEntries(Object.entries(record).filter(([key]) => keep.has(key)));
+}
+
 /**
- * Category keys must be non-empty and short; a map holds at most
- * MAX_NOTE_CATEGORY_ENTRIES keys (existing keys can always be updated).
+ * Drop per-category style entries for note categories that no longer exist
+ * on the map (keys are note category ids).
  */
-function canStoreNoteCategoryKey(target: Record<string, unknown>, categoryId: string): boolean {
-  if (categoryId.length === 0 || categoryId.length > MAX_NOTE_CATEGORY_KEY_LENGTH) {
-    return false;
+export function pruneNoteCategoryStyles(
+  settings: UserMapSettings,
+  categoryIds: ReadonlySet<string>
+): UserMapSettings {
+  return {
+    ...settings,
+    noteCategoryColors: pickKeys(settings.noteCategoryColors, categoryIds),
+    noteCategoryMarkerShapes: pickKeys(settings.noteCategoryMarkerShapes, categoryIds),
+    noteCategoryPipSizes: pickKeys(settings.noteCategoryPipSizes, categoryIds)
+  };
+}
+
+/**
+ * Enforce the collection caps on a save. Returns an error message when the
+ * merged settings exceed a cap, or null. Settings stored before the caps
+ * existed are grandfathered: a collection already over its cap may be saved
+ * as long as it does not grow.
+ */
+export function checkUserMapSettingsCaps(
+  merged: UserMapSettings,
+  current: UserMapSettings
+): string | null {
+  if (merged.annotations.length > Math.max(MAX_ANNOTATIONS, current.annotations.length)) {
+    return `A map can hold at most ${MAX_ANNOTATIONS} annotations`;
   }
 
-  return Object.hasOwn(target, categoryId) || Object.keys(target).length < MAX_NOTE_CATEGORY_ENTRIES;
+  const styleMaps = [
+    [merged.noteCategoryColors, current.noteCategoryColors],
+    [merged.noteCategoryMarkerShapes, current.noteCategoryMarkerShapes],
+    [merged.noteCategoryPipSizes, current.noteCategoryPipSizes]
+  ] as const;
+
+  for (const [mergedMap, currentMap] of styleMaps) {
+    const limit = Math.max(MAX_NOTE_CATEGORY_ENTRIES, Object.keys(currentMap).length);
+
+    if (Object.keys(mergedMap).length > limit) {
+      return `A map can hold style settings for at most ${MAX_NOTE_CATEGORY_ENTRIES} note categories`;
+    }
+  }
+
+  return null;
 }
 
 function parseMarkerOpacities(input: unknown, fallback: MarkerOpacities): MarkerOpacities {

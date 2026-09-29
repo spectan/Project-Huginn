@@ -81,6 +81,7 @@ vi.mock("@/lib/watermark/embed", () => ({
 }));
 
 import { join } from "path";
+import nextConfig from "../../../../../../next.config";
 import { GET } from "./route";
 
 describe("GET /api/maps/[mapId]/image", () => {
@@ -311,3 +312,12 @@ function seedShareLink(
 function createImageRequest(path: string): Request {
   return new Request(`http://localhost${path}`, { method: "GET" });
 }
+
+describe("standalone output tracing", () => {
+  it("excludes the raw map images from file tracing (the Dockerfile copies them)", () => {
+    const excludes = nextConfig.outputFileTracingExcludes ?? {};
+
+    expect(excludes["/api/maps/[mapId]/image"]).toContain("./map-images/**/*");
+    expect(excludes["/**"]).toContain("./map-images/**/*");
+  });
+});

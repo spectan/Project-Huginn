@@ -44,6 +44,7 @@ import {
   canWriteMarkers,
   type UserAccess
 } from "@/lib/domain/permissions";
+import { ABANDONED_DEED_CATEGORY_NAME } from "@/lib/domain/note-categories";
 import { err, ok, type Result } from "@/lib/domain/result";
 import {
   MAP_NOT_FOUND,
@@ -258,8 +259,6 @@ export type MarkerServiceDependencies = CanaryDependencies & {
   updateRift(id: string, input: RiftMarkerInput & { updatedByUserId: string }): Promise<RiftRecord | null>;
   updateTower(id: string, input: TowerMarkerInput & { updatedByUserId: string }): Promise<TowerRecord | null>;
 };
-
-const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
 
 type PathCreateMarkerInput = { type: PathType } & {
   name: string;
@@ -801,9 +800,12 @@ export async function updateMarker(
     return validated;
   }
 
-  const category = await requireNoteCategory(dependencies, existing.mapId, validated.value.category);
-  if (!category.ok) {
-    return category;
+  // Only a changed category must exist; an unchanged one is left as-is.
+  if (validated.value.category !== existing.category) {
+    const category = await requireNoteCategory(dependencies, existing.mapId, validated.value.category);
+    if (!category.ok) {
+      return category;
+    }
   }
 
   const updated = await dependencies.updateNote(input.markerId, {

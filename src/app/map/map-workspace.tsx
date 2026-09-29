@@ -70,7 +70,7 @@ import type {
   WorkspaceServer
 } from "@/lib/markers/marker-types";
 import { AccountOverlay, type AccountViewer } from "./account-overlay";
-import { MapSettingsOverlay } from "./map-settings-overlay";
+import { MapSettingsOverlay, type NoteCategoryMutationResult } from "./map-settings-overlay";
 import { MarkerLayer } from "./marker-layer";
 
 const FALLBACK_MAP_SIZE_PX = 2048;
@@ -79,8 +79,21 @@ const CLICK_DRAG_THRESHOLD_PX = 4;
 const LONG_PRESS_DURATION_MS = 600;
 const WILDERNESS_REBUILD_DEBOUNCE_MS = 180;
 const UNIQUE_ALERT_REFRESH_INTERVAL_MS = 60 * 1000;
+// Keepalive requests share a 64KB body quota; leave headroom for other in-flight keepalive requests.
+const MAX_KEEPALIVE_BODY_BYTES = 60 * 1024;
+const SERVER_SWITCH_SETTINGS_FLUSH_TIMEOUT_MS = 1000;
+const SETTINGS_SAVE_ERROR_MESSAGE = "Map settings could not be saved";
+// Mirror the server's user-settings caps (src/lib/map-settings/map-settings.ts).
+const MAX_ANNOTATIONS = 500;
+const MAX_ANNOTATION_TITLE_LENGTH = 120;
+const MAX_ANNOTATION_TEXT_LENGTH = 2000;
 const PINCH_MIN_DISTANCE_PX = 8;
 const ZOOM_STEP = 1.2;
+const WHEEL_NOTCH_PX = 100;
+const WHEEL_DELTA_LINE = 1;
+const WHEEL_DELTA_PAGE = 2;
+const WHEEL_LINE_HEIGHT_PX = 40;
+const WHEEL_PAGE_HEIGHT_PX = 800;
 const FLOATING_MENU_MARGIN_PX = 12;
 const CONTEXT_MENU_MAX_WIDTH_PX = 340;
 const CONTEXT_MENU_MAX_HEIGHT_PX = 420;
@@ -362,7 +375,15 @@ export default function MapWorkspace({
     [map, selectedMapLayer]
   );
   const availableServers = useMemo(() => getAvailableServers(servers, map), [map, servers]);
-  const mapSize = getMapSize(visualMap);
+  const mapWidthPx = visualMap?.widthPx;
+  const mapHeightPx = visualMap?.heightPx;
+  // Keep a stable object so memoized children (MarkerLayer) and callbacks don't churn every render.
+  const mapSize = useMemo(
+    () => getMapSize(
+      mapWidthPx === undefined || mapHeightPx === undefined ? null : { heightPx: mapHeightPx, widthPx: mapWidthPx }
+    ),
+    [mapHeightPx, mapWidthPx]
+  );
   const urlSearchSnapshot = useUrlSearchSnapshot();
   const fittedView = useMemo(() => getFitView(viewport, mapSize), [mapSize, viewport]);
   const urlCoordinate = useMemo(
@@ -457,7 +478,10 @@ export default function MapWorkspace({
   const quickDeedDragRef = useRef<QuickDeedDragState | null>(null);
   const hasInitializedSettingsSaveRef = useRef(false);
   const pendingSettingsSaveRef = useRef<PendingSettingsSave | null>(null);
-  const settingsSaveInFlightRef = useRef<Promise<void> | null>(null);
+  // Tail of the sequential settings-save chain; every save waits for the previous one so
+  // PATCHes reach the server in the order the changes were made.
+  const settingsSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const [settingsSaveError, setSettingsSaveError] = useState<string | null>(null);
   const pendingManualViewRef = useRef<ViewState | null>(null);
   const viewUpdateFrameRef = useRef<number | null>(null);
   const [committedView, setCommittedView] = useState<ViewState | null>(null);
@@ -756,17 +780,25 @@ export default function MapWorkspace({
     setTileHighlight(parsed.tileHighlight);
     setTileHighlightPanelPosition(parsed.tileHighlightPanelPosition);
   }, []);
+  const enqueueSettingsSave = useCallback((mapId: string, settings: UserMapSettings): Promise<void> => {
+    const next = settingsSaveChainRef.current.then(async () => {
+      const result = await saveUserMapSettings(mapId, settings);
+      setSettingsSaveError(result.ok ? null : result.error);
+    });
+    settingsSaveChainRef.current = next;
+    return next;
+  }, []);
   const flushPendingSettings = useCallback(async (): Promise<void> => {
     const pendingSave = pendingSettingsSaveRef.current;
 
     if (pendingSave !== null) {
       window.clearTimeout(pendingSave.timeoutId);
       pendingSettingsSaveRef.current = null;
-      settingsSaveInFlightRef.current = saveUserMapSettings(pendingSave.mapId, pendingSave.settings);
+      enqueueSettingsSave(pendingSave.mapId, pendingSave.settings);
     }
 
-    await settingsSaveInFlightRef.current;
-  }, []);
+    await settingsSaveChainRef.current;
+  }, [enqueueSettingsSave]);
   useLayoutEffect(() => {
     pathDraftRef.current = pathDraft;
   }, [pathDraft]);
@@ -823,9 +855,9 @@ export default function MapWorkspace({
     return () => window.clearInterval(intervalId);
   }, [showNextFooterTip]);
 
-  const createNoteCategory = useCallback(async (input: NoteCategoryEditorInput): Promise<NoteCategory | null> => {
+  const createNoteCategory = useCallback(async (input: NoteCategoryEditorInput): Promise<NoteCategoryMutationResult> => {
     if (map === null) {
-      return null;
+      return { error: null, ok: false };
     }
 
     try {
@@ -836,15 +868,15 @@ export default function MapWorkspace({
       });
 
       if (!response.ok) {
-        return null;
+        return { error: await readResponseError(response), ok: false };
       }
 
       const body = (await response.json()) as { category: NoteCategory };
       setNoteCategories((current) => upsertNoteCategory(current, body.category));
-      return body.category;
+      return { category: body.category, ok: true };
     } catch {
-      // The settings overlay reports a null result as a failed save.
-      return null;
+      // The settings overlay shows a generic message for a failure without a server error.
+      return { error: null, ok: false };
     }
   }, [map]);
   const updateNoteCategoryColor = useCallback((categoryId: string, color: string | null) => {
@@ -888,9 +920,9 @@ export default function MapWorkspace({
   const updateNoteCategory = useCallback(async (
     categoryId: string,
     input: NoteCategoryEditorInput
-  ): Promise<NoteCategory | null> => {
+  ): Promise<NoteCategoryMutationResult> => {
     if (map === null) {
-      return null;
+      return { error: null, ok: false };
     }
 
     const previousCategory = noteCategories.find((category) => category.id === categoryId) ?? null;
@@ -904,13 +936,13 @@ export default function MapWorkspace({
       });
 
       if (!response.ok) {
-        return null;
+        return { error: await readResponseError(response), ok: false };
       }
 
       body = (await response.json()) as { category: NoteCategory };
     } catch {
-      // The settings overlay reports a null result as a failed save.
-      return null;
+      // The settings overlay shows a generic message for a failure without a server error.
+      return { error: null, ok: false };
     }
 
     setNoteCategories((current) => upsertNoteCategory(current, body.category));
@@ -923,7 +955,7 @@ export default function MapWorkspace({
       )));
     }
 
-    return body.category;
+    return { category: body.category, ok: true };
   }, [map, noteCategories, updateMarkers]);
   const deleteNoteCategory = useCallback(async (categoryId: string): Promise<boolean> => {
     if (map === null) {
@@ -1061,9 +1093,15 @@ export default function MapWorkspace({
   const handleWheel = useCallback(
     (event: WheelEvent) => {
       event.preventDefault();
+      const factor = getWheelZoomFactor(event);
+
+      // Pure horizontal scrolls (deltaY 0) carry no zoom intent.
+      if (factor === null) {
+        return;
+      }
+
       cancelLongPress(longPressRef);
       setContextMenu(null);
-      const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
       zoomAt(factor, event.clientX, event.clientY);
     },
     [zoomAt]
@@ -1395,9 +1433,10 @@ export default function MapWorkspace({
         if (
           current !== null &&
           coordinatesAreEqual(current.coordinate, coordinate) &&
-          haveSameMarkerIds(current.markers, hoverMarkers)
+          haveSameMarkers(current.markers, hoverMarkers)
         ) {
-          // Same tile and markers: only move the tooltip, keeping the markers array stable.
+          // Same tile and same marker objects: only move the tooltip, keeping the markers array stable.
+          // A changed marker (e.g. an edit preview or a saved update) gets a new object and re-renders.
           return current.screenX === event.clientX && current.screenY === event.clientY
             ? current
             : { ...current, screenX: event.clientX, screenY: event.clientY };
@@ -1956,7 +1995,7 @@ export default function MapWorkspace({
           pendingSettingsSaveRef.current = null;
         }
 
-        settingsSaveInFlightRef.current = saveUserMapSettings(pendingSave.mapId, pendingSave.settings);
+        void enqueueSettingsSave(pendingSave.mapId, pendingSave.settings);
       }, 250)
     };
     pendingSettingsSaveRef.current = pendingSave;
@@ -1966,7 +2005,7 @@ export default function MapWorkspace({
       // or pagehide it is still sent (with keepalive) instead of being dropped.
       window.clearTimeout(pendingSave.timeoutId);
     };
-  }, [canViewMap, isShareMode, map, userMapSettings]);
+  }, [canViewMap, enqueueSettingsSave, isShareMode, map, userMapSettings]);
 
   useEffect(() => {
     function sendPendingSettingsWithKeepalive() {
@@ -2191,7 +2230,14 @@ export default function MapWorkspace({
               }}
               onServerChange={(serverId) => {
                 if (serverId !== map.id) {
-                  void flushPendingSettings().then(() => navigateToServer(serverId));
+                  // Let a normal save finish first, but never let a stalled request block the switch
+                  // (a save still in flight after the timeout is best-effort).
+                  void Promise.race([
+                    flushPendingSettings(),
+                    new Promise<void>((resolve) => {
+                      window.setTimeout(resolve, SERVER_SWITCH_SETTINGS_FLUSH_TIMEOUT_MS);
+                    })
+                  ]).then(() => navigateToServer(serverId));
                 }
               }}
               onFavoriteServerChange={setFavoriteServerId}
@@ -2210,6 +2256,19 @@ export default function MapWorkspace({
           now={uniqueAlertSnapshot.now}
           onDismiss={dismissUniqueAlert}
         />
+      ) : null}
+      {settingsSaveError !== null ? (
+        <div className="map-settings-save-error" role="alert">
+          <span>{settingsSaveError}</span>
+          <button
+            aria-label="Dismiss settings error"
+            className="map-unique-alert-dismiss"
+            onClick={() => setSettingsSaveError(null)}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
       ) : null}
       {contextMenu !== null ? (
         contextMenu.mode === "map" ? (
@@ -2289,7 +2348,7 @@ export default function MapWorkspace({
               ? { ...current, marker }
               : current
           ))}
-          onSubmit={(event) => void submitMarkerForm(event, dialog, map.id, updateMarkers, setAnnotations, setDialog, setFormError).then((saved) => {
+          onSubmit={(event) => void submitMarkerForm(event, dialog, map.id, annotations.length, updateMarkers, setAnnotations, setDialog, setFormError).then((saved) => {
             if (saved) {
               setQuickDeedDraft(null);
             }
@@ -3750,8 +3809,20 @@ function WildernessOverlay({
     return `${mapSize.widthPx}x${mapSize.heightPx}|${color}|${deedKey}|${waterMaskUrl ?? "no-mask"}`;
   }, [color, mapSize, deeds, waterMaskUrl]);
 
-  const [overlaySrc, setOverlaySrc] = useState<string | null>(null);
-  const hasOverlayRef = useRef(false);
+  const sizeKey = `${mapSize.widthPx}x${mapSize.heightPx}`;
+  // The built image remembers the map size it was drawn for, so a layer/size change never
+  // stretches a stale canvas over the new map.
+  const [overlay, setOverlay] = useState<{ sizeKey: string; src: string } | null>(null);
+  const [wasVisible, setWasVisible] = useState(visible);
+
+  if (wasVisible !== visible) {
+    // Drop the old image while hidden so re-showing never flashes deeds that have since changed.
+    setWasVisible(visible);
+
+    if (!visible) {
+      setOverlay(null);
+    }
+  }
 
   useEffect(() => {
     let isCancelled = false;
@@ -3762,9 +3833,10 @@ function WildernessOverlay({
       };
     }
 
-    // The first render builds immediately; later rebuilds (e.g. every pointermove while a
-    // deed is dragged or resized) are debounced so the full-map canvas is redrawn once idle.
-    const rebuildDelayMs = hasOverlayRef.current ? WILDERNESS_REBUILD_DEBOUNCE_MS : 0;
+    // The first build (and one after hiding or a map size change) runs immediately; later
+    // rebuilds (e.g. every pointermove while a deed is dragged or resized) are debounced so the
+    // full-map canvas is redrawn once idle while the current image stays up.
+    const rebuildDelayMs = overlay !== null && overlay.sizeKey === sizeKey ? WILDERNESS_REBUILD_DEBOUNCE_MS : 0;
     const timeoutId = window.setTimeout(() => {
       const canvasWidth = mapSize.widthPx;
       const canvasHeight = mapSize.heightPx;
@@ -3775,8 +3847,7 @@ function WildernessOverlay({
 
       if (ctx === null) {
         if (!isCancelled) {
-          hasOverlayRef.current = false;
-          setOverlaySrc(null);
+          setOverlay(null);
         }
         return;
       }
@@ -3821,8 +3892,7 @@ function WildernessOverlay({
           data[i] = (data[i] ?? 0) > 0 ? 255 : 0;
         }
         ctx.putImageData(imageData, 0, 0);
-        hasOverlayRef.current = true;
-        setOverlaySrc(canvas.toDataURL());
+        setOverlay({ sizeKey: `${canvasWidth}x${canvasHeight}`, src: canvas.toDataURL() });
       };
 
       if (waterMaskUrl !== null) {
@@ -3854,9 +3924,11 @@ function WildernessOverlay({
   }, [canvasKey, visible, waterMaskUrl]);
 
   // Without deeds nothing is rebuilt, so never show a canvas left over from earlier deeds.
-  if (!visible || overlaySrc === null || deeds.length === 0) {
+  if (!visible || overlay === null || overlay.sizeKey !== sizeKey || deeds.length === 0) {
     return null;
   }
+
+  const overlaySrc = overlay.src;
 
   return (
     <div
@@ -4290,10 +4362,18 @@ function MarkerFields({
 
     return (
       <>
-        <label><span>Title</span><input name="title" required defaultValue={annotation?.title ?? ""} /></label>
+        <label>
+          <span>Title</span>
+          <input
+            defaultValue={annotation?.title ?? ""}
+            maxLength={MAX_ANNOTATION_TITLE_LENGTH}
+            name="title"
+            required
+          />
+        </label>
         <label>
           <span>Text</span>
-          <textarea name="text" defaultValue={annotation?.text ?? ""} />
+          <textarea defaultValue={annotation?.text ?? ""} maxLength={MAX_ANNOTATION_TEXT_LENGTH} name="text" />
         </label>
       </>
     );
@@ -4654,6 +4734,7 @@ async function submitMarkerForm(
   event: FormEvent<HTMLFormElement>,
   dialog: DialogState,
   mapId: string,
+  annotationCount: number,
   setMarkers: (updater: (markers: WorkspaceMarker[]) => WorkspaceMarker[]) => void,
   setAnnotations: (updater: (annotations: UserAnnotation[]) => UserAnnotation[]) => void,
   setDialog: (dialog: DialogState | null) => void,
@@ -4670,7 +4751,24 @@ async function submitMarkerForm(
   }
 
   if (markerType === "annotation") {
+    // Annotations are saved with the user's map settings, which the server rejects past these caps.
+    if (dialog.mode === "create" && annotationCount >= MAX_ANNOTATIONS) {
+      setFormError(`You can keep at most ${MAX_ANNOTATIONS} annotations; delete one to add another`);
+      return false;
+    }
+
     const annotation = buildAnnotationMarker(dialog, payloadResult.payload);
+
+    if (annotation.title.trim().length > MAX_ANNOTATION_TITLE_LENGTH) {
+      setFormError(`Title must be ${MAX_ANNOTATION_TITLE_LENGTH} characters or fewer`);
+      return false;
+    }
+
+    if (annotation.text.trim().length > MAX_ANNOTATION_TEXT_LENGTH) {
+      setFormError(`Text must be ${MAX_ANNOTATION_TEXT_LENGTH} characters or fewer`);
+      return false;
+    }
+
     setAnnotations((current) => upsertAnnotation(current, annotation));
     setDialog(null);
     setFormError(null);
@@ -4860,21 +4958,61 @@ async function createAutoplannedTower(
   }
 }
 
+type SettingsSaveResult = { ok: true } | { error: string; ok: false };
+
 async function saveUserMapSettings(
   mapId: string,
   settings: UserMapSettings,
   options: { keepalive?: boolean } = {}
-): Promise<void> {
+): Promise<SettingsSaveResult> {
+  const body = JSON.stringify(settings);
+  // Browsers reject keepalive bodies over 64KB, so larger payloads fall back to a
+  // normal (best-effort) request that may not survive the page unloading.
+  const keepalive = options.keepalive === true && getUtf8ByteLength(body) <= MAX_KEEPALIVE_BODY_BYTES;
+
   try {
-    await fetch(`/api/maps/${mapId}/settings`, {
-      body: JSON.stringify(settings),
+    const response = await fetch(`/api/maps/${mapId}/settings`, {
+      body,
       headers: { "content-type": "application/json" },
       method: "PATCH",
-      ...(options.keepalive === true ? { keepalive: true } : {})
+      ...(keepalive ? { keepalive: true } : {})
     });
+
+    if (response?.ok === false) {
+      return { error: (await readResponseError(response)) ?? SETTINGS_SAVE_ERROR_MESSAGE, ok: false };
+    }
+
+    return { ok: true };
   } catch {
-    // Preference saves are best-effort; the next successful change will send the full settings payload.
+    return { error: SETTINGS_SAVE_ERROR_MESSAGE, ok: false };
   }
+}
+
+async function readResponseError(response: Response): Promise<string | null> {
+  const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+
+  return typeof body?.error === "string" && body.error.length > 0 ? body.error : null;
+}
+
+// One mouse-wheel notch (~100px) zooms by ZOOM_STEP; trackpad scrolls and pinches, which send
+// many small deltas, zoom proportionally. Each event is clamped to a single ZOOM_STEP.
+function getWheelZoomFactor(event: Pick<WheelEvent, "deltaMode" | "deltaY">): number | null {
+  if (event.deltaY === 0 || !Number.isFinite(event.deltaY)) {
+    return null;
+  }
+
+  const deltaPx = event.deltaMode === WHEEL_DELTA_LINE
+    ? event.deltaY * WHEEL_LINE_HEIGHT_PX
+    : event.deltaMode === WHEEL_DELTA_PAGE
+      ? event.deltaY * WHEEL_PAGE_HEIGHT_PX
+      : event.deltaY;
+  const factor = Math.exp((-deltaPx / WHEEL_NOTCH_PX) * Math.log(ZOOM_STEP));
+
+  return clamp(factor, 1 / ZOOM_STEP, ZOOM_STEP);
+}
+
+function getUtf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 function clampShareLinkHours(value: number): number {
@@ -5186,7 +5324,7 @@ function formatTowerCreatorFormValue(input: { makerName: string; makerNumber: st
   return formatTowerCreator(input);
 }
 
-function getMapSize(map: WorkspaceMap | null) {
+function getMapSize(map: { heightPx: number; widthPx: number } | null) {
   return {
     heightPx: map?.heightPx ?? FALLBACK_MAP_SIZE_PX,
     widthPx: map?.widthPx ?? FALLBACK_MAP_SIZE_PX
@@ -6280,8 +6418,8 @@ function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
   event.preventDefault();
 }
 
-function haveSameMarkerIds(first: readonly WorkspaceMarker[], second: readonly WorkspaceMarker[]): boolean {
-  return first.length === second.length && first.every((marker, index) => marker.id === second[index]?.id);
+function haveSameMarkers(first: readonly WorkspaceMarker[], second: readonly WorkspaceMarker[]): boolean {
+  return first.length === second.length && first.every((marker, index) => marker === second[index]);
 }
 
 function cancelLongPress(ref: { current: LongPressState | null }): void {

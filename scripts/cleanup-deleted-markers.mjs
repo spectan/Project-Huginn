@@ -1,7 +1,22 @@
 import { PrismaClient } from "@prisma/client";
 
 const BATCH_LIMIT = 100;
-const prisma = new PrismaClient();
+// Arbitrary app-wide key for pg_try_advisory_lock so only one cleanup runs at a time.
+const CLEANUP_LOCK_KEY = 4815162342;
+// A session-level advisory lock belongs to one connection, so pin the client
+// to a single connection: the lock, every purge and the unlock share it.
+const prisma = new PrismaClient(singleConnectionOptions(process.env.DATABASE_URL));
+
+function singleConnectionOptions(databaseUrl) {
+  if (databaseUrl === undefined || databaseUrl === "") {
+    return {};
+  }
+
+  const url = new URL(databaseUrl);
+  url.searchParams.set("connection_limit", "1");
+
+  return { datasourceUrl: url.toString() };
+}
 
 // Every soft-deletable marker table. `markerType` matches what the app writes
 // into audit metadata; paths use their stored pathType (bridge, canal, ...).
@@ -17,6 +32,21 @@ const MARKER_MODELS = [
 ];
 
 async function main() {
+  const [{ locked }] = await prisma.$queryRaw`SELECT pg_try_advisory_lock(${CLEANUP_LOCK_KEY}::bigint) AS locked`;
+
+  if (!locked) {
+    console.log("Another cleanup is already running; exiting.");
+    return;
+  }
+
+  try {
+    await runCleanup();
+  } finally {
+    await prisma.$queryRaw`SELECT pg_advisory_unlock(${CLEANUP_LOCK_KEY}::bigint)`;
+  }
+}
+
+async function runCleanup() {
   const now = new Date();
   const deletedCounts = {};
 

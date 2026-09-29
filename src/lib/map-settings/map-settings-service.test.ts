@@ -24,6 +24,9 @@ function createLock(): SaveUserMapSettingsDependencies["withSettingsLock"] {
   };
 }
 
+/** Note category ids that exist on every test map. */
+const noteCategoryIds: { current: string[] } = { current: [] };
+
 // The lock hands `work` the dependencies' own store; set per factory call.
 const storeRef: { current: Pick<SaveUserMapSettingsDependencies, "findSettings" | "upsertSettings"> | null } = {
   current: null
@@ -74,6 +77,7 @@ function createDependencies(): SaveUserMapSettingsDependencies {
 
   return {
     findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
+    findNoteCategoryIds: async () => noteCategoryIds.current,
     ...store,
     withSettingsLock: createLock()
   };
@@ -83,6 +87,7 @@ describe("user map settings service", () => {
   let dependencies: SaveUserMapSettingsDependencies;
 
   beforeEach(() => {
+    noteCategoryIds.current = [];
     dependencies = createDependencies();
   });
 
@@ -104,6 +109,77 @@ describe("user map settings service", () => {
 
     expect(result.ok && result.value.markerColors.towers).toBe("#00ff00");
     expect(result.ok && result.value.searchLinesEnabled).toBe(true);
+  });
+
+  it("drops style entries for note categories that no longer exist on save", async () => {
+    noteCategoryIds.current = ["cat-live"];
+
+    const result = await saveUserMapSettings({
+      actor: readableActor,
+      input: { noteCategoryColors: { "cat-gone": "#000000", "cat-live": "#ffffff" } },
+      mapId: "map-1"
+    }, dependencies);
+
+    expect(result.ok && result.value.noteCategoryColors).toEqual({ "cat-live": "#ffffff" });
+  });
+
+  it("rejects a save over the annotation cap without storing it", async () => {
+    const annotations = Array.from({ length: 501 }, (_, index) => ({
+      id: `a-${index}`,
+      text: "",
+      title: `Note ${index}`,
+      x: index,
+      y: index
+    }));
+
+    const result = await saveUserMapSettings({
+      actor: readableActor,
+      input: { annotations, searchLinesEnabled: true },
+      mapId: "map-1"
+    }, dependencies);
+
+    expect(result).toEqual({ ok: false, error: "A map can hold at most 500 annotations" });
+    const stored = await getUserMapSettings({ actor: readableActor, mapId: "map-1" }, dependencies);
+    expect(stored.ok && stored.value.searchLinesEnabled).toBe(false);
+  });
+
+  it("lets a user whose stored annotations already exceed the cap keep saving other settings", async () => {
+    const annotations = Array.from({ length: 600 }, (_, index) => ({
+      id: `a-${index}`,
+      text: "",
+      title: `Note ${index}`,
+      type: "annotation" as const,
+      x: index,
+      y: index
+    }));
+    await dependencies.upsertSettings({
+      mapId: "map-1",
+      settings: { ...DEFAULT_USER_MAP_SETTINGS, annotations },
+      userId: readableActor.id
+    });
+
+    const result = await saveUserMapSettings({
+      actor: readableActor,
+      input: { annotations, searchLinesEnabled: true },
+      mapId: "map-1"
+    }, dependencies);
+
+    expect(result.ok && result.value.annotations).toHaveLength(600);
+    expect(result.ok && result.value.searchLinesEnabled).toBe(true);
+  });
+
+  it("rejects style entries for more than 200 existing note categories", async () => {
+    noteCategoryIds.current = Array.from({ length: 201 }, (_, index) => `cat-${index}`);
+
+    const result = await saveUserMapSettings({
+      actor: readableActor,
+      input: {
+        noteCategoryColors: Object.fromEntries(noteCategoryIds.current.map((id) => [id, "#abcdef"]))
+      },
+      mapId: "map-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(false);
   });
 
   it("returns defaults when the user has no saved settings", async () => {
@@ -231,6 +307,7 @@ function createProfileDependencies(): SettingsProfilesDependencies & SaveUserMap
 
   return {
     findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
+    findNoteCategoryIds: async () => noteCategoryIds.current,
     ...store,
     withSettingsLock: createLock(),
     findProfile: async (userId, slot) => profiles.get(profileKey(userId, slot)) ?? null,

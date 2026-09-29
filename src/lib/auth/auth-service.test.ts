@@ -77,6 +77,7 @@ function createDependencies(): TestAuthServiceDependencies {
     recordAudit: async (input) => {
       audits.push(input);
     },
+    registrationRateLimiter: createFailureRateLimiter({ maxAttempts: 5, windowMs: 60 * 60 * 1000 }),
     updateUserPassword: async (input) => {
       passwordUpdates.push(input);
       const user = Array.from(users.values()).find((candidate) => candidate.id === input.userId);
@@ -223,6 +224,51 @@ describe("auth service", () => {
       { password: "correct horse battery staple", username: "Mako" },
       deps,
       { clientIp: "203.0.113.2" }
+    )).resolves.toMatchObject({ ok: true });
+  });
+
+  it("does not rate limit by username when the client IP is unknown", async () => {
+    await registerUser({ password: "correct horse battery staple", username: "Mako" }, deps);
+
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await loginUser({ password: "wrong horse battery staple", username: "Mako" }, deps);
+    }
+
+    await expect(loginUser({ password: "correct horse battery staple", username: "Mako" }, deps))
+      .resolves.toMatchObject({ ok: true });
+  });
+
+  it("counts concurrent login attempts before verifying passwords", async () => {
+    await registerUser({ password: "correct horse battery staple", username: "Mako" }, deps);
+    const verifyPassword = vi.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return false;
+    });
+    deps.verifyPassword = verifyPassword;
+
+    const results = await Promise.all(Array.from({ length: 25 }, () => loginUser(
+      { password: "wrong horse battery staple", username: "Mako" },
+      deps,
+      { clientIp: "203.0.113.5" }
+    )));
+
+    expect(verifyPassword).toHaveBeenCalledTimes(10);
+    expect(results.filter((result) => !result.ok && result.error === TOO_MANY_ATTEMPTS_MESSAGE)).toHaveLength(15);
+  });
+
+  it("rate limits registration attempts per client IP, skipping unknown IPs", async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await registerUser({ password: "short", username: `User${attempt}` }, deps, { clientIp: "203.0.113.8" });
+    }
+
+    await expect(registerUser(
+      { password: "correct horse battery staple", username: "Mako" },
+      deps,
+      { clientIp: "203.0.113.8" }
+    )).resolves.toEqual({ ok: false, error: TOO_MANY_ATTEMPTS_MESSAGE });
+    await expect(registerUser(
+      { password: "correct horse battery staple", username: "Mako" },
+      deps
     )).resolves.toMatchObject({ ok: true });
   });
 

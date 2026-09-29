@@ -1,16 +1,10 @@
 import argon2 from "argon2";
 import { PrismaClient } from "@prisma/client";
-import { validateInitialAdminPassword } from "./seed-admin-config.mjs";
+import { ensureInitialAdmin } from "./seed-admin-config.mjs";
 
 const prisma = new PrismaClient();
 
 const username = process.env.INITIAL_ADMIN_USERNAME ?? "admin";
-const password = validateInitialAdminPassword(process.env.INITIAL_ADMIN_PASSWORD);
-
-if (!password.ok) {
-  console.error(password.error);
-  process.exit(1);
-}
 
 const servers = [
   {
@@ -159,38 +153,20 @@ const servers = [
   }
 ];
 
-const maxWatermark = await prisma.user.aggregate({
-  _max: { watermarkNumber: true }
-});
-const nextWatermarkNumber = (maxWatermark._max.watermarkNumber ?? 0) + 1;
-
-// Create the admin on first run only. Re-running the seed must not reset an
-// existing admin's password (or re-grant admin to a deliberately demoted
-// account).
-const existingAdmin = await prisma.user.findUnique({
-  select: { id: true },
-  where: { username }
+// Create the admin on first run only. Re-running the seed never resets an
+// existing admin's password, and never promotes an existing non-admin
+// account (e.g. one self-registered under the admin username).
+const admin = await ensureInitialAdmin(prisma, {
+  hashPassword: (value) => argon2.hash(value),
+  password: process.env.INITIAL_ADMIN_PASSWORD,
+  username
 });
 
-if (existingAdmin === null) {
-  await prisma.user.create({
-    data: {
-      accessLevel: "WRITE",
-      approvalStatus: "APPROVED",
-      approvedAt: new Date(),
-      isAdmin: true,
-      passwordHash: await argon2.hash(password.value),
-      username,
-      watermarkNumber: nextWatermarkNumber
-    }
-  });
+if (!admin.ok) {
+  console.error(admin.error);
+  await prisma.$disconnect();
+  process.exit(1);
 }
-
-// Backfill a watermark number for the admin if it predates watermarking.
-await prisma.user.updateMany({
-  data: { watermarkNumber: nextWatermarkNumber },
-  where: { username, watermarkNumber: null }
-});
 
 for (const server of servers) {
   const existingMap = await prisma.map.findFirst({
@@ -268,5 +244,5 @@ for (const server of servers) {
 }
 
 await prisma.$disconnect();
-console.log(`Admin user ready: ${username}`);
+console.log(`Admin user ${admin.status === "created" ? "created" : "ready"}: ${admin.username}`);
 console.log(`Server maps ready: ${servers.map((server) => server.name).join(", ")}`);

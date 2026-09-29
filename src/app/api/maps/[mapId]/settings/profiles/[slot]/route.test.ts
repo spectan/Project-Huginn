@@ -226,6 +226,17 @@ describe("PUT /api/maps/[mapId]/settings/profiles/[slot]", () => {
     await expect(response.json()).resolves.toMatchObject({ profile: { name: "Hunting", slot: 1 } });
     expect(response.status).toBe(200);
   });
+
+  it("does not leak the created flag into the response body and looks the slot up once", async () => {
+    mocks.state.currentViewer = viewer;
+
+    const response = await PUT(createJsonRequest("PUT", "0", { name: "Scout" }), createContext("0"));
+    const body = await response.json() as { profile: Record<string, unknown> };
+
+    expect(response.status).toBe(201);
+    expect(Object.keys(body.profile).sort()).toEqual(["name", "slot", "updatedAt"]);
+    expect(mocks.dependencies.findProfile).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("PATCH /api/maps/[mapId]/settings/profiles/[slot]", () => {

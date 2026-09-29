@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => {
   };
   const dependencies: SaveUserMapSettingsDependencies = {
     findMap: vi.fn(async (mapId) => mapId === "map-1" ? { id: mapId } : null),
+    findNoteCategoryIds: vi.fn(async () => ["cat-1"]),
     ...store,
     withSettingsLock: vi.fn(async (_input, work) => work(store)) as SaveUserMapSettingsDependencies["withSettingsLock"]
   };
@@ -108,6 +109,33 @@ describe("PATCH /api/maps/[mapId]/settings", () => {
       { mapId: "map-1", userId: "user-1" },
       expect.any(Function)
     );
+  });
+
+  it("returns 400 and stores nothing when the save exceeds the annotation cap", async () => {
+    mocks.state.currentViewer = {
+      accessLevel: "READ",
+      approvalStatus: "APPROVED",
+      id: "user-1",
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+      ]
+    };
+    const annotations = Array.from({ length: 501 }, (_, index) => ({
+      id: `a-${index}`,
+      text: "",
+      title: `Note ${index}`,
+      x: index,
+      y: index
+    }));
+
+    const response = await PATCH(createSettingsRequest({ annotations }), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "A map can hold at most 500 annotations" });
+    expect(mocks.state.settings.has("user-1:map-1")).toBe(false);
   });
 });
 

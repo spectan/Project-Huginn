@@ -124,7 +124,35 @@ describe("GET /api/maps/active", () => {
         targetType: "MAP"
       }
     });
-    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1));
+  });
+
+  it("triggers detection only after the audit insert resolves", async () => {
+    mocks.state.currentViewer = AUTHORIZED_VIEWER;
+    let resolveInsert: (value: object) => void = () => undefined;
+    mocks.auditCreate.mockImplementationOnce(
+      () => new Promise<object>((resolve) => {
+        resolveInsert = resolve;
+      })
+    );
+
+    const response = await GET(buildRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.triggerAlertDetection).not.toHaveBeenCalled();
+
+    resolveInsert({});
+    await vi.waitFor(() => expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1));
+  });
+
+  it("still triggers detection when the audit insert fails", async () => {
+    mocks.state.currentViewer = AUTHORIZED_VIEWER;
+    mocks.auditCreate.mockRejectedValueOnce(new Error("db down"));
+
+    const response = await GET(buildRequest());
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1));
   });
 
   it("does not audit or trigger detection when the user is not authenticated", async () => {

@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getDeleteExpiresAt } from "@/lib/domain/deletion";
+import { ABANDONED_DEED_CATEGORY_NAME } from "@/lib/domain/note-categories";
 import type { DeletedMarkerDependencies } from "./deleted-marker-service";
 
 type DeletedRecordDates = {
@@ -370,7 +371,9 @@ async function restoreIfRestorable<T>(
   return count === 0 ? null : reread();
 }
 
-// Soft-deletes the "Abandoned Deed" note left by a disband, if it is still live.
+// Soft-deletes the "Abandoned Deed" note left by a disband, but only while it
+// is still live and still in that category: a note users have since
+// recategorized has become their own content and is kept.
 async function retireDisbandNote(
   transaction: Prisma.TransactionClient,
   noteId: string,
@@ -382,7 +385,7 @@ async function retireDisbandNote(
       deletedByUserId: input.updatedByUserId,
       deleteExpiresAt: getDeleteExpiresAt(input.now)
     },
-    where: { deletedAt: null, id: noteId }
+    where: { category: ABANDONED_DEED_CATEGORY_NAME, deletedAt: null, id: noteId }
   });
 
   if (count === 0) {

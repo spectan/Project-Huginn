@@ -118,7 +118,6 @@ function createDependencies(): TestDependencies {
       deletedShareLinkScopes.push(input);
     },
     deletedShareLinkScopes,
-    findUser: async (userId) => users.get(userId) ?? null,
     hashPassword: async (password) => `hashed:${password}`,
     listMaps: async () => maps,
     listUsers: async () => Array.from(users.values()),
@@ -147,28 +146,35 @@ function createDependencies(): TestDependencies {
       users.set(userId, updated);
       return updated;
     },
-    updateUserPrivileges: async ({ approvedByUserId, isAdmin, mapPermissions, userId }) => {
+    updateUserPrivileges: async ({ approvedByUserId, plan, userId }) => {
       const user = users.get(userId);
 
       if (user === undefined) {
         return null;
       }
 
+      const change = plan(user);
+
+      if (!change.ok) {
+        return change;
+      }
+
+      const approved = user.approvalStatus !== "APPROVED";
       const updated: TestUser = {
         ...user,
         accessLevel: "NONE" as const,
-        isAdmin,
-        mapPermissions,
-        ...(approvedByUserId === null
-          ? {}
-          : {
+        isAdmin: change.value.isAdmin,
+        mapPermissions: change.value.mapPermissions,
+        ...(approved
+          ? {
               approvalStatus: "APPROVED" as const,
               approvedAt: new Date("2026-06-01T00:00:00.000Z"),
               approvedBy: { username: approvedByUserId }
-            })
+            }
+          : {})
       };
       users.set(userId, updated);
-      return updated;
+      return { ok: true as const, value: { approved, user: updated } };
     },
     users
   };
@@ -528,8 +534,6 @@ describe("admin user management", () => {
       approvedAt,
       approvedBy: { username: "Original" }
     });
-    const updateSpy = vi.spyOn(dependencies, "updateUserPrivileges");
-
     const result = await updateAdminUser({
       actor: operatorActor,
       isAdmin: false,
@@ -537,7 +541,6 @@ describe("admin user management", () => {
       userId: "user-1"
     }, dependencies);
 
-    expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ approvedByUserId: null }));
     expect(result).toMatchObject({ ok: true, value: { approvedByUsername: "Original" } });
     expect(dependencies.users.get("user-1")?.approvedAt).toBe(approvedAt);
   });
@@ -553,6 +556,71 @@ describe("admin user management", () => {
     }, dependencies);
 
     expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ approvedByUserId: "operator-id" }));
+    expect(dependencies.users.get("user-1")?.approvedBy).toEqual({ username: "operator-id" });
+  });
+
+  it("preserves permissions on inactive operated maps when an operator edits an account", async () => {
+    const inactiveOperator = {
+      ...operatorActor,
+      mapPermissions: [
+        ...operatorActor.mapPermissions,
+        { accessLevel: "READ", isOperator: true, mapId: "map-retired" }
+      ]
+    } as const;
+    dependencies.users.set("user-1", {
+      ...dependencies.users.get("user-1")!,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-defiance" },
+        { accessLevel: "WRITE", isOperator: false, mapId: "map-retired" }
+      ]
+    });
+
+    const result = await updateAdminUser({
+      actor: inactiveOperator,
+      isAdmin: false,
+      mapPermissions: [],
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(dependencies.users.get("user-1")?.mapPermissions).toEqual([
+      { accessLevel: "WRITE", isOperator: false, mapId: "map-retired" }
+    ]);
+  });
+
+  it("evaluates admin-account and rejection guards against the user read inside the update", async () => {
+    dependencies.updateUserPrivileges = async ({ plan }) => {
+      const promotedMeanwhile = { ...dependencies.users.get("user-1")!, isAdmin: true };
+      return plan(promotedMeanwhile) as never;
+    };
+
+    await expect(updateAdminUser({
+      actor: operatorActor,
+      isAdmin: false,
+      mapPermissions: [],
+      userId: "user-1"
+    }, dependencies)).resolves.toEqual({ ok: false, error: "Operators cannot change global admin accounts" });
+  });
+
+  it("does not send an approval notification when the update did not approve the account", async () => {
+    mocks.dispatchDiscordNotification.mockClear();
+    const updateUserPrivileges = dependencies.updateUserPrivileges;
+    // Simulates a concurrent approver winning the race: the user was pending
+    // when read by the caller, but this update's conditional approval changed nothing.
+    dependencies.updateUserPrivileges = async (input) => {
+      const result = await updateUserPrivileges(input);
+      return result !== null && result.ok ? { ok: true, value: { ...result.value, approved: false } } : result;
+    };
+
+    const result = await updateAdminUser({
+      actor: operatorActor,
+      isAdmin: false,
+      mapPermissions: [{ accessLevel: "READ", isOperator: false, mapId: "map-defiance" }],
+      userId: "user-1"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(mocks.dispatchDiscordNotification).not.toHaveBeenCalled();
   });
 
   it("sends a Discord approval notification when a pending account is approved", async () => {

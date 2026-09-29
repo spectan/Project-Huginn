@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
     mapPermissions?: readonly [{ accessLevel: "READ"; isOperator: false; mapId: string }];
   },
   storedEvents: [] as Array<{ id: string; message: string; timestamp: number }>,
+  feedEvents: [] as Array<{ id: string; message: string; timestamp: number }>,
   map: {
     id: "map-1",
     name: "Celebration"
@@ -27,14 +28,13 @@ vi.mock("@/lib/markers/database", () => ({
 }));
 
 vi.mock("@/lib/events/database", () => ({
-  listEventsForMap: vi.fn(async () => mocks.storedEvents),
+  EVENT_FEED_DISPLAY_LIMIT: 30,
+  listEventsForMap: vi.fn(async () => mocks.storedEvents)
 }));
 
 vi.mock("@/lib/events/event-feed", () => ({
   fetchOfficialEventFeed: vi.fn(async () => ({
-    events: [
-      { id: "event-1", message: "A new mission is available!", timestamp: 1778385063 }
-    ],
+    events: mocks.feedEvents,
     fetchedAt: "2026-05-13T04:00:00.000Z",
     sourceUrl: "https://celebration.wurmonline.com/battles/server_feed.xml"
   })),
@@ -52,6 +52,9 @@ describe("GET /api/maps/[mapId]/events", () => {
       name: "Celebration"
     };
     mocks.storedEvents = [];
+    mocks.feedEvents = [
+      { id: "event-1", message: "A new mission is available!", timestamp: 1778385063 }
+    ];
   });
 
   it("requires map read access", async () => {
@@ -116,6 +119,32 @@ describe("GET /api/maps/[mapId]/events", () => {
       label: "Event",
       message: "A new mission is available!"
     });
+  });
+
+  it("limits freshly fetched events to the same count as stored events", async () => {
+    mocks.currentViewer = {
+      accessLevel: "READ",
+      approvalStatus: "APPROVED",
+      id: "user-1",
+      isAdmin: false,
+      mapPermissions: [
+        { accessLevel: "READ", isOperator: false, mapId: "map-1" }
+      ]
+    };
+    mocks.feedEvents = Array.from({ length: 45 }, (_, index) => ({
+      id: `event-${index}`,
+      message: `Event ${index}`,
+      timestamp: 1778385063 - index
+    }));
+
+    const response = await GET(new Request("http://localhost/api/maps/map-1/events"), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.feed.events).toHaveLength(30);
+    expect(body.feed.events[0]).toMatchObject({ id: "event-0" });
   });
 
   it("returns 404 when the requested map is missing", async () => {

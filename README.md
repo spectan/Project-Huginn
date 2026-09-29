@@ -173,14 +173,14 @@ The bundled Docker Compose exposes the application on port 3014. In production, 
 
 ## First Deploy
 
-Build the image, start the database, run migrations, seed the admin account, and start the application:
+Build the image, start the database, run migrations, seed the admin account, and start the application and the event sync worker (`sync` runs from the same image):
 
 ```bash
 docker compose build app
 docker compose up -d db
 docker compose run --rm app npm run db:migrate
 docker compose run --rm seed
-docker compose up -d app
+docker compose up -d app sync
 ```
 
 Verify the deployment:
@@ -195,17 +195,18 @@ Expected response:
 {"status":"ok"}
 ```
 
-Log in with the initial admin username and password configured in `.env`. Re-running the seed never changes an existing admin account's password or role; after the first deploy you can remove `INITIAL_ADMIN_PASSWORD` from `.env`.
+Log in with the initial admin username and password configured in `.env`. Re-running the seed never changes an existing admin account's password or role, and it needs no password once that admin exists, so after the first deploy you can remove `INITIAL_ADMIN_PASSWORD` from `.env`. If an account that is not an approved admin already holds `INITIAL_ADMIN_USERNAME` (compared case-insensitively), the seed exits with an error instead of promoting it.
 
 ## Update Deploy
 
-Pull the latest changes, rebuild the image, run any pending migrations, and recreate the application container:
+Pull the latest changes, rebuild the image, stop the event sync worker so the old version is not writing during migrations, run any pending migrations, and recreate both containers that run from the image (`app` and `sync`):
 
 ```bash
 git pull
 docker compose build app
+docker compose stop sync
 docker compose run --rm app npm run db:migrate
-docker compose up -d --force-recreate app
+docker compose up -d --force-recreate app sync
 ```
 
 Upgrading from a release that served map layers from `public/maps/`: the layer images moved to `map-images/maps/` (they were publicly downloadable without a watermark). No database migration is needed, but if you added custom layer images to `public/maps/`, move them to `map-images/maps/` before rebuilding. The rebuilt image drops them from the public static files.

@@ -66,7 +66,6 @@ export type AdminUserDependencies = {
     keepMapIds: readonly string[];
     userId: string;
   }): Promise<void>;
-  findUser(userId: string): Promise<AdminUserRecord | null>;
   hashPassword(password: string): Promise<string>;
   listMaps(): Promise<AdminMapSummary[]>;
   listUsers(): Promise<AdminUserRecord[]>;
@@ -79,13 +78,23 @@ export type AdminUserDependencies = {
     passwordHash: string;
     userId: string;
   }): Promise<AdminUserRecord | null>;
+  /**
+   * Locks the user row, re-reads it and passes it to `plan` inside the same
+   * transaction, so concurrent edits cannot overwrite each other's changes.
+   * Approves the account (recording `approvedByUserId`) only if it is not yet
+   * approved; `approved` reports whether this call made that change. Returns
+   * null when the user does not exist and the plan's error when it rejects.
+   */
   updateUserPrivileges(input: {
-    /** Set when the update approves a not-yet-approved account. */
-    approvedByUserId: string | null;
-    isAdmin: boolean;
-    mapPermissions: readonly MapPermission[];
+    approvedByUserId: string;
+    plan(existingUser: AdminUserRecord): Result<PrivilegeChange>;
     userId: string;
-  }): Promise<AdminUserRecord | null>;
+  }): Promise<Result<{ approved: boolean; user: AdminUserRecord }> | null>;
+};
+
+type PrivilegeChange = {
+  isAdmin: boolean;
+  mapPermissions: readonly MapPermission[];
 };
 
 export async function listAdminUsers(
@@ -129,28 +138,11 @@ export async function updateAdminUser(
     return err("Admins cannot change their own account");
   }
 
-  const [existingUser, maps] = await Promise.all([
-    dependencies.findUser(input.userId),
-    dependencies.listMaps()
-  ]);
-
-  if (existingUser === null) {
-    return err("User was not found");
-  }
-
+  const maps = await dependencies.listMaps();
   const globalAdmin = canAdminister(input.actor);
-  const operatedMapIds = getOperatedMapIds(input.actor);
-
-  if (!globalAdmin && existingUser.isAdmin) {
-    return err("Operators cannot change global admin accounts");
-  }
 
   if (!globalAdmin && input.isAdmin) {
     return err("Operators cannot grant global admin access");
-  }
-
-  if (!globalAdmin && existingUser.approvalStatus === "REJECTED") {
-    return err("Operators cannot approve rejected accounts");
   }
 
   const normalizedPermissionsResult = normalizeRequestedMapPermissions(input.mapPermissions, maps);
@@ -159,32 +151,53 @@ export async function updateAdminUser(
     return err(normalizedPermissionsResult.error);
   }
 
-  if (!globalAdmin && normalizedPermissionsResult.value.some((permission) => !operatedMapIds.has(permission.mapId))) {
+  const activeMapIds = new Set(maps.map((map) => map.id));
+  // Only active maps the actor manages are editable; permissions on other maps
+  // (unoperated servers for operators, inactive maps for everyone) are preserved.
+  const editableMapIds = globalAdmin
+    ? activeMapIds
+    : new Set(Array.from(getOperatedMapIds(input.actor)).filter((mapId) => activeMapIds.has(mapId)));
+
+  if (!globalAdmin && normalizedPermissionsResult.value.some((permission) => !editableMapIds.has(permission.mapId))) {
     return err("Operators can only change permissions for their operated servers");
   }
 
-  // Only the maps the actor can see are editable; permissions on other maps
-  // (unoperated servers for operators, inactive maps for admins) are preserved.
-  const editableMapIds = globalAdmin ? new Set(maps.map((map) => map.id)) : operatedMapIds;
-  const nextMapPermissions = mergePreservedPermissions(
-    existingUser.mapPermissions,
-    normalizedPermissionsResult.value,
-    editableMapIds
-  );
-  const user = await dependencies.updateUserPrivileges({
-    approvedByUserId: existingUser.approvalStatus === "APPROVED" ? null : input.actor.id,
-    isAdmin: globalAdmin ? input.isAdmin : existingUser.isAdmin,
-    mapPermissions: nextMapPermissions,
+  const updateResult = await dependencies.updateUserPrivileges({
+    approvedByUserId: input.actor.id,
+    plan: (existingUser) => {
+      if (!globalAdmin && existingUser.isAdmin) {
+        return err("Operators cannot change global admin accounts");
+      }
+
+      if (!globalAdmin && existingUser.approvalStatus === "REJECTED") {
+        return err("Operators cannot approve rejected accounts");
+      }
+
+      return ok({
+        isAdmin: globalAdmin ? input.isAdmin : existingUser.isAdmin,
+        mapPermissions: mergePreservedPermissions(
+          existingUser.mapPermissions,
+          normalizedPermissionsResult.value,
+          editableMapIds
+        )
+      });
+    },
     userId: input.userId
   });
 
-  if (user === null) {
+  if (updateResult === null) {
     return err("User was not found");
   }
 
+  if (!updateResult.ok) {
+    return updateResult;
+  }
+
+  const { approved, user } = updateResult.value;
+
   await revokeUnreadableShareLinks(user, dependencies);
 
-  if (existingUser.approvalStatus !== "APPROVED" && user.approvalStatus === "APPROVED") {
+  if (approved) {
     dispatchDiscordSafely({
       kind: "approval",
       username: user.username,
@@ -207,7 +220,7 @@ export async function updateAdminUser(
 
   return ok(serializeAdminUser(
     user,
-    globalAdmin ? undefined : operatedMapIds
+    globalAdmin ? undefined : editableMapIds
   ));
 }
 

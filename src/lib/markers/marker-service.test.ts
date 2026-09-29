@@ -601,6 +601,42 @@ describe("marker service", () => {
     expect(updated).toEqual({ ok: false, error: "Note category does not exist on this map" });
   });
 
+  it("allows editing a note whose unchanged category no longer exists", async () => {
+    const note = {
+      category: "General",
+      text: "",
+      title: "Mine entrance",
+      type: "note",
+      x: 25,
+      y: 30
+    };
+    const created = await createMarker({ actor: writer, input: note, mapId: "map-1" }, deps);
+    expect(created.ok).toBe(true);
+
+    if (!created.ok) {
+      return;
+    }
+
+    // The note's category has since vanished from the map.
+    deps.noteCategoryExists = async () => false;
+
+    const updated = await updateMarker({
+      actor: writer,
+      input: { ...note, title: "Renamed entrance" },
+      markerId: created.value.id,
+      markerType: "note"
+    }, deps);
+    expect(updated).toMatchObject({ ok: true, value: { category: "General", title: "Renamed entrance" } });
+
+    const recategorized = await updateMarker({
+      actor: writer,
+      input: { ...note, category: "Landmarks" },
+      markerId: created.value.id,
+      markerType: "note"
+    }, deps);
+    expect(recategorized).toEqual({ ok: false, error: "Note category does not exist on this map" });
+  });
+
   it("records a MARKER_READ authorization failure when listing is denied", async () => {
     const result = await listMarkers({ actor: reader, mapId: "map-2" }, deps);
 

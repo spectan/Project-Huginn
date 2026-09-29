@@ -3,7 +3,7 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
 import { findActiveMap } from "@/lib/markers/database";
 import { fetchOfficialEventFeed, getOfficialFeedUrl } from "@/lib/events/event-feed";
-import { listEventsForMap } from "@/lib/events/database";
+import { EVENT_FEED_DISPLAY_LIMIT, listEventsForMap } from "@/lib/events/database";
 import type { WurmMapsEventFeed } from "@/lib/wurmmaps/event-feed";
 
 type RouteContext = {
@@ -52,7 +52,7 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 
   const feed: WurmMapsEventFeed = {
-    events: freshFeed.events.map((event) => ({
+    events: freshFeed.events.slice(0, EVENT_FEED_DISPLAY_LIMIT).map((event) => ({
       id: event.id,
       kind: "event",
       label: "Event",

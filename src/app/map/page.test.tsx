@@ -253,7 +253,7 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.4.0")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.4.1")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
@@ -438,6 +438,160 @@ describe("MapPage", () => {
     }));
     const settingsCall = fetchMock.mock.calls.find(([url]) => url === "/api/maps/map-1/settings");
     expect(JSON.parse(String(settingsCall?.[1]?.body))).toMatchObject({ searchLinesEnabled: true });
+  });
+
+  it("sends a large pending settings save without keepalive when the page is hidden", () => {
+    const fetchMock = stubEventFeedFetch(0);
+    const annotations = Array.from({ length: 40 }, (_, index) => ({
+      id: `annotation-${index}`,
+      text: "x".repeat(2000),
+      title: `Waypoint ${index}`,
+      type: "annotation" as const,
+      x: 10 + index,
+      y: 10
+    }));
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      initialSettings: { ...DEFAULT_USER_MAP_SETTINGS, annotations },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
+    window.dispatchEvent(new Event("pagehide"));
+
+    const settingsCall = fetchMock.mock.calls.find(([url]) => url === "/api/maps/map-1/settings");
+    expect(settingsCall?.[1]).toMatchObject({ method: "PATCH" });
+    expect(settingsCall?.[1]?.keepalive).toBeUndefined();
+  });
+
+  it("sends settings saves one at a time, in order", async () => {
+    let resolveFirstSave: (response: Response) => void = () => undefined;
+    const settingsBodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) !== "/api/maps/map-1/settings") {
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+
+      settingsBodies.push(JSON.parse(String(init?.body)));
+
+      if (settingsBodies.length === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstSave = resolve;
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
+    await waitFor(() => expect(settingsBodies).toHaveLength(1));
+
+    fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(settingsBodies).toHaveLength(1);
+
+    resolveFirstSave(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await waitFor(() => expect(settingsBodies).toHaveLength(2));
+    expect(settingsBodies[0]).toMatchObject({ searchLinesEnabled: true });
+    expect(settingsBodies[1]).toMatchObject({ searchLinesEnabled: false });
+  });
+
+  it("reports a settings save the server rejected", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => (
+      String(input) === "/api/maps/map-1/settings"
+        ? new Response(JSON.stringify({ error: "Too many annotations" }), { status: 400 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 })
+    )));
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
+
+    expect(await screen.findByText("Too many annotations")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss settings error" }));
+    expect(screen.queryByText("Too many annotations")).toBeNull();
+  });
+
+  it("blocks creating an annotation past the server cap", async () => {
+    const fetchMock = stubEventFeedFetch(0);
+    const annotations = Array.from({ length: 500 }, (_, index) => ({
+      id: `annotation-${index}`,
+      text: "",
+      title: `Waypoint ${index}`,
+      type: "annotation" as const,
+      x: 1000 + (index % 20),
+      y: 1000 + Math.floor(index / 20)
+    }));
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialSettings: { ...DEFAULT_USER_MAP_SETTINGS, annotations },
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.contextMenu(stage, {
+      clientX: 125,
+      clientY: 140
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Annotation" }));
+    expect(screen.getByLabelText("Title").getAttribute("maxlength")).toBe("120");
+    expect(screen.getByLabelText("Text").getAttribute("maxlength")).toBe("2000");
+    fireEvent.change(screen.getByLabelText("Title"), {
+      target: { value: "One too many" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("You can keep at most 500 annotations; delete one to add another")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Annotation One too many at 125, 140" })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/maps/map-1/settings", expect.anything());
+  });
+
+  it("ignores horizontal wheel scrolls and scales zoom by the wheel delta", async () => {
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("1"));
+
+    fireEvent.wheel(stage, { clientX: 512, clientY: 512, deltaX: 80, deltaY: 0 });
+    expect(stage.dataset.zoom).toBe("1");
+
+    // A small trackpad delta zooms less than a full mouse-wheel notch.
+    fireEvent.wheel(stage, { clientX: 512, clientY: 512, deltaY: -50 });
+    await waitFor(() => expect(Number(stage.dataset.zoom)).toBeGreaterThan(1));
+    expect(Number(stage.dataset.zoom)).toBeLessThan(1.2);
   });
 
   it("resizes the event feed from a top corner while bottom-aligned", () => {
@@ -6142,6 +6296,31 @@ describe("MapPage", () => {
     fireEvent.click(categoryControls.getByRole("button", { name: "Save Landmarks category" }));
 
     expect(await categoryControls.findByText("Note category could not be saved")).toBeTruthy();
+  });
+
+  it("shows the server's error when a note category is rejected", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => (
+      String(input).includes("/note-categories")
+        ? new Response(JSON.stringify({ error: "Category name is too long" }), { status: 400 })
+        : new Response(JSON.stringify({ ok: true }), { status: 200 })
+    )));
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const categoryControls = expandNoteCategories();
+    fireEvent.click(categoryControls.getByRole("button", { name: "Add note category" }));
+    const nameInput = categoryControls.getByLabelText("New note category name");
+    expect(nameInput.getAttribute("maxlength")).toBe("80");
+    fireEvent.change(nameInput, { target: { value: "Quarry" } });
+    fireEvent.click(categoryControls.getByRole("button", { name: "Create note category" }));
+
+    expect(await categoryControls.findByText("Category name is too long")).toBeTruthy();
   });
 
   it("deletes an existing marker from its context menu", async () => {
