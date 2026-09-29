@@ -20,7 +20,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
 
   const { id } = await context.params;
-  const result = await deleteAlert(id);
+  const result = await deleteAlert(id, viewer.id);
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: 404 });

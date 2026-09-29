@@ -38,6 +38,8 @@ type MapSettingsOverlayProps = {
   tileHighlight: TileHighlightSettings;
   viewerCanWrite: boolean;
   viewerIsAdmin: boolean;
+  // Resolves once any debounced settings save has reached the server, so profile snapshots are current.
+  onFlushPendingSettings?(): Promise<void>;
   onLoadSettings(settings: UserMapSettings): void;
   onMarkerColorsChange(colors: MarkerColors): void;
   onMarkerOpacitiesChange(opacities: MarkerOpacities): void;
@@ -76,6 +78,7 @@ export function MapSettingsOverlay({
   tileHighlight,
   viewerCanWrite,
   viewerIsAdmin,
+  onFlushPendingSettings,
   onLoadSettings,
   onMarkerColorsChange,
   onMarkerOpacitiesChange,
@@ -474,7 +477,11 @@ export function MapSettingsOverlay({
               />
             </fieldset>
           </div>
-          <ProfileSettings mapId={mapId} onLoadSettings={onLoadSettings} />
+          <ProfileSettings
+            mapId={mapId}
+            onFlushPendingSettings={onFlushPendingSettings}
+            onLoadSettings={onLoadSettings}
+          />
           <div className="map-settings-actions">
             <button
               className="map-settings-default"
@@ -535,7 +542,7 @@ type MapSettingsProfileSummary = {
 };
 
 const PROFILE_SLOTS = [0, 1, 2] as const;
-const MAX_PROFILE_NAME_LENGTH = 60;
+const MAX_PROFILE_NAME_LENGTH = 40;
 
 function MapConfirmDialog({
   confirmLabel,
@@ -601,9 +608,11 @@ function MapConfirmDialog({
 
 function ProfileSettings({
   mapId,
+  onFlushPendingSettings,
   onLoadSettings
 }: {
   mapId: string;
+  onFlushPendingSettings?(): Promise<void>;
   onLoadSettings(settings: UserMapSettings): void;
 }) {
   const [profiles, setProfiles] = useState<MapSettingsProfileSummary[] | null>(null);
@@ -662,6 +671,8 @@ function ProfileSettings({
     const trimmedName = name.trim().slice(0, MAX_PROFILE_NAME_LENGTH);
 
     try {
+      // The server snapshots the stored settings, so push any debounced change first.
+      await onFlushPendingSettings?.();
       const response = await fetch(`${profilesUrl}/${slot}`, {
         body: JSON.stringify(trimmedName.length > 0 ? { name: trimmedName } : {}),
         headers: { "content-type": "application/json" },
@@ -678,7 +689,7 @@ function ProfileSettings({
     } catch {
       setError("Profile could not be saved");
     }
-  }, [profilesUrl, refreshProfiles]);
+  }, [onFlushPendingSettings, profilesUrl, refreshProfiles]);
 
   const renameProfile = useCallback(async (slot: number, name: string) => {
     const trimmedName = name.trim().slice(0, MAX_PROFILE_NAME_LENGTH);
@@ -856,6 +867,27 @@ function NoteCategorySettings({
   const [isAdding, setIsAdding] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const handleUpdate = useCallback(async (categoryId: string, input: NoteCategoryFormInput) => {
+    setCategoryError(null);
+    const category = await onUpdate(categoryId, input);
+
+    if (category === null) {
+      setCategoryError("Note category could not be saved");
+    }
+
+    return category;
+  }, [onUpdate]);
+  const handleDelete = useCallback(async (categoryId: string) => {
+    setCategoryError(null);
+    const deleted = await onDelete(categoryId);
+
+    if (!deleted) {
+      setCategoryError("Note category could not be deleted");
+    }
+
+    return deleted;
+  }, [onDelete]);
 
   return (
     <fieldset className="map-layer-controls map-note-category-controls">
@@ -878,10 +910,10 @@ function NoteCategorySettings({
               viewerCanWrite={viewerCanWrite}
               viewerIsAdmin={viewerIsAdmin}
               onColorChange={onColorChange}
-              onDelete={onDelete}
+              onDelete={handleDelete}
               onMarkerShapeChange={onMarkerShapeChange}
               onPipSizeChange={onPipSizeChange}
-              onUpdate={onUpdate}
+              onUpdate={handleUpdate}
             />
           ))}
           {viewerCanWrite ? (
@@ -891,13 +923,17 @@ function NoteCategorySettings({
                   className="map-note-category-add-form"
                   onSubmit={(event: FormEvent<HTMLFormElement>) => {
                     event.preventDefault();
+                    setCategoryError(null);
                     void onCreate({
                       name: newCategoryName
                     }).then((category) => {
-                      if (category !== null) {
-                        setNewCategoryName("");
-                        setIsAdding(false);
+                      if (category === null) {
+                        setCategoryError("Note category could not be created");
+                        return;
                       }
+
+                      setNewCategoryName("");
+                      setIsAdding(false);
                     });
                   }}
                 >
@@ -918,6 +954,7 @@ function NoteCategorySettings({
               )}
             </div>
           ) : null}
+          {categoryError !== null ? <p className="map-note-category-error" role="alert">{categoryError}</p> : null}
         </>
       ) : null}
     </fieldset>

@@ -12,8 +12,6 @@ if (!password.ok) {
   process.exit(1);
 }
 
-const passwordHash = await argon2.hash(password.value);
-
 const servers = [
   {
     heightPx: 2048,
@@ -161,33 +159,32 @@ const servers = [
   }
 ];
 
-const maxWatermark = await prisma.user.findFirst({
-  orderBy: { watermarkNumber: "desc" },
-  select: { watermarkNumber: true }
+const maxWatermark = await prisma.user.aggregate({
+  _max: { watermarkNumber: true }
 });
-const nextWatermarkNumber = (maxWatermark?.watermarkNumber ?? 0) + 1;
+const nextWatermarkNumber = (maxWatermark._max.watermarkNumber ?? 0) + 1;
 
-await prisma.user.upsert({
-  create: {
-    accessLevel: "WRITE",
-    approvalStatus: "APPROVED",
-    approvedAt: new Date(),
-    isAdmin: true,
-    passwordHash,
-    username,
-    watermarkNumber: nextWatermarkNumber
-  },
-  update: {
-    accessLevel: "WRITE",
-    approvalStatus: "APPROVED",
-    approvedAt: new Date(),
-    isAdmin: true,
-    passwordHash
-  },
-  where: {
-    username
-  }
+// Create the admin on first run only. Re-running the seed must not reset an
+// existing admin's password (or re-grant admin to a deliberately demoted
+// account).
+const existingAdmin = await prisma.user.findUnique({
+  select: { id: true },
+  where: { username }
 });
+
+if (existingAdmin === null) {
+  await prisma.user.create({
+    data: {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      approvedAt: new Date(),
+      isAdmin: true,
+      passwordHash: await argon2.hash(password.value),
+      username,
+      watermarkNumber: nextWatermarkNumber
+    }
+  });
+}
 
 // Backfill a watermark number for the admin if it predates watermarking.
 await prisma.user.updateMany({

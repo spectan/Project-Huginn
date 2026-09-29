@@ -3,21 +3,31 @@ import { PrismaClient } from "@prisma/client";
 const BATCH_LIMIT = 100;
 const prisma = new PrismaClient();
 
+// Every soft-deletable marker table. `markerType` matches what the app writes
+// into audit metadata; paths use their stored pathType (bridge, canal, ...).
+const MARKER_MODELS = [
+  { countKey: "tower", markerType: "tower", model: "tower", targetType: "TOWER" },
+  { countKey: "deed", markerType: "deed", model: "deed", targetType: "DEED" },
+  { countKey: "note", markerType: "note", model: "note", targetType: "NOTE" },
+  { countKey: "rift", markerType: "rift", model: "rift", targetType: "RIFT" },
+  { countKey: "camp", markerType: "camp", model: "camp", targetType: "CAMP" },
+  { countKey: "minedoor", markerType: "minedoor", model: "minedoor", targetType: "MINEDOOR" },
+  { countKey: "locateSoul", markerType: "locateSoul", model: "locateSoul", targetType: "LOCATE_SOUL" },
+  { countKey: "path", markerType: null, model: "pathMarker", targetType: "PATH" }
+];
+
 async function main() {
   const now = new Date();
-  const towerCount = await cleanupTowers(now);
-  const deedCount = await cleanupDeeds(now);
-  const noteCount = await cleanupNotes(now);
-  const shareLinkCount = await cleanupShareLinks(now);
+  const deletedCounts = {};
 
-  console.log(JSON.stringify({
-    deletedCounts: {
-      deed: deedCount,
-      note: noteCount,
-      shareLink: shareLinkCount,
-      tower: towerCount
-    }
-  }));
+  for (const config of MARKER_MODELS) {
+    deletedCounts[config.countKey] = await cleanupMarkers(config, now);
+  }
+
+  deletedCounts.shareLink = await cleanupShareLinks(now);
+  deletedCounts.session = await cleanupSessions(now);
+
+  console.log(JSON.stringify({ deletedCounts }));
 }
 
 async function cleanupShareLinks(now) {
@@ -30,110 +40,94 @@ async function cleanupShareLinks(now) {
   return deleted.count;
 }
 
-async function cleanupTowers(now) {
-  const markers = await prisma.tower.findMany({
-    orderBy: { deleteExpiresAt: "asc" },
-    select: {
-      id: true,
-      mapId: true
-    },
-    take: BATCH_LIMIT,
+async function cleanupSessions(now) {
+  const deleted = await prisma.session.deleteMany({
     where: {
-      deletedAt: { not: null },
-      deleteExpiresAt: { lte: now }
+      expiresAt: { lte: now }
     }
   });
-
-  return cleanupMarkers({
-    deleteOperation: prisma.tower.deleteMany.bind(prisma.tower),
-    markerType: "tower",
-    now,
-    records: markers,
-    targetType: "TOWER"
-  });
-}
-
-async function cleanupDeeds(now) {
-  const markers = await prisma.deed.findMany({
-    orderBy: { deleteExpiresAt: "asc" },
-    select: {
-      id: true,
-      mapId: true
-    },
-    take: BATCH_LIMIT,
-    where: {
-      deletedAt: { not: null },
-      deleteExpiresAt: { lte: now }
-    }
-  });
-
-  return cleanupMarkers({
-    deleteOperation: prisma.deed.deleteMany.bind(prisma.deed),
-    markerType: "deed",
-    now,
-    records: markers,
-    targetType: "DEED"
-  });
-}
-
-async function cleanupNotes(now) {
-  const markers = await prisma.note.findMany({
-    orderBy: { deleteExpiresAt: "asc" },
-    select: {
-      id: true,
-      mapId: true
-    },
-    take: BATCH_LIMIT,
-    where: {
-      deletedAt: { not: null },
-      deleteExpiresAt: { lte: now }
-    }
-  });
-
-  return cleanupMarkers({
-    deleteOperation: prisma.note.deleteMany.bind(prisma.note),
-    markerType: "note",
-    now,
-    records: markers,
-    targetType: "NOTE"
-  });
-}
-
-async function cleanupMarkers({
-  deleteOperation,
-  markerType,
-  now,
-  records,
-  targetType
-}) {
-  if (records.length === 0) {
-    return 0;
-  }
-
-  const ids = records.map((record) => record.id);
-  const auditEvents = records.map((record) => ({
-    action: "MARKER_CLEANED_UP",
-    actorUserId: null,
-    mapId: record.mapId,
-    metadata: {
-      cleanedAt: now.toISOString(),
-      markerType
-    },
-    targetId: record.id,
-    targetType
-  }));
-  const [deleted] = await prisma.$transaction([
-    deleteOperation({
-      where: {
-        id: { in: ids }
-      }
-    }),
-    prisma.auditEvent.createMany({
-      data: auditEvents
-    })
-  ]);
 
   return deleted.count;
+}
+
+function expiredWhere(now) {
+  return {
+    deletedAt: { not: null },
+    deleteExpiresAt: { lte: now }
+  };
+}
+
+// Purges expired soft-deleted markers of one type in batches, writing one
+// MARKER_CLEANED_UP audit per purged row.
+async function cleanupMarkers({ markerType, model, targetType }, now) {
+  let total = 0;
+
+  for (;;) {
+    const records = await prisma[model].findMany({
+      orderBy: { deleteExpiresAt: "asc" },
+      select: {
+        id: true,
+        mapId: true,
+        ...(markerType === null ? { pathType: true } : {})
+      },
+      take: BATCH_LIMIT,
+      where: expiredWhere(now)
+    });
+
+    if (records.length === 0) {
+      break;
+    }
+
+    total += await purgeBatch({ markerType, model, now, records, targetType });
+
+    if (records.length < BATCH_LIMIT) {
+      break;
+    }
+  }
+
+  return total;
+}
+
+async function purgeBatch({ markerType, model, now, records, targetType }) {
+  const ids = records.map((record) => record.id);
+
+  return prisma.$transaction(async (transaction) => {
+    // Re-check the expiry so a marker restored since the read is kept.
+    const deleted = await transaction[model].deleteMany({
+      where: {
+        ...expiredWhere(now),
+        id: { in: ids }
+      }
+    });
+
+    if (deleted.count === 0) {
+      return 0;
+    }
+
+    const remaining = deleted.count === ids.length
+      ? new Set()
+      : new Set((await transaction[model].findMany({
+          select: { id: true },
+          where: { id: { in: ids } }
+        })).map((record) => record.id));
+    const purged = records.filter((record) => !remaining.has(record.id));
+
+    await transaction.auditEvent.createMany({
+      data: purged.map((record) => ({
+        action: "MARKER_CLEANED_UP",
+        actorUserId: null,
+        mapId: record.mapId,
+        metadata: {
+          cleanedAt: now.toISOString(),
+          markerType: markerType ?? record.pathType
+        },
+        targetId: record.id,
+        targetType
+      }))
+    });
+
+    return deleted.count;
+  });
 }
 
 main()

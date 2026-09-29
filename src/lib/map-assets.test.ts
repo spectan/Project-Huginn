@@ -39,7 +39,7 @@ const mapAssets = [
 
 describe("server map assets", () => {
   it.each(mapAssets)("includes $file as a $width x $height PNG", ({ file, height, width }) => {
-    const bytes = readFileSync(join(process.cwd(), "public", "maps", file));
+    const bytes = readFileSync(join(process.cwd(), "map-images", "maps", file));
 
     expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
     expect(bytes.readUInt32BE(16)).toBe(width);

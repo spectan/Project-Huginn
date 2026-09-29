@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
     mapPermissions?: readonly [{ accessLevel: "WRITE"; isOperator: false; mapId: string }];
   },
   map: null as null | { id: string },
-  noteCategoryUpsert: vi.fn(async (input: unknown) => {
+  noteCategoryCreate: vi.fn(async (input: unknown) => {
     void input;
 
     return {
@@ -19,6 +19,17 @@ const mocks = vi.hoisted(() => ({
       markerShape: "circle",
       name: "Landmarks",
       pipSize: 3
+    };
+  }),
+  noteCategoryFindUnique: vi.fn(async (input: unknown) => {
+    void input;
+
+    return null as null | {
+      color: string | null;
+      id: string;
+      markerShape: string;
+      name: string;
+      pipSize: number;
     };
   })
 }));
@@ -38,8 +49,9 @@ vi.mock("@/lib/db/prisma", () => ({
       ))
     },
     noteCategory: {
+      create: mocks.noteCategoryCreate,
       findMany: vi.fn(async () => []),
-      upsert: mocks.noteCategoryUpsert
+      findUnique: mocks.noteCategoryFindUnique
     }
   }
 }));
@@ -67,7 +79,7 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
 
     await expect(response.json()).resolves.toEqual({ error: "Write access is required" });
     expect(response.status).toBe(403);
-    expect(mocks.noteCategoryUpsert).not.toHaveBeenCalled();
+    expect(mocks.noteCategoryCreate).not.toHaveBeenCalled();
   });
 
   it("allows approved writers to create note categories by shared name only", async () => {
@@ -95,18 +107,71 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
       }
     });
     expect(response.status).toBe(201);
-    expect(mocks.noteCategoryUpsert).toHaveBeenCalledWith(expect.objectContaining({
-      create: expect.objectContaining({
+    expect(mocks.noteCategoryCreate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
         name: "Landmarks"
       })
     }));
-    const upsertInput = mocks.noteCategoryUpsert.mock.calls[0]?.[0] as { create?: unknown } | undefined;
-    expect(upsertInput?.create).not.toHaveProperty("color");
-    expect(upsertInput?.create).not.toHaveProperty("markerShape");
-    expect(upsertInput?.create).not.toHaveProperty("pipSize");
+    const createInput = mocks.noteCategoryCreate.mock.calls[0]?.[0] as { data?: unknown } | undefined;
+    expect(createInput?.data).not.toHaveProperty("color");
+    expect(createInput?.data).not.toHaveProperty("markerShape");
+    expect(createInput?.data).not.toHaveProperty("pipSize");
+    expect(mocks.auditCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("returns 404 instead of upserting categories for inactive or missing maps", async () => {
+  it("returns 200 without a created audit when the category already exists", async () => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      id: "admin-1",
+      isAdmin: true
+    };
+    mocks.noteCategoryFindUnique.mockResolvedValueOnce({
+      color: "#ff0000",
+      id: "category-existing",
+      markerShape: "square",
+      name: "Landmarks",
+      pipSize: 4
+    });
+
+    const response = await POST(createCategoryRequest({ name: "Landmarks" }), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ category: { id: "category-existing" } });
+    expect(mocks.noteCategoryCreate).not.toHaveBeenCalled();
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 200 without a created audit when a concurrent request created the category", async () => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      id: "admin-1",
+      isAdmin: true
+    };
+    mocks.noteCategoryCreate.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }));
+    mocks.noteCategoryFindUnique
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        color: null,
+        id: "category-raced",
+        markerShape: "circle",
+        name: "Landmarks",
+        pipSize: 3
+      });
+
+    const response = await POST(createCategoryRequest({ name: "Landmarks" }), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ category: { id: "category-raced" } });
+    expect(mocks.auditCreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 404 instead of creating categories for inactive or missing maps", async () => {
     mocks.currentViewer = {
       accessLevel: "WRITE",
       approvalStatus: "APPROVED",
@@ -121,7 +186,7 @@ describe("POST /api/maps/[mapId]/note-categories", () => {
 
     await expect(response.json()).resolves.toEqual({ error: "Map was not found" });
     expect(response.status).toBe(404);
-    expect(mocks.noteCategoryUpsert).not.toHaveBeenCalled();
+    expect(mocks.noteCategoryCreate).not.toHaveBeenCalled();
   });
 });
 

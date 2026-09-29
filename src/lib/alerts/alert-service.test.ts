@@ -58,9 +58,20 @@ type AlertFindFirstArgs = {
     actorUserId: string | null;
     createdAt: { gte: Date };
     mapId: string | null;
+    metadata?: { path: string[]; equals: string };
     rule: string;
     status: string;
   };
+};
+
+type AlertUpdateArgs = {
+  data: {
+    description: string;
+    metadata: unknown;
+    severity: string;
+    title: string;
+  };
+  where: { id: string };
 };
 
 type AlertCreateArgs = {
@@ -125,9 +136,24 @@ const mocks = vi.hoisted(() => {
         alert.mapId === args.where.mapId &&
         alert.rule === args.where.rule &&
         alert.status === args.where.status &&
-        alert.createdAt >= args.where.createdAt.gte
+        alert.createdAt >= args.where.createdAt.gte &&
+        (args.where.metadata === undefined ||
+          metadataClientIp(alert.metadata) === args.where.metadata.equals)
     ) ?? null;
   });
+
+  const alertUpdate = vi.fn(async (args: AlertUpdateArgs) => {
+    const alert = state.alerts.find((candidate) => candidate.id === args.where.id);
+
+    if (alert === undefined) {
+      throw Object.assign(new Error("Record to update not found."), { code: "P2025" });
+    }
+
+    Object.assign(alert, args.data, { updatedAt: new Date() });
+    return alert;
+  });
+
+  const executeRaw = vi.fn<(...args: unknown[]) => Promise<number>>(async () => 1);
 
   const alertCreate = vi.fn(async (args: AlertCreateArgs) => {
     const now = new Date();
@@ -157,8 +183,14 @@ const mocks = vi.hoisted(() => {
     return alert;
   });
 
+  const auditEventCreate = vi.fn(async (args: { data: unknown }) => args.data);
   const alertDelete = vi.fn(async (args: { where: { id: string } }) => {
     const index = state.alerts.findIndex((alert) => alert.id === args.where.id);
+
+    if (index === -1) {
+      throw Object.assign(new Error("Record to delete does not exist."), { code: "P2025" });
+    }
+
     const [removed] = state.alerts.splice(index, 1);
     return removed ?? null;
   });
@@ -172,26 +204,35 @@ const mocks = vi.hoisted(() => {
     alertDelete,
     alertFindFirst,
     alertFindUnique,
+    alertUpdate,
+    executeRaw,
+    auditEventCreate,
     auditEventFindFirst,
     auditEventFindMany,
     state
   };
 });
 
-vi.mock("@/lib/db/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/db/prisma", () => {
+  const client = {
+    $executeRaw: mocks.executeRaw,
+    $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(client)),
     alert: {
       create: mocks.alertCreate,
       delete: mocks.alertDelete,
       findFirst: mocks.alertFindFirst,
-      findUnique: mocks.alertFindUnique
+      findUnique: mocks.alertFindUnique,
+      update: mocks.alertUpdate
     },
     auditEvent: {
+      create: mocks.auditEventCreate,
       findFirst: mocks.auditEventFindFirst,
       findMany: mocks.auditEventFindMany
     }
-  }
-}));
+  };
+
+  return { prisma: client };
+});
 
 const discordMocks = vi.hoisted(() => ({
   dispatchDiscordNotification: vi.fn<(message: { kind: string }, deps: unknown) => Promise<{ ok: true; value: null }>>(
@@ -679,7 +720,7 @@ describe("detectAlerts", () => {
       expect(alerts).toHaveLength(1);
       expect(alerts[0]?.severity).toBe("MEDIUM");
       expect(alerts[0]?.title).toBe("Multiple registrations from 203.0.113.20");
-      expect(alerts[0]?.metadata).toEqual({ count: 3, windowMinutes: 60 });
+      expect(alerts[0]?.metadata).toEqual({ clientIp: "203.0.113.20", count: 3, windowMinutes: 60 });
     });
 
     it("does not alert below the 3 registration threshold", async () => {
@@ -876,6 +917,98 @@ describe("detectAlerts", () => {
       expect(mocks.state.alerts).toHaveLength(1);
     });
 
+    it("keys null-actor rules by client IP so another IP still alerts", async () => {
+      addEvents(5, {
+        action: "FAILED_LOGIN",
+        actor: null,
+        mapId: null,
+        metadata: { clientIp: "203.0.113.30" }
+      });
+      await detectAlerts();
+
+      addEvents(5, {
+        action: "FAILED_LOGIN",
+        actor: null,
+        mapId: null,
+        metadata: { clientIp: "203.0.113.31" }
+      });
+      const second = await detectAlerts();
+
+      expect(second.ok).toBe(true);
+
+      if (!second.ok) {
+        return;
+      }
+
+      expect(second.value.alerts.map((alert) => alert.title)).toEqual([
+        "Repeated authentication failures from 203.0.113.31"
+      ]);
+      expect(mocks.state.alerts.filter((alert) => alert.rule === "REPEATED_AUTH_FAILURES")).toHaveLength(2);
+    });
+
+    it("takes a per-dedup-key advisory lock inside a transaction", async () => {
+      addEvents(5, {
+        action: "FAILED_LOGIN",
+        actor: null,
+        mapId: null,
+        metadata: { clientIp: "203.0.113.32" }
+      });
+
+      await detectAlerts();
+
+      expect(mocks.executeRaw).toHaveBeenCalledTimes(1);
+      const [strings, key] = mocks.executeRaw.mock.calls[0] ?? [];
+      expect((strings as TemplateStringsArray).join("?")).toContain("pg_advisory_xact_lock(hashtext(?))");
+      expect(key).toBe("alert:REPEATED_AUTH_FAILURES:::203.0.113.32");
+    });
+
+    it("escalates an open alert when a more severe detection arrives and notifies again", async () => {
+      const fetchMock = vi.fn<(...args: unknown[]) => Promise<Response>>(async () => new Response("ok"));
+      vi.stubGlobal("fetch", fetchMock);
+      process.env.ALERT_WEBHOOK_URL = "https://hooks.example.com/alerts";
+
+      try {
+        addEvents(20, { action: "MARKER_DELETED" });
+        await detectAlerts();
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
+
+        addEvents(30, { action: "MARKER_DELETED" });
+        const second = await detectAlerts();
+
+        expect(second.ok).toBe(true);
+
+        if (!second.ok) {
+          return;
+        }
+
+        expect(mocks.state.alerts).toHaveLength(1);
+        expect(mocks.state.alerts[0]?.severity).toBe("HIGH");
+        expect(mocks.state.alerts[0]?.description).toBe("50 markers deleted in the last 15 minutes");
+        expect(second.value.alerts.map((alert) => alert.severity)).toEqual(["HIGH"]);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(2);
+
+        // Same severity again: still suppressed.
+        const third = await detectAlerts();
+        expect(third.ok && third.value.alerts).toEqual([]);
+      } finally {
+        vi.unstubAllGlobals();
+        delete process.env.ALERT_WEBHOOK_URL;
+      }
+    });
+
+    it("does not downgrade an open alert on a less severe detection", async () => {
+      mocks.state.alerts.push(seededAlert({ severity: "HIGH" }));
+      addEvents(20, { action: "MARKER_DELETED" });
+
+      const result = await detectAlerts();
+
+      expect(result.ok && result.value.alerts).toEqual([]);
+      expect(mocks.state.alerts[0]?.severity).toBe("HIGH");
+      expect(mocks.alertUpdate).not.toHaveBeenCalled();
+    });
+
     it("allows a new alert once the previous one is older than one hour", async () => {
       mocks.state.alerts.push(seededAlert({
         createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000)
@@ -996,6 +1129,52 @@ describe("detectAlerts", () => {
       });
     });
 
+    it("sends the webhook with a timeout signal", async () => {
+      addEvents(50, { action: "MARKER_DELETED" });
+
+      await detectAlerts();
+
+      const [, init] = fetchMock.mock.calls[0] ?? [];
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+    });
+
+    it("does not block or fail alert creation on a hanging or failing webhook", async () => {
+      fetchMock.mockImplementationOnce(() => new Promise<Response>(() => undefined));
+      addEvents(50, { action: "MARKER_DELETED" });
+
+      const result = await detectAlerts();
+
+      expect(result.ok && result.value.created).toBe(1);
+
+      fetchMock.mockRejectedValueOnce(new Error("network down"));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      addEvents(15, {
+        action: "FAILED_LOGIN",
+        actor: null,
+        mapId: null,
+        metadata: { clientIp: "203.0.113.40" }
+      });
+
+      const second = await detectAlerts();
+      await flushMicrotasks();
+
+      expect(second.ok && second.value.created).toBe(1);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("logs non-2xx webhook responses", async () => {
+      fetchMock.mockResolvedValueOnce(new Response("nope", { status: 500 }));
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      addEvents(50, { action: "MARKER_DELETED" });
+
+      await detectAlerts();
+      await flushMicrotasks();
+
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("HTTP 500"));
+      warn.mockRestore();
+    });
+
     it("does not post MEDIUM alerts", async () => {
       addEvents(20, { action: "MARKER_DELETED" });
 
@@ -1101,6 +1280,34 @@ describe("triggerAlertDetection", () => {
     }
   });
 
+  it("coalesces concurrent triggers into one in-flight run plus one rerun", async () => {
+    let releaseFirst: () => void = () => undefined;
+    mocks.auditEventFindMany.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () => resolve([]);
+        })
+    );
+
+    for (let index = 0; index < 5; index += 1) {
+      triggerAlertDetection();
+    }
+
+    await flushMicrotasks();
+    expect(mocks.auditEventFindMany).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(mocks.auditEventFindMany).toHaveBeenCalledTimes(2);
+
+    // Idle again: the next trigger starts a fresh run.
+    triggerAlertDetection();
+    await flushMicrotasks();
+    expect(mocks.auditEventFindMany).toHaveBeenCalledTimes(3);
+  });
+
   it("swallows detection failures instead of rejecting", async () => {
     mocks.state.failAuditFindMany = true;
 
@@ -1118,20 +1325,34 @@ describe("deleteAlert", () => {
     mocks.state.alerts = [];
   });
 
-  it("hard-deletes an existing alert", async () => {
+  it("hard-deletes an existing alert and audits the deletion", async () => {
     mocks.state.alerts.push(seededAlert({ id: "alert-x" }));
 
-    const result = await deleteAlert("alert-x");
+    const result = await deleteAlert("alert-x", "admin-1");
 
     expect(result).toEqual({ ok: true, value: null });
-    expect(mocks.alertDelete).toHaveBeenCalledWith({ where: { id: "alert-x" } });
+    expect(mocks.alertDelete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: "alert-x" } }));
     expect(mocks.state.alerts).toHaveLength(0);
+    expect(mocks.auditEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "ALERT_DELETED",
+        actorUserId: "admin-1",
+        targetId: "alert-x",
+        targetType: "SYSTEM"
+      })
+    });
   });
 
   it("returns an error when the alert does not exist", async () => {
-    const result = await deleteAlert("alert-missing");
+    const result = await deleteAlert("alert-missing", "admin-1");
 
     expect(result).toEqual({ ok: false, error: "Alert was not found" });
-    expect(mocks.alertDelete).not.toHaveBeenCalled();
+    expect(mocks.auditEventCreate).not.toHaveBeenCalled();
+  });
+
+  it("rethrows unexpected delete failures", async () => {
+    mocks.alertDelete.mockRejectedValueOnce(new Error("database unavailable"));
+
+    await expect(deleteAlert("alert-x", "admin-1")).rejects.toThrow("database unavailable");
   });
 });

@@ -3,7 +3,7 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
 import { findActiveMap } from "@/lib/markers/database";
 import { fetchOfficialEventFeed, getOfficialFeedUrl } from "@/lib/events/event-feed";
-import { listEventsForMap, upsertEvents } from "@/lib/events/database";
+import { listEventsForMap } from "@/lib/events/database";
 import type { WurmMapsEventFeed } from "@/lib/wurmmaps/event-feed";
 
 type RouteContext = {
@@ -50,11 +50,6 @@ export async function GET(_request: Request, context: RouteContext) {
   if (freshFeed === null) {
     return NextResponse.json({ error: "Event feed is unavailable" }, { status: 502 });
   }
-
-  await upsertEvents(
-    map.id,
-    freshFeed.events.map((event) => ({ message: event.message, timestamp: event.timestamp }))
-  );
 
   const feed: WurmMapsEventFeed = {
     events: freshFeed.events.map((event) => ({

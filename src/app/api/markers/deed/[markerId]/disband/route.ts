@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createMarkerDependencies } from "@/lib/markers/database";
+import { getMarkerErrorStatus } from "@/lib/markers/marker-errors";
 import { disbandDeedMarker } from "@/lib/markers/marker-service";
 import { getClientIp } from "@/lib/network/client-ip";
 
@@ -24,7 +25,7 @@ export async function POST(request: Request, context: RouteContext) {
   );
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    return NextResponse.json({ error: result.error }, { status: getMarkerErrorStatus(result.error) });
   }
 
   return NextResponse.json(result.value);

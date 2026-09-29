@@ -45,7 +45,7 @@ export type UserMapSettings = {
   tileHighlightPanelPosition: TileHighlightPanelPosition | null;
 };
 
-export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
+const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
   annotations: true,
   bridges: true,
   camps: true,
@@ -68,7 +68,7 @@ export const DEFAULT_MARKER_VISIBILITY: MarkerVisibility = {
   wildernessOverlay: false
 };
 
-export const DEFAULT_MARKER_COLORS: MarkerColors = {
+const DEFAULT_MARKER_COLORS: MarkerColors = {
   annotations: "#38bdf8",
   bridges: "#cc00cc",
   camps: "#facc15",
@@ -86,7 +86,7 @@ export const DEFAULT_MARKER_COLORS: MarkerColors = {
   wildernessOverlay: "#c000ff"
 };
 
-export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
+const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
   annotations: 50,
   bridges: 50,
   canals: 50,
@@ -102,7 +102,7 @@ export const DEFAULT_MARKER_OPACITIES: MarkerOpacities = {
   wildernessOverlay: 50
 };
 
-export const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
+const DEFAULT_TILE_HIGHLIGHT: TileHighlightSettings = {
   color: "#c000ff",
   opacity: 50,
   selection: ""
@@ -113,7 +113,7 @@ export const MIN_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
   width: 260
 };
 
-export const DEFAULT_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
+const DEFAULT_EVENT_FEED_PANEL_SIZE: EventFeedPanelSize = {
   height: 240,
   width: 320
 };
@@ -197,6 +197,10 @@ const MAX_STORED_PANEL_SIZE_PX = 10000;
 const MAX_ANNOTATION_TITLE_LENGTH = 120;
 const MAX_ANNOTATION_TEXT_LENGTH = 2000;
 const MAX_STORED_ANNOTATION_COORDINATE = 100000;
+/** Bounds on user-supplied collections stored in the settings JSON blob. */
+const MAX_ANNOTATIONS = 500;
+const MAX_NOTE_CATEGORY_ENTRIES = 200;
+const MAX_NOTE_CATEGORY_KEY_LENGTH = 80;
 
 export function parseUserMapSettings(input: unknown): UserMapSettings {
   return parseUserMapSettingsWithFallback(input, DEFAULT_USER_MAP_SETTINGS);
@@ -267,6 +271,10 @@ function parseAnnotations(input: unknown, fallback: UserAnnotation[]): UserAnnot
   const seenIds = new Set<string>();
 
   for (const entry of input) {
+    if (annotations.length >= MAX_ANNOTATIONS) {
+      break;
+    }
+
     if (!isRecord(entry)) {
       continue;
     }
@@ -346,7 +354,7 @@ function parseNoteCategoryColors(input: unknown, fallback: NoteCategoryColors): 
   const colors = { ...fallback };
 
   for (const [categoryId, value] of Object.entries(source)) {
-    if (categoryId.length === 0) {
+    if (!canStoreNoteCategoryKey(colors, categoryId)) {
       continue;
     }
 
@@ -368,7 +376,7 @@ function parseNoteCategoryMarkerShapes(
   const markerShapes = { ...fallback };
 
   for (const [categoryId, value] of Object.entries(source)) {
-    if (categoryId.length === 0) {
+    if (!canStoreNoteCategoryKey(markerShapes, categoryId)) {
       continue;
     }
 
@@ -387,7 +395,11 @@ function parseNoteCategoryPipSizes(input: unknown, fallback: NoteCategoryPipSize
   const pipSizes = { ...fallback };
 
   for (const [categoryId, value] of Object.entries(source)) {
-    if (categoryId.length === 0 || typeof value !== "number" || !Number.isFinite(value)) {
+    if (
+      !canStoreNoteCategoryKey(pipSizes, categoryId) ||
+      typeof value !== "number" ||
+      !Number.isFinite(value)
+    ) {
       continue;
     }
 
@@ -399,6 +411,18 @@ function parseNoteCategoryPipSizes(input: unknown, fallback: NoteCategoryPipSize
   }
 
   return pipSizes;
+}
+
+/**
+ * Category keys must be non-empty and short; a map holds at most
+ * MAX_NOTE_CATEGORY_ENTRIES keys (existing keys can always be updated).
+ */
+function canStoreNoteCategoryKey(target: Record<string, unknown>, categoryId: string): boolean {
+  if (categoryId.length === 0 || categoryId.length > MAX_NOTE_CATEGORY_KEY_LENGTH) {
+    return false;
+  }
+
+  return Object.hasOwn(target, categoryId) || Object.keys(target).length < MAX_NOTE_CATEGORY_ENTRIES;
 }
 
 function parseMarkerOpacities(input: unknown, fallback: MarkerOpacities): MarkerOpacities {

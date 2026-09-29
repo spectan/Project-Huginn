@@ -12,7 +12,18 @@ const mocks = vi.hoisted(() => ({
   riftCount: vi.fn(async () => 0),
   towerCount: vi.fn(async () => 1),
   userCount: vi.fn(async (args?: { where?: unknown }) => (args === undefined ? 9 : 3)),
-  viewer: null as null | { isAdmin: boolean }
+  redirect: vi.fn((href: string) => {
+    throw new Error(`NEXT_REDIRECT:${href}`);
+  }),
+  viewer: null as null | {
+    approvalStatus: "APPROVED" | "PENDING";
+    isAdmin: boolean;
+    mapPermissions?: { accessLevel: "READ"; isOperator: boolean; mapId: string }[];
+  }
+}));
+
+vi.mock("next/navigation", () => ({
+  redirect: mocks.redirect
 }));
 
 vi.mock("@/lib/auth/current-viewer", () => ({
@@ -41,7 +52,7 @@ describe("AdminDashboardPage", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.viewer = { isAdmin: true };
+    mocks.viewer = { approvalStatus: "APPROVED", isAdmin: true };
     fetchMock = vi.fn(async () => ({
       json: async () => ({ alerts: [] }),
       ok: true
@@ -110,8 +121,27 @@ describe("AdminDashboardPage", () => {
     expect(screen.queryByText("Pending accounts")).toBeNull();
   });
 
+  it("redirects operators who can manage accounts to the accounts page", async () => {
+    mocks.viewer = {
+      approvalStatus: "APPROVED",
+      isAdmin: false,
+      mapPermissions: [{ accessLevel: "READ", isOperator: true, mapId: "map-1" }]
+    };
+
+    await expect(AdminDashboardPage()).rejects.toThrow("NEXT_REDIRECT:/admin/accounts");
+    expect(mocks.userCount).not.toHaveBeenCalled();
+  });
+
+  it("renders access denied for unapproved admins", async () => {
+    mocks.viewer = { approvalStatus: "PENDING", isAdmin: true };
+
+    render(await AdminDashboardPage());
+
+    expect(screen.getByText("Admin access is required")).toBeTruthy();
+  });
+
   it("renders access denied for non-admin viewers", async () => {
-    mocks.viewer = { isAdmin: false };
+    mocks.viewer = { approvalStatus: "APPROVED", isAdmin: false };
 
     render(await AdminDashboardPage());
 

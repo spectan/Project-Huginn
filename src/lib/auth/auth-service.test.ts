@@ -21,28 +21,13 @@ vi.mock("@/lib/discord/database", () => ({
 }));
 
 import {
-  approveUser,
   changeOwnPassword,
   type AuthServiceDependencies,
   loginUser,
-  registerUser
+  registerUser,
+  TOO_MANY_ATTEMPTS_MESSAGE
 } from "./auth-service";
-
-const adminActor = {
-  accessLevel: "WRITE",
-  approvalStatus: "APPROVED",
-  id: "admin-id",
-  isAdmin: true,
-  username: "root"
-} as const;
-
-const nonAdminActor = {
-  accessLevel: "WRITE",
-  approvalStatus: "APPROVED",
-  id: "writer-id",
-  isAdmin: false,
-  username: "penny"
-} as const;
+import { createFailureRateLimiter } from "./failure-rate-limiter";
 
 type TestAuthServiceDependencies = AuthServiceDependencies & {
   __test: {
@@ -70,6 +55,10 @@ function createDependencies(): TestAuthServiceDependencies {
       token: `session-${userId}`
     }),
     createUser: async (data) => {
+      if (users.has(data.username.toLowerCase())) {
+        return null;
+      }
+
       const user = {
         accessLevel: "NONE" as const,
         approvalStatus: "PENDING" as const,
@@ -81,6 +70,7 @@ function createDependencies(): TestAuthServiceDependencies {
       users.set(data.username.toLowerCase(), user);
       return user;
     },
+    failureRateLimiter: createFailureRateLimiter(),
     findUserById: async (userId) => Array.from(users.values()).find((user) => user.id === userId) ?? null,
     findUserByUsername: async (username) => users.get(username.toLowerCase()) ?? null,
     hashPassword: async (password) => `hashed:${password}`,
@@ -98,21 +88,6 @@ function createDependencies(): TestAuthServiceDependencies {
       const updated = {
         ...user,
         passwordHash: input.passwordHash
-      };
-      users.set(user.username.toLowerCase(), updated);
-      return updated;
-    },
-    updateUserApproval: async (input) => {
-      const user = Array.from(users.values()).find((candidate) => candidate.id === input.userId);
-
-      if (user === undefined) {
-        return null;
-      }
-
-      const updated = {
-        ...user,
-        accessLevel: input.accessLevel,
-        approvalStatus: "APPROVED" as const
       };
       users.set(user.username.toLowerCase(), updated);
       return updated;
@@ -202,43 +177,91 @@ describe("auth service", () => {
     });
   });
 
-  it("approves pending users only for admins", async () => {
-    const registered = await registerUser({
+  it("reports a taken username when creation loses a registration race", async () => {
+    deps.findUserByUsername = async () => null;
+    deps.createUser = async () => null;
+
+    const result = await registerUser({
       password: "correct horse battery staple",
       username: "Mako"
     }, deps);
 
-    expect(registered.ok).toBe(true);
+    expect(result).toEqual({ ok: false, error: "Username is already registered" });
+  });
 
-    if (!registered.ok) {
-      return;
+  it("verifies against a dummy hash when the username does not exist", async () => {
+    const verifyPassword = vi.fn<(hash: string, password: string) => Promise<boolean>>(async () => false);
+    deps.verifyPassword = verifyPassword;
+
+    await loginUser({ password: "correct horse battery staple", username: "Ghost" }, deps);
+
+    expect(verifyPassword).toHaveBeenCalledTimes(1);
+    expect(verifyPassword.mock.calls[0]?.[0]).toMatch(/^\$argon2id\$/);
+  });
+
+  it("rate limits login failures per client IP without counting successful logins", async () => {
+    await registerUser({ password: "correct horse battery staple", username: "Mako" }, deps);
+
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      await loginUser({ password: "wrong horse battery staple", username: "Mako" }, deps, { clientIp: "203.0.113.1" });
     }
 
-    const blocked = await approveUser({
-      accessLevel: "READ",
-      actor: nonAdminActor,
-      userId: registered.value.viewer.id
-    }, deps);
+    await expect(loginUser(
+      { password: "correct horse battery staple", username: "Mako" },
+      deps,
+      { clientIp: "203.0.113.1" }
+    )).resolves.toMatchObject({ ok: true });
 
-    expect(blocked).toEqual({
-      ok: false,
-      error: "Admin access is required"
-    });
+    await loginUser({ password: "wrong horse battery staple", username: "Mako" }, deps, { clientIp: "203.0.113.1" });
 
-    const approved = await approveUser({
-      accessLevel: "WRITE",
-      actor: adminActor,
-      userId: registered.value.viewer.id
-    }, deps);
+    await expect(loginUser(
+      { password: "correct horse battery staple", username: "Mako" },
+      deps,
+      { clientIp: "203.0.113.1" }
+    )).resolves.toEqual({ ok: false, error: TOO_MANY_ATTEMPTS_MESSAGE });
+    await expect(loginUser(
+      { password: "correct horse battery staple", username: "Mako" },
+      deps,
+      { clientIp: "203.0.113.2" }
+    )).resolves.toMatchObject({ ok: true });
+  });
 
-    expect(approved).toMatchObject({
-      ok: true,
-      value: {
-        approvalStatus: "APPROVED",
-        permissions: "WRITE",
-        username: "Mako"
+  it("audits and rate limits wrong current passwords on self-service password changes", async () => {
+    const registered = await registerUser({ password: "correct horse battery staple", username: "Mako" }, deps);
+
+    if (!registered.ok) {
+      throw new Error("registration failed");
+    }
+
+    const attempt = (currentPassword: string) => changeOwnPassword({
+      actor: { id: registered.value.viewer.id },
+      currentSessionTokenHash: null,
+      input: {
+        confirmPassword: "new secure password",
+        currentPassword,
+        newPassword: "new secure password"
       }
+    }, deps);
+
+    await attempt("wrong horse battery staple");
+
+    expect(deps.__test.audits).toContainEqual({
+      action: "FAILED_LOGIN",
+      actorUserId: registered.value.viewer.id,
+      metadata: { attemptedAction: "USER_PASSWORD_CHANGED", username: "Mako" },
+      targetId: registered.value.viewer.id,
+      targetType: "USER"
     });
+
+    for (let count = 1; count < 10; count += 1) {
+      await attempt("wrong horse battery staple");
+    }
+
+    await expect(attempt("correct horse battery staple")).resolves.toEqual({
+      ok: false,
+      error: TOO_MANY_ATTEMPTS_MESSAGE
+    });
+    expect(deps.__test.passwordUpdates).toEqual([]);
   });
 
   it("changes the current user's password after verifying the current password", async () => {
@@ -391,34 +414,6 @@ describe("auth service alert detection triggers", () => {
     expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
   });
 
-  it("triggers alert detection after a failed admin authorization", async () => {
-    const result = await approveUser({
-      accessLevel: "READ",
-      actor: nonAdminActor,
-      userId: "user-1"
-    }, deps);
-
-    expect(result).toEqual({ ok: false, error: "Admin access is required" });
-    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
-  });
-
-  it("triggers alert detection after approving a user", async () => {
-    await registerUser({
-      password: "correct horse battery staple",
-      username: "Mako"
-    }, deps);
-    mocks.triggerAlertDetection.mockClear();
-
-    const result = await approveUser({
-      accessLevel: "READ",
-      actor: adminActor,
-      userId: "user-1"
-    }, deps);
-
-    expect(result.ok).toBe(true);
-    expect(mocks.triggerAlertDetection).toHaveBeenCalledTimes(1);
-  });
-
   it("triggers alert detection after a password change", async () => {
     const registered = await registerUser({
       password: "correct horse battery staple",
@@ -503,38 +498,6 @@ describe("auth service discord dispatch", () => {
     expect(discordMocks.dispatchDiscordNotification).not.toHaveBeenCalled();
   });
 
-  it("dispatches an approval notification with the approved user and acting admin", async () => {
-    await registerUser({
-      password: "correct horse battery staple",
-      username: "Mako"
-    }, deps);
-    discordMocks.dispatchDiscordNotification.mockClear();
-
-    const result = await approveUser({
-      accessLevel: "READ",
-      actor: adminActor,
-      userId: "user-1"
-    }, deps);
-
-    expect(result.ok).toBe(true);
-    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledTimes(1);
-    expect(discordMocks.dispatchDiscordNotification).toHaveBeenCalledWith(
-      { kind: "approval", username: "Mako", actorUsername: "root" },
-      expect.anything()
-    );
-  });
-
-  it("does not dispatch an approval notification for non-admin actors", async () => {
-    const result = await approveUser({
-      accessLevel: "READ",
-      actor: nonAdminActor,
-      userId: "user-1"
-    }, deps);
-
-    expect(result.ok).toBe(false);
-    expect(discordMocks.dispatchDiscordNotification).not.toHaveBeenCalled();
-  });
-
   it("does not let a synchronous dispatch failure break registration", async () => {
     discordMocks.dispatchDiscordNotification.mockImplementationOnce(() => {
       throw new Error("discord module exploded");
@@ -543,25 +506,6 @@ describe("auth service discord dispatch", () => {
     const result = await registerUser({
       password: "correct horse battery staple",
       username: "Mako"
-    }, deps);
-
-    expect(result.ok).toBe(true);
-  });
-
-  it("does not let a synchronous dispatch failure break approval", async () => {
-    await registerUser({
-      password: "correct horse battery staple",
-      username: "Mako"
-    }, deps);
-    discordMocks.dispatchDiscordNotification.mockClear();
-    discordMocks.dispatchDiscordNotification.mockImplementationOnce(() => {
-      throw new Error("discord module exploded");
-    });
-
-    const result = await approveUser({
-      accessLevel: "READ",
-      actor: adminActor,
-      userId: "user-1"
     }, deps);
 
     expect(result.ok).toBe(true);

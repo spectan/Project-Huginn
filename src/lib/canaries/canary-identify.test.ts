@@ -66,12 +66,12 @@ describe("extractMarkerSignals", () => {
     expect(signals.ids).toContain("cljk3m2n90000abcd1234");
   });
 
-  it("extracts 25-char hex canary ids from non-JSON text", () => {
-    const text = "leaked marker 0123456789abcdef012345678 dumped";
+  it("extracts cuid-shaped canary ids from non-JSON text", () => {
+    const text = "leaked marker c0123456789abcdefghijklmn dumped";
 
     const signals = extractMarkerSignals(text);
 
-    expect(signals.ids).toContain("0123456789abcdef012345678");
+    expect(signals.ids).toEqual(["c0123456789abcdefghijklmn"]);
   });
 
   it("dedupes coordinate styles overlapping in non-JSON text", () => {

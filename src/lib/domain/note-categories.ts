@@ -10,7 +10,7 @@ export const MIN_NOTE_CATEGORY_PIP_SIZE = 1;
 export const MAX_NOTE_CATEGORY_PIP_SIZE = 10;
 export const DEFAULT_NOTE_CATEGORY_NAME = "General";
 
-export type NoteCategoryInput = {
+type NoteCategoryInput = {
   name: string;
 };
 
@@ -30,7 +30,7 @@ export function validateNoteCategoryInput(input: unknown): Result<NoteCategoryIn
   });
 }
 
-export function normalizeCategoryName(input: unknown): string | null {
+function normalizeCategoryName(input: unknown): string | null {
   if (typeof input !== "string") {
     return null;
   }

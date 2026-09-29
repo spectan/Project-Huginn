@@ -47,7 +47,7 @@ A shared, web-based mapping utility for Wurm Online. Project Huginn lets communi
 
 ### Account and Access Control
 
-- Local account registration with bcrypt-hashed passwords.
+- Local account registration with argon2-hashed passwords.
 - Admin approval workflow for new accounts.
 - Per-map read or write permissions managed from the admin panel.
 - User settings persisted per account, including layer colors, opacities, and favorites.
@@ -155,7 +155,11 @@ INITIAL_ADMIN_PASSWORD=<strong-admin-password>
 POSTGRES_URL=postgresql://wurm:<long-random-password>@db:5432/wurm_map_util
 ```
 
-Store sensitive values securely. The application reads environment variables from `.env` at build time and runtime through Docker Compose.
+Store sensitive values securely. The application reads environment variables from `.env` at build time and runtime through Docker Compose. `INITIAL_ADMIN_PASSWORD` is only passed to the one-off `seed` service, not to the running app container.
+
+### Map Images
+
+Raw map layer images live in `map-images/maps/` (outside `public/`) and are only served through `/api/maps/[mapId]/image`, which watermarks them per user. Database `imagePath` values such as `/maps/xanadu-terrain.png` resolve relative to `map-images/`. Only the water masks (`*-water-mask.png`) and the background `wurm-map.png` remain in `public/maps/`. Regenerate water masks with `node scripts/generate-water-masks.mjs`.
 
 ### Build the Production Image
 
@@ -175,7 +179,7 @@ Build the image, start the database, run migrations, seed the admin account, and
 docker compose build app
 docker compose up -d db
 docker compose run --rm app npm run db:migrate
-docker compose run --rm app npm run seed:admin
+docker compose run --rm seed
 docker compose up -d app
 ```
 
@@ -191,7 +195,7 @@ Expected response:
 {"status":"ok"}
 ```
 
-Log in with the initial admin username and password configured in `.env`.
+Log in with the initial admin username and password configured in `.env`. Re-running the seed never changes an existing admin account's password or role; after the first deploy you can remove `INITIAL_ADMIN_PASSWORD` from `.env`.
 
 ## Update Deploy
 
@@ -203,6 +207,8 @@ docker compose build app
 docker compose run --rm app npm run db:migrate
 docker compose up -d --force-recreate app
 ```
+
+Upgrading from a release that served map layers from `public/maps/`: the layer images moved to `map-images/maps/` (they were publicly downloadable without a watermark). No database migration is needed, but if you added custom layer images to `public/maps/`, move them to `map-images/maps/` before rebuilding. The rebuilt image drops them from the public static files.
 
 Verify the deployment:
 
@@ -264,7 +270,7 @@ npm run test:watch                  # Run tests in watch mode
 npm run verify                      # Run typecheck, lint, test, and build
 npm run db:migrate                  # Deploy Prisma migrations
 npm run db:push                     # Push schema changes without migration files
-npm run seed:admin                  # Create the initial admin account
+npm run seed:admin                  # Create the initial admin account (existing accounts are left unchanged)
 npm run cleanup:deleted-markers     # Remove soft-deleted markers older than 72 hours
 ```
 

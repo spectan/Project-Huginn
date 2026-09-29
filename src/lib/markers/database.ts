@@ -46,14 +46,33 @@ export function createMarkerDependencies(clientIp?: string): MarkerServiceDepend
     createTower: async (input) => prisma.tower.create({ data: input, include: markerUserRelations }).then(normalizeTowerRecord),
     disbandDeed: async (input) => prisma.$transaction(async (transaction) => {
       const deed = await transaction.deed.findFirst({
-        where: { deletedAt: null, id: input.deedId }
+        where: { ...liveMarkerWhere(input.deedId), mapId: input.note.mapId }
       });
 
-      if (deed === null || deed.mapId !== input.note.mapId) {
+      if (deed === null) {
         return null;
       }
 
-      const existingCategory = await transaction.noteCategory.findUnique({
+      // Claim the deed first so a concurrent disband/delete cannot also succeed.
+      const claimed = await transaction.deed.updateMany({
+        data: {
+          deletedAt: input.deletedAt,
+          deletedByUserId: input.actorUserId,
+          deleteExpiresAt: input.deleteExpiresAt
+        },
+        where: { deletedAt: null, id: deed.id }
+      });
+
+      if (claimed.count === 0) {
+        return null;
+      }
+
+      const category = await transaction.noteCategory.upsert({
+        create: {
+          mapId: deed.mapId,
+          name: input.categoryName
+        },
+        update: {},
         where: {
           mapId_name: {
             mapId: deed.mapId,
@@ -61,22 +80,12 @@ export function createMarkerDependencies(clientIp?: string): MarkerServiceDepend
           }
         }
       });
-      const category = existingCategory ?? await transaction.noteCategory.create({
-        data: {
-          mapId: deed.mapId,
-          name: input.categoryName
-        }
-      });
       const note = await transaction.note.create({
         data: input.note,
         include: markerUserRelations
       });
       const deletedDeed = await transaction.deed.update({
-        data: {
-          deletedAt: input.deletedAt,
-          deletedByUserId: input.actorUserId,
-          deleteExpiresAt: input.deleteExpiresAt
-        },
+        data: { disbandNoteId: note.id },
         where: { id: deed.id }
       });
 
@@ -84,15 +93,15 @@ export function createMarkerDependencies(clientIp?: string): MarkerServiceDepend
     }),
     findCamp: async (id) => prisma.camp.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }),
     findDeed: async (id) => prisma.deed.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }),
     findLocateSoul: async (id) => prisma.locateSoul.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }),
     findMap: async (mapId) => prisma.map.findFirst({
       include: mapWithLayers,
@@ -100,23 +109,23 @@ export function createMarkerDependencies(clientIp?: string): MarkerServiceDepend
     }),
     findMinedoor: async (id) => prisma.minedoor.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }),
     findNote: async (id) => prisma.note.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }),
     findPath: async (id) => prisma.pathMarker.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }).then((path) => path === null ? null : normalizePathRecord(path)),
     findRift: async (id) => prisma.rift.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }),
     findTower: async (id) => prisma.tower.findFirst({
       include: { map: true, ...markerUserRelations },
-      where: { deletedAt: null, id }
+      where: liveMarkerWhere(id)
     }).then((tower) => tower === null ? null : normalizeTowerRecord(tower)),
     listActiveMarkers: async (mapId) => {
       const [towers, deeds, notes, rifts, camps, minedoors, locateSouls, paths] = await Promise.all([
@@ -173,6 +182,12 @@ export function createMarkerDependencies(clientIp?: string): MarkerServiceDepend
         towers: towers.map(normalizeTowerRecord)
       };
     },
+    noteCategoryExists: async (mapId, name) => (
+      await prisma.noteCategory.findUnique({
+        select: { id: true },
+        where: { mapId_name: { mapId, name } }
+      })
+    ) !== null,
     now: () => new Date(),
     recordAudit: async (input) => {
       const metadata = clientIp !== undefined && clientIp.length > 0
@@ -189,122 +204,98 @@ export function createMarkerDependencies(clientIp?: string): MarkerServiceDepend
         }
       });
     },
-    softDeleteCamp: async (id, input) => {
-      const existing = await prisma.camp.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.camp.update({ data: input, where: { id } });
-    },
-    softDeleteDeed: async (id, input) => {
-      const existing = await prisma.deed.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.deed.update({ data: input, where: { id } });
-    },
-    softDeleteNote: async (id, input) => {
-      const existing = await prisma.note.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.note.update({ data: input, where: { id } });
-    },
-    softDeleteMinedoor: async (id, input) => {
-      const existing = await prisma.minedoor.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.minedoor.update({ data: input, where: { id } });
-    },
-    softDeleteLocateSoul: async (id, input) => {
-      const existing = await prisma.locateSoul.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.locateSoul.update({ data: input, where: { id } });
-    },
-    softDeletePath: async (id, input) => {
-      const existing = await prisma.pathMarker.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.pathMarker.update({ data: input, where: { id } }).then(normalizePathRecord);
-    },
-    softDeleteRift: async (id, input) => {
-      const existing = await prisma.rift.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.rift.update({ data: input, where: { id } });
-    },
-    softDeleteTower: async (id, input) => {
-      const existing = await prisma.tower.findFirst({ where: { deletedAt: null, id } });
-
-      if (existing === null) {
-        return null;
-      }
-
-      return prisma.tower.update({ data: input, where: { id } }).then(normalizeTowerRecord);
-    },
-    updateDeed: async (id, input) => prisma.deed.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }),
-    updateCamp: async (id, input) => prisma.camp.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }),
-    updateMinedoor: async (id, input) => prisma.minedoor.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }),
-    updateLocateSoul: async (id, input) => prisma.locateSoul.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }),
-    updateNote: async (id, input) => prisma.note.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }),
-    updatePath: async (id, input) => prisma.pathMarker.update({
-      data: {
-        ...input,
-        points: input.points as Prisma.InputJsonValue
-      },
-      include: markerUserRelations,
-      where: { id }
-    }).then(normalizePathRecord),
-    updateRift: async (id, input) => prisma.rift.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }),
-    updateTower: async (id, input) => prisma.tower.update({
-      data: input,
-      include: markerUserRelations,
-      where: { id }
-    }).then(normalizeTowerRecord)
+    softDeleteCamp: async (id, input) => writeIfLive(
+      prisma.camp.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.camp.findUnique({ where: { id } })
+    ),
+    softDeleteDeed: async (id, input) => writeIfLive(
+      prisma.deed.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.deed.findUnique({ where: { id } })
+    ),
+    softDeleteNote: async (id, input) => writeIfLive(
+      prisma.note.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.note.findUnique({ where: { id } })
+    ),
+    softDeleteMinedoor: async (id, input) => writeIfLive(
+      prisma.minedoor.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.minedoor.findUnique({ where: { id } })
+    ),
+    softDeleteLocateSoul: async (id, input) => writeIfLive(
+      prisma.locateSoul.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.locateSoul.findUnique({ where: { id } })
+    ),
+    softDeletePath: async (id, input) => writeIfLive(
+      prisma.pathMarker.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.pathMarker.findUnique({ where: { id } })
+        .then((path) => path === null ? null : normalizePathRecord(path))
+    ),
+    softDeleteRift: async (id, input) => writeIfLive(
+      prisma.rift.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.rift.findUnique({ where: { id } })
+    ),
+    softDeleteTower: async (id, input) => writeIfLive(
+      prisma.tower.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.tower.findUnique({ where: { id } })
+        .then((tower) => tower === null ? null : normalizeTowerRecord(tower))
+    ),
+    updateDeed: async (id, input) => writeIfLive(
+      prisma.deed.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.deed.findUnique({ include: markerUserRelations, where: { id } })
+    ),
+    updateCamp: async (id, input) => writeIfLive(
+      prisma.camp.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.camp.findUnique({ include: markerUserRelations, where: { id } })
+    ),
+    updateMinedoor: async (id, input) => writeIfLive(
+      prisma.minedoor.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.minedoor.findUnique({ include: markerUserRelations, where: { id } })
+    ),
+    updateLocateSoul: async (id, input) => writeIfLive(
+      prisma.locateSoul.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.locateSoul.findUnique({ include: markerUserRelations, where: { id } })
+    ),
+    updateNote: async (id, input) => writeIfLive(
+      prisma.note.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.note.findUnique({ include: markerUserRelations, where: { id } })
+    ),
+    updatePath: async (id, input) => writeIfLive(
+      prisma.pathMarker.updateMany({
+        data: {
+          ...input,
+          points: input.points as Prisma.InputJsonValue
+        },
+        where: { deletedAt: null, id }
+      }),
+      () => prisma.pathMarker.findUnique({ include: markerUserRelations, where: { id } })
+        .then((path) => path === null ? null : normalizePathRecord(path))
+    ),
+    updateRift: async (id, input) => writeIfLive(
+      prisma.rift.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.rift.findUnique({ include: markerUserRelations, where: { id } })
+    ),
+    updateTower: async (id, input) => writeIfLive(
+      prisma.tower.updateMany({ data: input, where: { deletedAt: null, id } }),
+      () => prisma.tower.findUnique({ include: markerUserRelations, where: { id } })
+        .then((tower) => tower === null ? null : normalizeTowerRecord(tower))
+    )
   };
+}
+
+// Live markers are not soft-deleted and sit on an active map.
+function liveMarkerWhere(id: string) {
+  return { deletedAt: null, id, map: { isActive: true } };
+}
+
+// Conditional write: only rows still live are touched, so a concurrent
+// delete/update race resolves to exactly one winner. Returns null when the
+// row was no longer live, otherwise re-reads it.
+async function writeIfLive<T>(
+  write: Promise<{ count: number }>,
+  reread: () => Promise<T | null>
+): Promise<T | null> {
+  const { count } = await write;
+
+  return count === 0 ? null : reread();
 }
 
 function normalizeTowerRecord<T extends { towerType: string }>(

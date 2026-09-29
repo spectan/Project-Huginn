@@ -10,6 +10,9 @@ const querySchema = z.object({
   status: z.enum(["OPEN", "ACKNOWLEDGED", "RESOLVED"]).optional()
 });
 
+/** Manual detection may look back at most this far (bounds the audit scan). */
+const MAX_DETECTION_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+
 const bodySchema = z.object({
   since: z.string().datetime().optional(),
   until: z.string().datetime().optional()
@@ -76,7 +79,7 @@ export async function POST(request: Request) {
   }
 
   const result = await detectAlerts({
-    since: parsed.data.since === undefined ? undefined : new Date(parsed.data.since),
+    since: parsed.data.since === undefined ? undefined : clampSince(new Date(parsed.data.since)),
     until: parsed.data.until === undefined ? undefined : new Date(parsed.data.until)
   });
 
@@ -88,4 +91,10 @@ export async function POST(request: Request) {
     alerts: result.value.alerts,
     created: result.value.created
   });
+}
+
+function clampSince(since: Date): Date {
+  const earliest = Date.now() - MAX_DETECTION_LOOKBACK_MS;
+
+  return since.getTime() < earliest ? new Date(earliest) : since;
 }

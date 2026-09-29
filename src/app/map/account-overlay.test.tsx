@@ -72,7 +72,7 @@ describe("AccountOverlay", () => {
     expect(within(permissionsGroup).queryByText("Defiance")).toBeNull();
     expect(within(permissionsGroup).queryByText("Admin")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(screen.getByText("Project Huginn - v1.3.9")).toBeTruthy();
+    expect(screen.getByText("Project Huginn - v1.4.0")).toBeTruthy();
     expect(screen.queryByRole("checkbox", { name: "Overlays" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Towers" })).toBeNull();
     expect(screen.queryByRole("checkbox", { name: "Deeds" })).toBeNull();
@@ -114,6 +114,21 @@ describe("AccountOverlay", () => {
     expect(screen.queryByRole("link", { name: "Reveal watermark" })).toBeNull();
     expect(screen.queryByText("Manage accounts")).toBeNull();
     expect(screen.queryByLabelText("Access for Mako")).toBeNull();
+  });
+
+  it("links operators to the accounts administration page", () => {
+    renderAccountOverlay({
+      approvalStatus: "APPROVED",
+      isAdmin: false,
+      mapPermissions: [{ accessLevel: "WRITE", isOperator: true, mapId: "map-celebration" }],
+      pendingApprovalCount: 0,
+      permissions: "WRITE",
+      username: "Operator"
+    }, [{ id: "map-celebration", name: "Celebration" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Operator" }));
+
+    expect(screen.getByRole("link", { name: "Administration" }).getAttribute("href")).toBe("/admin/accounts");
   });
 
   it("lets authenticated users change their own password from the account dropdown", async () => {

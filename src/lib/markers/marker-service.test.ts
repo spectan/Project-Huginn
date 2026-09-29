@@ -416,6 +416,11 @@ function createDependencies(): MarkerServiceDependencies & { auditEvents: unknow
       rifts: Array.from(rifts.values()).filter((rift) => rift.mapId === mapId),
       towers: Array.from(towers.values()).filter((tower) => tower.mapId === mapId)
     }),
+    noteCategoryExists: async (mapId, name) => (
+      name === "General" ||
+      name === "Landmarks" ||
+      Array.from(noteCategories.values()).some((category) => category.mapId === mapId && category.name === name)
+    ),
     listCanaryMarkers: async ({ mapId, userId }) => (
       Array.from(canaries.values())
         .filter((canary) => canary.mapId === mapId && canary.userId === userId)
@@ -561,6 +566,117 @@ describe("marker service", () => {
 
   beforeEach(() => {
     deps = createDependencies();
+  });
+
+  it("rejects notes whose category does not exist on the map", async () => {
+    const note = {
+      category: "Nonexistent",
+      text: "",
+      title: "Mine entrance",
+      type: "note",
+      x: 25,
+      y: 30
+    };
+
+    const created = await createMarker({ actor: writer, input: note, mapId: "map-1" }, deps);
+    expect(created).toEqual({ ok: false, error: "Note category does not exist on this map" });
+
+    const valid = await createMarker({
+      actor: writer,
+      input: { ...note, category: "General" },
+      mapId: "map-1"
+    }, deps);
+    expect(valid.ok).toBe(true);
+
+    if (!valid.ok) {
+      return;
+    }
+
+    const updated = await updateMarker({
+      actor: writer,
+      input: note,
+      markerId: valid.value.id,
+      markerType: "note"
+    }, deps);
+    expect(updated).toEqual({ ok: false, error: "Note category does not exist on this map" });
+  });
+
+  it("records a MARKER_READ authorization failure when listing is denied", async () => {
+    const result = await listMarkers({ actor: reader, mapId: "map-2" }, deps);
+
+    expect(result).toEqual({ ok: false, error: "Read access is required" });
+    expect(deps.auditEvents).toEqual([
+      expect.objectContaining({
+        action: "FAILED_AUTHORIZATION",
+        metadata: { attemptedAction: "MARKER_READ" }
+      })
+    ]);
+  });
+
+  it("treats a path deleted under a different path type as not found", async () => {
+    const created = await createMarker({
+      actor: writer,
+      input: {
+        name: "Bridge",
+        notes: "",
+        points: [{ x: 10, y: 10 }, { x: 20, y: 20 }],
+        type: "bridge",
+        width: 1
+      },
+      mapId: "map-1"
+    }, deps);
+
+    expect(created.ok).toBe(true);
+
+    if (!created.ok) {
+      return;
+    }
+
+    const deleted = await deleteMarker({
+      actor: writer,
+      markerId: created.value.id,
+      markerType: "canal"
+    }, deps);
+
+    expect(deleted).toEqual({ ok: false, error: "Marker was not found" });
+    expect(deps.auditEvents).toHaveLength(1);
+  });
+
+  it("writes one delete audit when a concurrent delete wins the race", async () => {
+    await createMarker({
+      actor: writer,
+      input: {
+        damage: "",
+        makerName: "",
+        makerNumber: "",
+        ql: "",
+        type: "tower",
+        x: 25,
+        y: 30
+      },
+      mapId: "map-1"
+    }, deps);
+    const softDeleteTower = deps.softDeleteTower;
+    let softDeleteCalls = 0;
+    // Both requests see the live marker, but only the first conditional write matches.
+    deps.softDeleteTower = async (id, input) => {
+      softDeleteCalls += 1;
+      return softDeleteCalls === 1 ? softDeleteTower(id, input) : null;
+    };
+    const findTower = deps.findTower;
+    const snapshot = await findTower("tower-1");
+    deps.findTower = async () => snapshot;
+
+    const results = await Promise.all([
+      deleteMarker({ actor: writer, markerId: "tower-1", markerType: "tower" }, deps),
+      deleteMarker({ actor: writer, markerId: "tower-1", markerType: "tower" }, deps)
+    ]);
+
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect(results.filter((result) => !result.ok)).toEqual([{ ok: false, error: "Marker was not found" }]);
+    expect(deps.auditEvents.filter((event) => (
+      (event as { action: string }).action === "MARKER_DELETED"
+    ))).toHaveLength(1);
   });
 
   it("creates a tower marker for approved writers", async () => {

@@ -3,11 +3,12 @@ import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { identifyCanaryLeaks } from "@/lib/canaries/canary-identify-service";
 import { createCanaryDependencies } from "@/lib/canaries/database";
 import { prisma } from "@/lib/db/prisma";
+import { canViewAuditLog } from "@/lib/domain/permissions";
 
 export async function POST(request: Request) {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !viewer.isAdmin) {
+  if (viewer === null || !canViewAuditLog(viewer)) {
     return NextResponse.json({ error: "Admin access is required" }, { status: 403 });
   }
 

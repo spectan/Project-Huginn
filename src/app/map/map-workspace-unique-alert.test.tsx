@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import MapWorkspace from "./map-workspace";
@@ -161,6 +161,31 @@ describe("MapWorkspace unique-alive alert", () => {
     expect(screen.getByRole("status").textContent).toContain(
       "Potentially a unique alive — last slain 15 days ago"
     );
+  });
+
+  it("appears in a long-lived tab once the respawn window passes", () => {
+    vi.useFakeTimers({ now: Date.now() });
+
+    try {
+      render(React.createElement(MapWorkspace, {
+        initialMarkers: [],
+        lastUniqueSlainAt: new Date(Date.now() - 14 * DAY_MS + 30 * 1000).toISOString(),
+        map: activeMap,
+        viewer: approvedViewer
+      }));
+
+      expect(screen.queryByRole("status")).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(60 * 1000);
+      });
+
+      expect(screen.getByRole("status").textContent).toContain(
+        "Potentially a unique alive — last slain 14 days ago"
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reappears for the never-slain message once a real slain has aged out", () => {

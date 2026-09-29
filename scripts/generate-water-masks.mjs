@@ -5,7 +5,10 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const MAPS_DIR = path.join(__dirname, "..", "public", "maps");
+// Source layer images are kept outside public/ (only served watermarked);
+// the generated masks are loaded directly by the client from public/maps.
+const SOURCE_MAPS_DIR = path.join(__dirname, "..", "map-images", "maps");
+const MASKS_DIR = path.join(__dirname, "..", "public", "maps");
 
 function isWaterPixel(r, g, b) {
   if (r === 0 && g === 0 && b === 0) return true;
@@ -51,16 +54,16 @@ async function generateWaterMask(topoPath, outputPath) {
 }
 
 async function main() {
-  const files = fs.readdirSync(MAPS_DIR)
-    .filter(f => f.endsWith(".png") && !f.endsWith("-water-mask.png") && f !== "wurm-map.png")
+  const files = fs.readdirSync(SOURCE_MAPS_DIR)
+    .filter(f => f.endsWith(".png") && !f.endsWith("-water-mask.png"))
     .sort();
 
   console.log(`Found ${files.length} map images\n`);
 
   for (const file of files) {
-    const mapPath = path.join(MAPS_DIR, file);
+    const mapPath = path.join(SOURCE_MAPS_DIR, file);
     const maskName = file.replace(".png", "-water-mask.png");
-    const outputPath = path.join(MAPS_DIR, maskName);
+    const outputPath = path.join(MASKS_DIR, maskName);
 
     try {
       await generateWaterMask(mapPath, outputPath);

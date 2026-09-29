@@ -31,6 +31,9 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
+# Raw map layer images: read by the watermarking image route, never served
+# statically (they are outside public/).
+COPY --from=builder /app/map-images ./map-images
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/scripts ./scripts

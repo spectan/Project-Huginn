@@ -25,13 +25,13 @@ type SettingsProfileRecord = {
   updatedAt: Date;
 };
 
-export type SettingsProfileSummary = {
+type SettingsProfileSummary = {
   name: string;
   slot: number;
   updatedAt: Date;
 };
 
-export type SettingsProfile = {
+type SettingsProfile = {
   name: string;
   settings: UserMapSettings;
   slot: number;
@@ -45,6 +45,20 @@ export type UserMapSettingsDependencies = {
     settings: UserMapSettings;
     userId: string;
   }): Promise<UserMapSettingsRecord>;
+};
+
+type UserMapSettingsStore = Pick<UserMapSettingsDependencies, "findSettings" | "upsertSettings">;
+
+/**
+ * Saving merges into the stored settings, so the read-merge-write must be
+ * serialized per (user, map): withSettingsLock runs `work` in a transaction
+ * holding a lock on that pair, handing it a store bound to the transaction.
+ */
+export type SaveUserMapSettingsDependencies = UserMapSettingsDependencies & {
+  withSettingsLock<T>(
+    input: { mapId: string; userId: string },
+    work: (store: UserMapSettingsStore) => Promise<T>
+  ): Promise<T>;
 };
 
 // Profiles belong to the user, not a map, so the same slots follow them across servers.
@@ -64,9 +78,9 @@ export type SettingsProfilesDependencies = UserMapSettingsDependencies & {
   }): Promise<SettingsProfileRecord>;
 };
 
-export const MIN_PROFILE_SLOT = 0;
-export const MAX_PROFILE_SLOT = 2;
-export const MAX_PROFILE_NAME_LENGTH = 40;
+const MIN_PROFILE_SLOT = 0;
+const MAX_PROFILE_SLOT = 2;
+const MAX_PROFILE_NAME_LENGTH = 40;
 
 export async function getUserMapSettings(
   input: { actor: Actor; mapId: string },
@@ -88,7 +102,7 @@ export async function getUserMapSettings(
 
 export async function saveUserMapSettings(
   input: { actor: Actor; input: unknown; mapId: string },
-  dependencies: UserMapSettingsDependencies
+  dependencies: SaveUserMapSettingsDependencies
 ): Promise<Result<UserMapSettings>> {
   if (!canReadMap(input.actor, input.mapId)) {
     return err("Read access is required");
@@ -100,16 +114,22 @@ export async function saveUserMapSettings(
     return err("Map was not found");
   }
 
-  const current = await dependencies.findSettings(input.actor.id, map.id);
-  const mergedSettings = mergeUserMapSettingsInput(
-    parseUserMapSettings(current?.settings ?? null),
-    input.input
+  const saved = await dependencies.withSettingsLock(
+    { mapId: map.id, userId: input.actor.id },
+    async (store) => {
+      const current = await store.findSettings(input.actor.id, map.id);
+      const mergedSettings = mergeUserMapSettingsInput(
+        parseUserMapSettings(current?.settings ?? null),
+        input.input
+      );
+
+      return store.upsertSettings({
+        mapId: map.id,
+        settings: mergedSettings,
+        userId: input.actor.id
+      });
+    }
   );
-  const saved = await dependencies.upsertSettings({
-    mapId: map.id,
-    settings: mergedSettings,
-    userId: input.actor.id
-  });
 
   return ok(parseUserMapSettings(saved.settings));
 }
@@ -141,7 +161,7 @@ export async function listSettingsProfiles(
 export async function saveSettingsProfile(
   input: { actor: Actor; mapId: string; name?: unknown; slot: number },
   dependencies: SettingsProfilesDependencies
-): Promise<Result<SettingsProfileSummary>> {
+): Promise<Result<SettingsProfileSummary & { created: boolean }>> {
   if (!canReadMap(input.actor, input.mapId)) {
     return err("Read access is required");
   }
@@ -170,6 +190,10 @@ export async function saveSettingsProfile(
     return err(settings.error);
   }
 
+  // Only used to report created vs. overwritten; a concurrent save of the
+  // same slot can at worst misreport this flag, never lose data.
+  const existing = await dependencies.findProfile(input.actor.id, slotResult.value);
+
   // Annotations carry map coordinates, so they stay with the map rather than the profile.
   const saved = await dependencies.upsertProfile({
     name: nameResult.value,
@@ -179,6 +203,7 @@ export async function saveSettingsProfile(
   });
 
   return ok({
+    created: existing === null,
     name: saved.name,
     slot: saved.slot,
     updatedAt: saved.updatedAt

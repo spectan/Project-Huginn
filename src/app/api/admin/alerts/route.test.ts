@@ -142,23 +142,38 @@ describe("POST /api/admin/alerts", () => {
   });
 
   it("runs detection with the requested range", async () => {
+    const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const until = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const response = await POST(new Request("http://localhost/api/admin/alerts", {
       body: JSON.stringify({
-        since: "2026-05-09T00:00:00.000Z",
-        until: "2026-05-10T00:00:00.000Z"
+        since: since.toISOString(),
+        until: until.toISOString()
       }),
       method: "POST"
     }));
 
     expect(response.status).toBe(200);
-    expect(mocks.detectAlerts).toHaveBeenCalledWith({
-      since: new Date("2026-05-09T00:00:00.000Z"),
-      until: new Date("2026-05-10T00:00:00.000Z")
-    });
+    expect(mocks.detectAlerts).toHaveBeenCalledWith({ since, until });
 
     const body = await response.json() as { alerts: unknown[]; created: number };
     expect(body.created).toBe(1);
     expect(body.alerts).toHaveLength(1);
+  });
+
+  it("clamps since to at most 7 days back", async () => {
+    const before = Date.now();
+    const response = await POST(new Request("http://localhost/api/admin/alerts", {
+      body: JSON.stringify({ since: "1970-01-01T00:00:00.000Z" }),
+      method: "POST"
+    }));
+
+    expect(response.status).toBe(200);
+
+    const input = mocks.detectAlerts.mock.calls[0]?.[0] as { since: Date; until: undefined };
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    expect(input.since.getTime()).toBeGreaterThanOrEqual(before - sevenDaysMs);
+    expect(input.since.getTime()).toBeLessThanOrEqual(Date.now() - sevenDaysMs);
+    expect(input.until).toBeUndefined();
   });
 
   it("runs detection with defaults when the body is empty", async () => {

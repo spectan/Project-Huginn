@@ -26,6 +26,18 @@ const USER_SELECT = {
 
 export function createAdminUserDependencies(clientIp?: string): AdminUserDependencies {
   return {
+    deleteShareLinksOutsideMaps: async ({ keepMapIds, userId }) => {
+      await prisma.shareLink.deleteMany({
+        where: {
+          createdByUserId: userId,
+          mapId: { notIn: Array.from(keepMapIds) }
+        }
+      });
+    },
+    findUser: async (userId) => prisma.user.findUnique({
+      select: USER_SELECT,
+      where: { id: userId }
+    }),
     hashPassword: async (password) => argon2.hash(password),
     listMaps: async () => prisma.map.findMany({
       orderBy: { name: "asc" },
@@ -35,13 +47,14 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
       },
       where: { isActive: true }
     }),
+    // Unbounded on purpose: the accounts page lists every account of a small
+    // community, and a silent cap would hide accounts past the limit.
     listUsers: async () => prisma.user.findMany({
       orderBy: [
         { approvalStatus: "asc" },
         { username: "asc" }
       ],
-      select: USER_SELECT,
-      take: 100
+      select: USER_SELECT
     }),
     recordAudit: async (input) => {
       const metadata = clientIp !== undefined && clientIp.length > 0
@@ -57,16 +70,7 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
         }
       });
     },
-    removeUser: async ({ userId }) => {
-      const existingUser = await prisma.user.findUnique({
-        select: USER_SELECT,
-        where: { id: userId }
-      });
-
-      if (existingUser === null) {
-        return null;
-      }
-
+    removeUser: async ({ userId }) => nullIfRecordNotFound(async () => {
       const [, deletedUser] = await prisma.$transaction([
         prisma.session.deleteMany({
           where: { userId }
@@ -78,17 +82,8 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
       ]);
 
       return deletedUser;
-    },
-    updateUserPassword: async ({ passwordHash, userId }) => {
-      const existingUser = await prisma.user.findUnique({
-        select: { id: true },
-        where: { id: userId }
-      });
-
-      if (existingUser === null) {
-        return null;
-      }
-
+    }),
+    updateUserPassword: async ({ passwordHash, userId }) => nullIfRecordNotFound(async () => {
       const [, updatedUser] = await prisma.$transaction([
         prisma.session.deleteMany({
           where: { userId }
@@ -101,18 +96,27 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
       ]);
 
       return updatedUser;
-    },
-    updateUserPrivileges: async ({ approvedByUserId, isAdmin, mapPermissions, userId }) => {
-      const existingUser = await prisma.user.findUnique({
-        select: { id: true },
-        where: { id: userId }
-      });
+    }),
+    updateUserPrivileges: async ({ approvedByUserId, isAdmin, mapPermissions, userId }) => nullIfRecordNotFound(async () => (
+      prisma.$transaction(async (transaction) => {
+        // Update the user row first so a concurrently deleted user fails with
+        // P2025 before any permission rows are touched.
+        await transaction.user.update({
+          data: {
+            accessLevel: "NONE",
+            isAdmin,
+            ...(approvedByUserId === null
+              ? {}
+              : {
+                  approvalStatus: "APPROVED" as const,
+                  approvedAt: new Date(),
+                  approvedByUserId
+                })
+          },
+          select: { id: true },
+          where: { id: userId }
+        });
 
-      if (existingUser === null) {
-        return null;
-      }
-
-      return prisma.$transaction(async (transaction) => {
         await transaction.userMapPermission.deleteMany({
           where: {
             userId,
@@ -143,18 +147,30 @@ export function createAdminUserDependencies(clientIp?: string): AdminUserDepende
           });
         }
 
-        return transaction.user.update({
-          data: {
-            accessLevel: "NONE",
-            approvalStatus: "APPROVED",
-            approvedAt: new Date(),
-            approvedByUserId,
-            isAdmin
-          },
+        return transaction.user.findUniqueOrThrow({
           select: USER_SELECT,
           where: { id: userId }
         });
-      });
-    }
+      })
+    ))
   };
+}
+
+async function nullIfRecordNotFound<T>(operation: () => Promise<T>): Promise<T | null> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (isRecordNotFoundError(error)) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+function isRecordNotFoundError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2025";
 }

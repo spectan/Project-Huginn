@@ -198,6 +198,6 @@ export function parseHexRgb(value: string): RgbColor {
   };
 }
 
-export function packRgb(color: RgbColor): number {
+function packRgb(color: RgbColor): number {
   return (color.r << 16) | (color.g << 8) | color.b;
 }

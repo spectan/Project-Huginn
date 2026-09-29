@@ -35,11 +35,19 @@ export async function POST(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error },
-      { status: result.error === "Admin access is required" ? 403 : 400 }
+      { status: getRestoreErrorStatus(result.error) }
     );
   }
 
   return NextResponse.json({ restored: result.value });
+}
+
+function getRestoreErrorStatus(error: string): 400 | 403 | 404 {
+  if (error === "Admin access is required") {
+    return 403;
+  }
+
+  return error === "Deleted marker was not found" ? 404 : 400;
 }
 
 function parseMarkerType(value: string): MarkerType | null {

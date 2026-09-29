@@ -17,6 +17,7 @@ type Actor = UserAccess & {
 
 type DeletedMarkerAuditAction =
   | "FAILED_AUTHORIZATION"
+  | "MARKER_DELETED"
   | "MARKER_RESTORED";
 
 type DeletedMarkerAuditTarget = "TOWER" | "DEED" | "NOTE" | "RIFT" | "CAMP" | "MINEDOOR" | "LOCATE_SOUL" | "PATH" | "SYSTEM";
@@ -36,6 +37,24 @@ type DeletedMarkerReference = {
   deleteExpiresAt: Date;
   id: string;
   mapId: string;
+};
+
+type RestoredMarker = {
+  id: string;
+  mapId: string;
+  x: number;
+  y: number;
+};
+
+type RetiredNote = {
+  id: string;
+  x: number;
+  y: number;
+};
+
+type RestoreInput = {
+  now: Date;
+  updatedByUserId: string;
 };
 
 type DeletedMarkerRecordBase = {
@@ -103,7 +122,7 @@ export type DeletedMarkerDependencies = {
   findDeletedLocateSoul(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedMinedoor(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedNote(id: string): Promise<DeletedMarkerReference | null>;
-  findDeletedPath(id: string): Promise<DeletedMarkerReference | null>;
+  findDeletedPath(id: string, pathType: PathMarkerType): Promise<DeletedMarkerReference | null>;
   findDeletedRift(id: string): Promise<DeletedMarkerReference | null>;
   findDeletedTower(id: string): Promise<DeletedMarkerReference | null>;
   listRestorableDeletedMarkers(input: {
@@ -121,14 +140,14 @@ export type DeletedMarkerDependencies = {
   }>;
   now(): Date;
   recordAudit(input: DeletedMarkerAuditInput): Promise<void>;
-  restoreCamp(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restoreDeed(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restoreLocateSoul(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restoreMinedoor(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restoreNote(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restorePath(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restoreRift(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
-  restoreTower(id: string, input: { updatedByUserId: string }): Promise<{ id: string; mapId: string } | null>;
+  restoreCamp(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
+  restoreDeed(id: string, input: RestoreInput): Promise<(RestoredMarker & { retiredNote: RetiredNote | null }) | null>;
+  restoreLocateSoul(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
+  restoreMinedoor(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
+  restoreNote(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
+  restorePath(id: string, input: RestoreInput & { pathType: PathMarkerType }): Promise<RestoredMarker | null>;
+  restoreRift(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
+  restoreTower(id: string, input: RestoreInput): Promise<RestoredMarker | null>;
 };
 
 export async function listRestorableDeletedMarkers(
@@ -144,12 +163,14 @@ export async function listRestorableDeletedMarkers(
     return err("Admin access is required");
   }
 
+  const limit = getLimit(input.limit);
   const deletedMarkers = await dependencies.listRestorableDeletedMarkers({
-    limit: getLimit(input.limit),
+    limit,
     now: dependencies.now()
   });
 
-  return ok([
+  // Each table is capped at `limit`; merge them and apply the cap overall.
+  const merged = [
     ...deletedMarkers.towers.map(serializeDeletedTower),
     ...deletedMarkers.deeds.map(serializeDeletedDeed),
     ...deletedMarkers.notes.map(serializeDeletedNote),
@@ -158,7 +179,13 @@ export async function listRestorableDeletedMarkers(
     ...deletedMarkers.minedoors.map(serializeDeletedMinedoor),
     ...deletedMarkers.locateSouls.map(serializeDeletedLocateSoul),
     ...deletedMarkers.paths.map(serializeDeletedPath)
-  ]);
+  ];
+
+  return ok(
+    merged
+      .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))
+      .slice(0, limit)
+  );
 }
 
 export async function restoreDeletedMarker(
@@ -187,11 +214,14 @@ export async function restoreDeletedMarker(
     return err("Deleted marker was not found");
   }
 
-  if (deleted.deleteExpiresAt <= dependencies.now()) {
+  const now = dependencies.now();
+
+  if (deleted.deleteExpiresAt <= now) {
     return err("Restore window has expired");
   }
 
   const restored = await restoreMarker(input.markerType, input.markerId, {
+    now,
     updatedByUserId: input.actor.id
   }, dependencies);
 
@@ -203,10 +233,27 @@ export async function restoreDeletedMarker(
     action: "MARKER_RESTORED",
     actorUserId: input.actor.id,
     mapId: restored.mapId,
-    metadata: { markerType: input.markerType },
+    metadata: { markerType: input.markerType, x: restored.x, y: restored.y },
     targetId: restored.id,
     targetType: getAuditTargetType(input.markerType)
   });
+
+  // Restoring a disbanded deed retires the "Abandoned Deed" note created for it.
+  if (restored.retiredNote !== undefined && restored.retiredNote !== null) {
+    await recordAudit(dependencies, {
+      action: "MARKER_DELETED",
+      actorUserId: input.actor.id,
+      mapId: restored.mapId,
+      metadata: {
+        markerType: "note",
+        reason: "deed_restored",
+        x: restored.retiredNote.x,
+        y: restored.retiredNote.y
+      },
+      targetId: restored.retiredNote.id,
+      targetType: "NOTE"
+    });
+  }
 
   return ok({
     markerId: restored.id,
@@ -302,7 +349,7 @@ async function findDeletedMarker(
   }
 
   if (isPathMarkerType(markerType)) {
-    return dependencies.findDeletedPath(markerId);
+    return dependencies.findDeletedPath(markerId, markerType);
   }
 
   return dependencies.findDeletedNote(markerId);
@@ -311,9 +358,9 @@ async function findDeletedMarker(
 async function restoreMarker(
   markerType: MarkerType,
   markerId: string,
-  input: { updatedByUserId: string },
+  input: RestoreInput,
   dependencies: DeletedMarkerDependencies
-): Promise<{ id: string; mapId: string } | null> {
+): Promise<(RestoredMarker & { retiredNote?: RetiredNote | null }) | null> {
   if (markerType === "tower") {
     return dependencies.restoreTower(markerId, input);
   }
@@ -339,7 +386,7 @@ async function restoreMarker(
   }
 
   if (isPathMarkerType(markerType)) {
-    return dependencies.restorePath(markerId, input);
+    return dependencies.restorePath(markerId, { ...input, pathType: markerType });
   }
 
   return dependencies.restoreNote(markerId, input);

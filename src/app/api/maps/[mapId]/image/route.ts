@@ -1,11 +1,30 @@
 import { NextResponse } from "next/server";
-import { join } from "path";
+import { resolve, sep } from "path";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { canReadMap } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
 import { createShareDependencies } from "@/lib/share/database";
 import { resolveShareLink, SHARE_LINK_INVALID_MESSAGE } from "@/lib/share/share-service";
 import { embedWatermark } from "@/lib/watermark/embed";
+
+// Raw (unwatermarked) layer images live outside public/ so Next never serves
+// them directly; DB imagePath values ("/maps/<file>.png") resolve under here.
+const MAP_IMAGE_ROOT = "map-images";
+
+function resolveMapImagePath(imagePath: string): string | null {
+  if (imagePath.split(/[\\/]/).includes("..")) {
+    return null;
+  }
+
+  const baseDir = resolve(process.cwd(), MAP_IMAGE_ROOT);
+  const filePath = resolve(baseDir, `.${imagePath.startsWith("/") ? "" : "/"}${imagePath}`);
+
+  return filePath.startsWith(baseDir + sep) ? filePath : null;
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return (error as { code?: unknown } | null)?.code === "ENOENT";
+}
 
 export async function GET(
   request: Request,
@@ -58,8 +77,16 @@ export async function GET(
     return NextResponse.json({ error: "Authentication is required" }, { status: 401 });
   }
 
-  let imagePath: string | null = null;
-  let resolvedLayerId = "";
+  const map = await prisma.map.findUnique({
+    select: { imagePath: true, isActive: true },
+    where: { id: mapId },
+  });
+  if (map === null || !map.isActive) {
+    return NextResponse.json({ error: "Map not found" }, { status: 404 });
+  }
+
+  let imagePath: string | null = map.imagePath;
+  let resolvedLayerId = `${mapId}:default`;
 
   if (layerId !== undefined && layerId.length > 0) {
     const layer = await prisma.mapLayer.findFirst({
@@ -70,28 +97,33 @@ export async function GET(
     }
     imagePath = layer.imagePath;
     resolvedLayerId = layer.id;
-  } else {
-    const map = await prisma.map.findUnique({
-      where: { id: mapId },
-    });
-    if (map === null) {
-      return NextResponse.json({ error: "Map not found" }, { status: 404 });
-    }
-    imagePath = map.imagePath;
-    resolvedLayerId = `${mapId}:default`;
   }
 
   if (imagePath === null || imagePath.length === 0) {
     return NextResponse.json({ error: "No image configured" }, { status: 404 });
   }
 
-  const rawFilePath = join(process.cwd(), "public", imagePath);
+  const rawFilePath = resolveMapImagePath(imagePath);
 
-  const watermarked = await embedWatermark(
-    rawFilePath,
-    { mapId, userId: watermarkUserId, layerId: resolvedLayerId, watermarkNumber },
-    { cache: true }
-  );
+  if (rawFilePath === null) {
+    return NextResponse.json({ error: "No image configured" }, { status: 404 });
+  }
+
+  let watermarked: Buffer;
+
+  try {
+    watermarked = await embedWatermark(
+      rawFilePath,
+      { userId: watermarkUserId, layerId: resolvedLayerId, watermarkNumber },
+      { cache: true }
+    );
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return NextResponse.json({ error: "Map image not found" }, { status: 404 });
+    }
+
+    throw error;
+  }
 
   return new NextResponse(new Uint8Array(watermarked), {
     headers: {

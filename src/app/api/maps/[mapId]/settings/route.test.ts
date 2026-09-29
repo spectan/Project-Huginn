@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { UserMapSettingsDependencies } from "@/lib/map-settings/map-settings-service";
+import type { SaveUserMapSettingsDependencies } from "@/lib/map-settings/map-settings-service";
 
 const mocks = vi.hoisted(() => {
   const state = {
@@ -13,8 +13,7 @@ const mocks = vi.hoisted(() => {
     settings: new Map<string, unknown>()
   };
 
-  const dependencies: UserMapSettingsDependencies = {
-    findMap: vi.fn(async (mapId) => mapId === "map-1" ? { id: mapId } : null),
+  const store: Pick<SaveUserMapSettingsDependencies, "findSettings" | "upsertSettings"> = {
     findSettings: vi.fn(async (userId, mapId) => {
       const saved = state.settings.get(`${userId}:${mapId}`);
       return saved === undefined ? null : { settings: saved };
@@ -23,6 +22,11 @@ const mocks = vi.hoisted(() => {
       state.settings.set(`${userId}:${mapId}`, settings);
       return { settings };
     })
+  };
+  const dependencies: SaveUserMapSettingsDependencies = {
+    findMap: vi.fn(async (mapId) => mapId === "map-1" ? { id: mapId } : null),
+    ...store,
+    withSettingsLock: vi.fn(async (_input, work) => work(store)) as SaveUserMapSettingsDependencies["withSettingsLock"]
   };
 
   return {
@@ -100,6 +104,10 @@ describe("PATCH /api/maps/[mapId]/settings", () => {
       }
     });
     expect(response.status).toBe(200);
+    expect(mocks.dependencies.withSettingsLock).toHaveBeenCalledWith(
+      { mapId: "map-1", userId: "user-1" },
+      expect.any(Function)
+    );
   });
 });
 

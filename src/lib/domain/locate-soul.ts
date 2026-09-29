@@ -1,4 +1,4 @@
-export const LOCATE_SOUL_DISTANCE_BANDS = [
+const LOCATE_SOUL_DISTANCE_BANDS = [
   { key: "0", label: "0 tiles", minTiles: 0, maxTiles: 0 },
   { key: "1-3", label: "1-3 tiles", minTiles: 1, maxTiles: 3 },
   { key: "4-5", label: "4-5 tiles", minTiles: 4, maxTiles: 5 },
@@ -23,7 +23,7 @@ export const LOCATE_SOUL_CASTER_FACINGS = [
   "northwest"
 ] as const;
 
-export const LOCATE_SOUL_DIRECTIONS = [
+const LOCATE_SOUL_DIRECTIONS = [
   "ahead",
   "aheadRight",
   "right",
@@ -38,13 +38,13 @@ export type LocateSoulDistanceBandKey = typeof LOCATE_SOUL_DISTANCE_BANDS[number
 export type LocateSoulCasterFacing = typeof LOCATE_SOUL_CASTER_FACINGS[number];
 export type LocateSoulDirection = typeof LOCATE_SOUL_DIRECTIONS[number];
 
-export type ParsedLocateSoulMessage = {
+type ParsedLocateSoulMessage = {
   direction: LocateSoulDirection;
   distanceBand: LocateSoulDistanceBandKey;
   targetName: string;
 };
 
-export type LocateSoulOverlayGeometry = {
+type LocateSoulOverlayGeometry = {
   centerAngleDegrees: number;
   maxDistanceTiles: number;
   minDistanceTiles: number;

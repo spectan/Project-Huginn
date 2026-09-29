@@ -107,6 +107,35 @@ function expandNoteCategories() {
   return categoryControls;
 }
 
+function stubEventFeedFetch(eventCount: number) {
+  const feed = {
+    events: Array.from({ length: eventCount }, (_, index) => ({
+      id: `event-${index}`,
+      kind: "deed" as const,
+      label: "Deed",
+      message: `Celebration event ${index}`,
+      subtype: 1,
+      timestamp: 1778286000 + index
+    })),
+    fetchedAt: "2026-05-13T04:00:00.000Z",
+    serverStatus: {
+      status: "online",
+      uptimeSeconds: 53207,
+      weather: "A light breeze is coming from the south.",
+      wurmTime: "It is 18:30:03 on day of Awakening."
+    },
+    sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
+  };
+  const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(async (input) => (
+    String(input).endsWith("/events")
+      ? new Response(JSON.stringify({ feed }), { status: 200 })
+      : new Response(JSON.stringify({ ok: true }), { status: 200 })
+  ));
+  vi.stubGlobal("fetch", fetchMock);
+
+  return fetchMock;
+}
+
 describe("MapPage", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -224,7 +253,7 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.3.9")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.4.0")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
@@ -248,26 +277,9 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
   });
 
-  it("keeps the Celebration event feed minimized until the events button is opened", () => {
+  it("keeps the Celebration event feed minimized until the events button is opened", async () => {
+    stubEventFeedFetch(35);
     render(React.createElement(MapWorkspace, {
-      initialEventFeed: {
-        events: Array.from({ length: 35 }, (_, index) => ({
-          id: `event-${index}`,
-          kind: "deed" as const,
-          label: "Deed",
-          message: `Celebration event ${index}`,
-          subtype: 1,
-          timestamp: 1778286000 + index
-        })),
-        fetchedAt: "2026-05-13T04:00:00.000Z",
-        serverStatus: {
-          status: "online",
-          uptimeSeconds: 53207,
-          weather: "A light breeze is coming from the south.",
-          wurmTime: "It is 18:30:03 on day of Awakening."
-        },
-        sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
-      },
       initialMarkers: [],
       initialNoteCategories: noteCategories,
       map: activeMap,
@@ -292,6 +304,7 @@ describe("MapPage", () => {
 
     expect(eventsButton.getAttribute("aria-expanded")).toBe("true");
     const feed = screen.getByRole("dialog", { name: "Celebration event feed" });
+    expect(await within(feed).findByText("Celebration event 34")).toBeTruthy();
     expect(within(feed).getByText("Celebration Events")).toBeTruthy();
     expect(within(feed).getByText("Online")).toBeTruthy();
     expect(within(feed).getAllByRole("listitem")).toHaveLength(30);
@@ -339,28 +352,9 @@ describe("MapPage", () => {
   });
 
   it("renders saved event feed size and saves resize changes", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true }));
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubEventFeedFetch(8);
 
     render(React.createElement(MapWorkspace, {
-      initialEventFeed: {
-        events: Array.from({ length: 8 }, (_, index) => ({
-          id: `event-${index}`,
-          kind: "deed" as const,
-          label: "Deed",
-          message: `Celebration event ${index}`,
-          subtype: 1,
-          timestamp: 1778286000 + index
-        })),
-        fetchedAt: "2026-05-13T04:00:00.000Z",
-        serverStatus: {
-          status: "online",
-          uptimeSeconds: 53207,
-          weather: "A light breeze is coming from the south.",
-          wurmTime: "It is 18:30:03 on day of Awakening."
-        },
-        sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
-      },
       initialMarkers: [],
       initialNoteCategories: noteCategories,
       initialSettings: {
@@ -421,26 +415,34 @@ describe("MapPage", () => {
     });
   });
 
-  it("resizes the event feed from a top corner while bottom-aligned", () => {
+  it("sends a pending settings save with keepalive when the page is hidden", () => {
+    const fetchMock = stubEventFeedFetch(0);
+
     render(React.createElement(MapWorkspace, {
-      initialEventFeed: {
-        events: Array.from({ length: 8 }, (_, index) => ({
-          id: `event-${index}`,
-          kind: "deed" as const,
-          label: "Deed",
-          message: `Celebration event ${index}`,
-          subtype: 1,
-          timestamp: 1778286000 + index
-        })),
-        fetchedAt: "2026-05-13T04:00:00.000Z",
-        serverStatus: {
-          status: "online",
-          uptimeSeconds: 53207,
-          weather: "A light breeze is coming from the south.",
-          wurmTime: "It is 18:30:03 on day of Awakening."
-        },
-        sourceUrl: "https://wurmmaps.xyz/APIs/stat-delegate.php?map=celebration"
-      },
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(getLayerControls().getByRole("checkbox", { name: "Search Lines" }));
+
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/maps/map-1/settings", expect.anything());
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/maps/map-1/settings", expect.objectContaining({
+      keepalive: true,
+      method: "PATCH"
+    }));
+    const settingsCall = fetchMock.mock.calls.find(([url]) => url === "/api/maps/map-1/settings");
+    expect(JSON.parse(String(settingsCall?.[1]?.body))).toMatchObject({ searchLinesEnabled: true });
+  });
+
+  it("resizes the event feed from a top corner while bottom-aligned", () => {
+    stubEventFeedFetch(8);
+    render(React.createElement(MapWorkspace, {
       initialMarkers: [],
       initialNoteCategories: noteCategories,
       initialSettings: {
@@ -2692,14 +2694,14 @@ describe("MapPage", () => {
     const stage = screen.getByTestId("map-stage");
     fireEvent.pointerDown(stage, {
       button: 0,
-      clientX: 1274,
-      clientY: 1034,
+      clientX: 500,
+      clientY: 310,
       ctrlKey: true,
       pointerId: 71
     });
     fireEvent.pointerUp(window, {
-      clientX: 1274,
-      clientY: 1034,
+      clientX: 500,
+      clientY: 310,
       ctrlKey: true,
       pointerId: 71
     });
@@ -2732,14 +2734,14 @@ describe("MapPage", () => {
 
     fireEvent.pointerDown(stage, {
       button: 0,
-      clientX: 1029,
-      clientY: 844,
+      clientX: 255,
+      clientY: 120,
       ctrlKey: true,
       pointerId: 72
     });
     fireEvent.pointerUp(window, {
-      clientX: 1029,
-      clientY: 844,
+      clientX: 255,
+      clientY: 120,
       ctrlKey: true,
       pointerId: 72
     });
@@ -2799,14 +2801,14 @@ describe("MapPage", () => {
     const stage = screen.getByTestId("map-stage");
     fireEvent.pointerDown(stage, {
       button: 0,
-      clientX: 1029,
-      clientY: 844,
+      clientX: 255,
+      clientY: 120,
       ctrlKey: true,
       pointerId: 72
     });
     fireEvent.pointerUp(window, {
-      clientX: 1029,
-      clientY: 844,
+      clientX: 255,
+      clientY: 120,
       ctrlKey: true,
       pointerId: 72
     });
@@ -4594,7 +4596,7 @@ describe("MapPage", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit Highway East Road" }));
 
     expect(screen.queryByTestId("path-marker-highway-1")).toBeNull();
-    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")).toBe("1024.5,1024.5 1084.5,1024.5");
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")).toBe("121,131 181,131");
   });
 
   it("keeps prior highway draft connections visible while moving later points", async () => {
@@ -4650,7 +4652,7 @@ describe("MapPage", () => {
     });
 
     await waitFor(() => expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.split(" ")).toHaveLength(4));
-    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.startsWith("1024.5,1024.5")).toBe(true);
+    expect(document.querySelector(".map-path-draft-line")?.getAttribute("points")?.startsWith("121,131")).toBe(true);
 
     fireEvent.pointerUp(window, {
       clientX: startLeft + 9.5,
@@ -4877,21 +4879,21 @@ describe("MapPage", () => {
       clientX: 150,
       clientY: 130
     });
-    let pathDetails = screen.getByRole("tooltip", { name: "Map items at -724, -764" });
+    let pathDetails = screen.getByRole("tooltip", { name: "Map items at 150, 130" });
     expect(within(pathDetails).getByText("Cedar Bridge")).toBeTruthy();
     expect(within(pathDetails).getByText("Bridge | 2 points | Width 2")).toBeTruthy();
     fireEvent.mouseMove(canal, {
       clientX: 150,
       clientY: 130
     });
-    pathDetails = screen.getByRole("tooltip", { name: "Map items at -724, -764" });
+    pathDetails = screen.getByRole("tooltip", { name: "Map items at 150, 130" });
     expect(within(pathDetails).getByText("West Canal")).toBeTruthy();
     expect(within(pathDetails).getByText("Canal | 2 points | Width 2")).toBeTruthy();
     fireEvent.mouseMove(highway, {
       clientX: 150,
       clientY: 130
     });
-    pathDetails = screen.getByRole("tooltip", { name: "Map items at -724, -764" });
+    pathDetails = screen.getByRole("tooltip", { name: "Map items at 150, 130" });
     expect(within(pathDetails).getByText("East Road")).toBeTruthy();
     expect(within(pathDetails).getByText("Highway | 2 points | Width 2")).toBeTruthy();
 
@@ -5041,6 +5043,72 @@ describe("MapPage", () => {
     const reticule = screen.getByTestId("selected-coordinate-reticule");
     expect(reticule.getAttribute("aria-label")).toBe("Selected coordinate 125, 140");
     expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=125&y=140`);
+  });
+
+  it("keeps the current view when a click writes the coordinate to the URL", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1024
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 1024
+    });
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.dataset.zoom).toBe("0.5"));
+    const fittedTransform = stage.style.transform;
+
+    fireEvent.pointerDown(stage, {
+      button: 0,
+      clientX: 125,
+      clientY: 140,
+      pointerId: 1
+    });
+    fireEvent.pointerUp(window, {
+      clientX: 125,
+      clientY: 140,
+      pointerId: 1
+    });
+
+    expect(window.location.href).toBe(`${window.location.origin}/map?server=1&x=250&y=280`);
+    expect(stage.dataset.zoom).toBe("0.5");
+    expect(stage.style.transform).toBe(fittedTransform);
+  });
+
+  it("anchors wheel zoom on the displayed coordinate URL view", async () => {
+    window.history.replaceState(null, "", "/map?x=1070&y=278");
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const stage = screen.getByTestId("map-stage");
+
+    await waitFor(() => expect(stage.style.transform).toBe("translate(-46.5px, 745.5px) scale(1)"));
+
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      clientX: 1024,
+      clientY: 1024,
+      deltaY: -100
+    });
+    act(() => {
+      stage.dispatchEvent(wheelEvent);
+    });
+
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    await waitFor(() => expect(stage.style.transform).toBe("translate(-260.6px, 689.8px) scale(1.2)"));
   });
 
   it("plans one temporary route with tile and meter distance", async () => {
@@ -5543,10 +5611,10 @@ describe("MapPage", () => {
     const layer = screen.getByTestId("search-line-layer");
     expect(within(layer).getAllByTestId("search-line")).toHaveLength(2);
     const deedLine = layer.querySelector("[data-search-line-id='deed-1']");
-    expect(deedLine?.getAttribute("x1")).toBe("1024");
-    expect(deedLine?.getAttribute("y1")).toBe("1024");
-    expect(deedLine?.getAttribute("x2")).toBe("1424");
-    expect(deedLine?.getAttribute("y2")).toBe("1504");
+    expect(deedLine?.getAttribute("x1")).toBe("100.5");
+    expect(deedLine?.getAttribute("y1")).toBe("120.5");
+    expect(deedLine?.getAttribute("x2")).toBe("500.5");
+    expect(deedLine?.getAttribute("y2")).toBe("600.5");
 
     await waitFor(() => expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/maps/map-1/settings",
@@ -6024,6 +6092,56 @@ describe("MapPage", () => {
     expect(screen.getByRole("dialog", { name: "Add note" })).toBeTruthy();
     expect(screen.getByLabelText("X")).toHaveProperty("value", "250");
     expect(screen.getByLabelText("Y")).toHaveProperty("value", "300");
+  });
+
+  it("shows a form error when saving a marker fails with a network error", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }));
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        {
+          category: "General",
+          id: "note-1",
+          text: "Scout here",
+          title: "Scout note",
+          type: "note",
+          x: 700,
+          y: 800
+        }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Note General - Scout note at 700, 800" }), {
+      clientX: 300,
+      clientY: 300
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit Note General - Scout note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText("Marker could not be saved")).toBeTruthy();
+  });
+
+  it("shows an error when a note category request fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    }));
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [],
+      initialNoteCategories: noteCategories,
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    const categoryControls = expandNoteCategories();
+    fireEvent.click(categoryControls.getByRole("button", { name: "Save Landmarks category" }));
+
+    expect(await categoryControls.findByText("Note category could not be saved")).toBeTruthy();
   });
 
   it("deletes an existing marker from its context menu", async () => {

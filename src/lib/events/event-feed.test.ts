@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  EVENT_FEED_DISPLAY_LIMIT,
   fetchOfficialEventFeed,
   getOfficialFeedUrl,
   parseEventFeedXml
@@ -56,9 +55,9 @@ describe("official event feed", () => {
     expect(getOfficialFeedUrl("Unknown")).toBeNull();
   });
 
-  it("fetches and limits events from official feed", async () => {
+  it("fetches all parsed events from the official feed", async () => {
     const xml = `<server_feed><messages>${Array.from(
-      { length: EVENT_FEED_DISPLAY_LIMIT + 5 },
+      { length: 35 },
       (_, i) => `<message text="Event ${i}" time="${1783100000 + i}"/>`
     ).join("")}</messages></server_feed>`;
 
@@ -70,7 +69,7 @@ describe("official event feed", () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result?.events).toHaveLength(EVENT_FEED_DISPLAY_LIMIT);
+    expect(result?.events).toHaveLength(35);
     expect(result?.fetchedAt).toBe("2026-05-13T04:00:00.000Z");
     expect(result?.sourceUrl).toBe("https://celebration.wurmonline.com/battles/server_feed.xml");
   });

@@ -7,9 +7,27 @@ import {
   renameSettingsProfile,
   saveSettingsProfile,
   saveUserMapSettings,
-  type SettingsProfilesDependencies,
-  type UserMapSettingsDependencies
+  type SaveUserMapSettingsDependencies,
+  type SettingsProfilesDependencies
 } from "./map-settings-service";
+
+/** In-memory stand-in for the per-(user, map) transaction lock. */
+function createLock(): SaveUserMapSettingsDependencies["withSettingsLock"] {
+  const tails = new Map<string, Promise<unknown>>();
+
+  return (input, work) => {
+    const key = `${input.userId}:${input.mapId}`;
+    const previous = tails.get(key) ?? Promise.resolve();
+    const run = previous.then(() => work(storeRef.current!));
+    tails.set(key, run.catch(() => undefined));
+    return run;
+  };
+}
+
+// The lock hands `work` the dependencies' own store; set per factory call.
+const storeRef: { current: Pick<SaveUserMapSettingsDependencies, "findSettings" | "upsertSettings"> | null } = {
+  current: null
+};
 
 const readableActor = {
   accessLevel: "READ",
@@ -35,13 +53,13 @@ const blockedActor = {
   approvalStatus: "PENDING"
 } as const;
 
-function createDependencies(): UserMapSettingsDependencies {
+function createDependencies(): SaveUserMapSettingsDependencies {
   const maps = new Set(["map-1"]);
   const settings = new Map<string, unknown>();
-
-  return {
-    findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
+  const store: Pick<SaveUserMapSettingsDependencies, "findSettings" | "upsertSettings"> = {
     findSettings: async (userId, mapId) => {
+      // Yield so unserialized concurrent saves would interleave.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       const saved = settings.get(`${userId}:${mapId}`);
       return saved === undefined ? null : { settings: saved };
     },
@@ -52,13 +70,40 @@ function createDependencies(): UserMapSettingsDependencies {
       };
     }
   };
+  storeRef.current = store;
+
+  return {
+    findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
+    ...store,
+    withSettingsLock: createLock()
+  };
 }
 
 describe("user map settings service", () => {
-  let dependencies: UserMapSettingsDependencies;
+  let dependencies: SaveUserMapSettingsDependencies;
 
   beforeEach(() => {
     dependencies = createDependencies();
+  });
+
+  it("serializes concurrent saves so neither merge is lost", async () => {
+    await Promise.all([
+      saveUserMapSettings({
+        actor: readableActor,
+        input: { markerColors: { towers: "#00ff00" } },
+        mapId: "map-1"
+      }, dependencies),
+      saveUserMapSettings({
+        actor: readableActor,
+        input: { searchLinesEnabled: true },
+        mapId: "map-1"
+      }, dependencies)
+    ]);
+
+    const result = await getUserMapSettings({ actor: readableActor, mapId: "map-1" }, dependencies);
+
+    expect(result.ok && result.value.markerColors.towers).toBe("#00ff00");
+    expect(result.ok && result.value.searchLinesEnabled).toBe(true);
   });
 
   it("returns defaults when the user has no saved settings", async () => {
@@ -163,16 +208,14 @@ type StoredProfile = {
   updatedAt: Date;
 };
 
-function createProfileDependencies(): SettingsProfilesDependencies & {
+function createProfileDependencies(): SettingsProfilesDependencies & SaveUserMapSettingsDependencies & {
   profiles: Map<string, StoredProfile>;
 } {
   const maps = new Set(["map-1", "map-2"]);
   const settings = new Map<string, unknown>();
   const profiles = new Map<string, StoredProfile>();
   const profileKey = (userId: string, slot: number) => `${userId}:${slot}`;
-
-  return {
-    findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
+  const store: Pick<SaveUserMapSettingsDependencies, "findSettings" | "upsertSettings"> = {
     findSettings: async (userId, mapId) => {
       const saved = settings.get(`${userId}:${mapId}`);
       return saved === undefined ? null : { settings: saved };
@@ -182,7 +225,14 @@ function createProfileDependencies(): SettingsProfilesDependencies & {
       return {
         settings: nextSettings
       };
-    },
+    }
+  };
+  storeRef.current = store;
+
+  return {
+    findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
+    ...store,
+    withSettingsLock: createLock(),
     findProfile: async (userId, slot) => profiles.get(profileKey(userId, slot)) ?? null,
     listProfiles: async (userId) => [...profiles.entries()]
       .filter(([key]) => key.startsWith(`${userId}:`))
@@ -283,6 +333,14 @@ describe("settings profiles service", () => {
       ok: false,
       error: "Profile name must be 40 characters or fewer"
     });
+  });
+
+  it("reports whether a save created or overwrote the slot", async () => {
+    const first = await saveSettingsProfile({ actor: readableActor, mapId: "map-1", slot: 1 }, dependencies);
+    const second = await saveSettingsProfile({ actor: readableActor, mapId: "map-1", slot: 1 }, dependencies);
+
+    expect(first.ok && first.value.created).toBe(true);
+    expect(second.ok && second.value.created).toBe(false);
   });
 
   it("defaults the profile name when blank or missing", async () => {

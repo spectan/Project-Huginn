@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "fs/promises";
-import { createHash } from "crypto";
+import { createReadStream } from "fs";
+import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "fs/promises";
+import { createHash, randomUUID } from "crypto";
 import { dirname, join } from "path";
 import sharp from "sharp";
 import {
@@ -16,29 +17,138 @@ import {
 } from "./config";
 import { formatWatermarkNumber, renderNumberTile } from "./digits";
 
-function hashInput(input: string | Buffer): Promise<string> {
-  const hash = createHash("sha256");
-  if (Buffer.isBuffer(input)) {
-    hash.update(input);
-    return Promise.resolve(hash.digest("hex"));
-  }
-  return new Promise(async (resolve, reject) => {
-    const { createReadStream } = await import("fs");
-    const stream = createReadStream(input);
+function hashBuffer(input: Buffer): string {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+function hashFile(path: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    const stream = createReadStream(path);
     stream.on("error", reject);
-    stream.on("data", (chunk: Buffer) => hash.update(chunk));
+    stream.on("data", (chunk) => hash.update(chunk));
     stream.on("end", () => resolve(hash.digest("hex")));
   });
 }
 
+// Content hashes of source files, keyed by path + mtime + size so an
+// unchanged source is hashed once per process instead of on every request.
+const sourceHashCache = new Map<string, { identity: string; hash: Promise<string> }>();
+
+async function hashSourceFile(path: string): Promise<string> {
+  const stats = await stat(path);
+  const identity = `${stats.mtimeMs}:${stats.size}`;
+  const cached = sourceHashCache.get(path);
+
+  if (cached !== undefined && cached.identity === identity) {
+    return cached.hash;
+  }
+
+  const hash = hashFile(path);
+  sourceHashCache.set(path, { identity, hash });
+  hash.catch(() => {
+    if (sourceHashCache.get(path)?.hash === hash) {
+      sourceHashCache.delete(path);
+    }
+  });
+
+  return hash;
+}
+
+function hashInput(input: string | Buffer): Promise<string> {
+  return Buffer.isBuffer(input) ? Promise.resolve(hashBuffer(input)) : hashSourceFile(input);
+}
+
+/** Cached watermarked images untouched for this long are deleted. */
+const CACHE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const CACHE_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+/** Cache hits refresh the file mtime at most this often (keeps it "recent"). */
+const CACHE_TOUCH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+let lastPruneAt = 0;
+
+/**
+ * Delete cached files (including abandoned temp files) not accessed or
+ * modified within maxAgeMs. Returns the number of files removed.
+ */
+export async function pruneWatermarkCache(
+  cacheDir: string,
+  maxAgeMs: number = CACHE_MAX_AGE_MS,
+  now: number = Date.now()
+): Promise<number> {
+  let entries: string[];
+
+  try {
+    entries = await readdir(cacheDir);
+  } catch {
+    return 0;
+  }
+
+  let removed = 0;
+
+  for (const entry of entries) {
+    const filePath = join(cacheDir, entry);
+
+    try {
+      const stats = await stat(filePath);
+
+      if (!stats.isFile() || now - Math.max(stats.atimeMs, stats.mtimeMs) <= maxAgeMs) {
+        continue;
+      }
+
+      await rm(filePath, { force: true });
+      removed += 1;
+    } catch {
+      // Raced with another prune or write; skip.
+    }
+  }
+
+  return removed;
+}
+
+function maybePruneCache(cacheDir: string): void {
+  const now = Date.now();
+
+  if (now - lastPruneAt < CACHE_PRUNE_INTERVAL_MS) {
+    return;
+  }
+
+  lastPruneAt = now;
+  void pruneWatermarkCache(cacheDir, CACHE_MAX_AGE_MS, now).catch(() => {});
+}
+
+async function touchIfStale(path: string): Promise<void> {
+  const stats = await stat(path);
+  const now = Date.now();
+
+  if (now - stats.mtimeMs > CACHE_TOUCH_INTERVAL_MS) {
+    const date = new Date(now);
+    await utimes(path, date, date);
+  }
+}
+
+async function writeCacheFile(cachePath: string, png: Buffer): Promise<void> {
+  await mkdir(dirname(cachePath), { recursive: true });
+  // Write to a temp file in the same directory, then rename: readers never
+  // observe a partially written cache entry.
+  const tempPath = `${cachePath}.${process.pid}.${randomUUID()}.tmp`;
+
+  try {
+    await writeFile(tempPath, png);
+    await rename(tempPath, cachePath);
+  } catch (error) {
+    await rm(tempPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 export interface EmbedContext {
   layerId: string;
-  mapId: string;
   userId: string;
   watermarkNumber: number;
 }
 
-export interface EmbedOptions {
+interface EmbedOptions {
   cache?: boolean;
 }
 
@@ -85,8 +195,11 @@ export async function embedWatermark(
   const cachePath = join(cacheDir, cacheKey + ".png");
 
   if (cache) {
+    maybePruneCache(cacheDir);
+
     try {
       const cached = await readFile(cachePath);
+      void touchIfStale(cachePath).catch(() => {});
       return cached;
     } catch {
       // cache miss, continue
@@ -144,8 +257,7 @@ export async function embedWatermark(
   const png = await pipeline.png({ compressionLevel: 6 }).toBuffer();
 
   if (cache) {
-    await mkdir(dirname(cachePath), { recursive: true });
-    await writeFile(cachePath, png);
+    await writeCacheFile(cachePath, png);
   }
 
   return png;

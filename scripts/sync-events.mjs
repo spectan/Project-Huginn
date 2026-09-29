@@ -7,6 +7,7 @@ import {
 const prisma = new PrismaClient();
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
+const FETCH_TIMEOUT_MS = 15 * 1000;
 
 const OFFICIAL_EVENT_FEED_URLS = {
   Affliction: "http://affliction.wurmonline.com/battles/server_feed.xml",
@@ -28,7 +29,10 @@ const OFFICIAL_EVENT_FEED_URLS = {
 };
 
 const MAX_EVENTS_PER_SERVER = 100;
+// Keep in sync with ABANDONED_DEED_CATEGORY_NAME in src/lib/markers/marker-service.ts.
 const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
+// Keep in sync with DELETED_MARKER_RETENTION_HOURS in src/lib/domain/constants.ts.
+const DELETED_MARKER_RETENTION_HOURS = 72;
 
 function formatDisbandDate(timestamp) {
   const date = new Date(timestamp * 1000);
@@ -74,6 +78,97 @@ async function handleRenameEvents(mapId, events) {
   }
 }
 
+function formatDisbandedDeedNoteText(deed, timestamp) {
+  const foundingDate = deed.foundingDate === null ? "Unknown" : deed.foundingDate.toISOString().slice(0, 10);
+
+  // Mirrors formatDisbandedDeedNoteText in src/lib/markers/marker-service.ts,
+  // plus the disband date reported by the feed.
+  return [
+    `Former deed: ${deed.name}`,
+    `Mayor: ${deed.founder}`,
+    `Founding date: ${foundingDate}`,
+    `Dimensions: N${deed.north} W${deed.west} E${deed.east} S${deed.south}`,
+    `Perimeter: ${deed.perimeter} tiles`,
+    `Coordinates: ${deed.x}, ${deed.y}`,
+    `Disbanded: ${formatDisbandDate(timestamp)}`
+  ].join("\n");
+}
+
+// Mirrors disbandDeed in src/lib/markers/database.ts: claim the deed with a
+// conditional soft-delete, upsert the category, create the note, link it to the
+// deed and write the same audit rows (with no actor, since the feed did it).
+async function disbandDeed(mapId, deed, timestamp) {
+  const deletedAt = new Date();
+  const deleteExpiresAt = new Date(
+    deletedAt.getTime() + DELETED_MARKER_RETENTION_HOURS * 60 * 60 * 1000
+  );
+
+  return prisma.$transaction(async (transaction) => {
+    const claimed = await transaction.deed.updateMany({
+      data: {
+        deletedAt,
+        deletedByUserId: null,
+        deleteExpiresAt
+      },
+      where: { deletedAt: null, id: deed.id }
+    });
+
+    if (claimed.count === 0) {
+      return false;
+    }
+
+    const category = await transaction.noteCategory.upsert({
+      create: { mapId, name: ABANDONED_DEED_CATEGORY_NAME },
+      update: {},
+      where: { mapId_name: { mapId, name: ABANDONED_DEED_CATEGORY_NAME } }
+    });
+    const note = await transaction.note.create({
+      data: {
+        category: ABANDONED_DEED_CATEGORY_NAME,
+        mapId,
+        text: formatDisbandedDeedNoteText(deed, timestamp),
+        title: deed.name,
+        x: deed.x,
+        y: deed.y
+      }
+    });
+
+    await transaction.deed.update({
+      data: { disbandNoteId: note.id },
+      where: { id: deed.id }
+    });
+    await transaction.auditEvent.createMany({
+      data: [
+        {
+          action: "MARKER_CREATED",
+          actorUserId: null,
+          mapId,
+          metadata: { markerType: "note", source: "event-feed", x: note.x, y: note.y },
+          targetId: note.id,
+          targetType: "NOTE"
+        },
+        {
+          action: "MARKER_DELETED",
+          actorUserId: null,
+          mapId,
+          metadata: {
+            convertedTo: "note",
+            markerType: "deed",
+            noteCategory: category.name,
+            source: "event-feed",
+            x: deed.x,
+            y: deed.y
+          },
+          targetId: deed.id,
+          targetType: "DEED"
+        }
+      ]
+    });
+
+    return true;
+  });
+}
+
 async function handleDisbandEvents(mapId, events) {
   const disbandEvents = events
     .map((event) => ({
@@ -82,14 +177,10 @@ async function handleDisbandEvents(mapId, events) {
     }))
     .filter((event) => event.deedName !== null);
 
-  if (disbandEvents.length === 0) {
-    return;
-  }
-
   for (const { deedName, timestamp } of disbandEvents) {
     try {
       const deed = await prisma.deed.findFirst({
-        where: { deletedAt: null, mapId, name: deedName }
+        where: { deletedAt: null, map: { isActive: true }, mapId, name: deedName }
       });
 
       if (deed === null) {
@@ -97,38 +188,11 @@ async function handleDisbandEvents(mapId, events) {
         continue;
       }
 
-      await prisma.noteCategory.upsert({
-        create: { mapId, name: ABANDONED_DEED_CATEGORY_NAME },
-        update: {},
-        where: { mapId_name: { mapId, name: ABANDONED_DEED_CATEGORY_NAME } }
-      });
+      const disbanded = await disbandDeed(mapId, deed, timestamp);
 
-      const deletedAt = new Date();
-      const deleteExpiresAt = new Date(
-        deletedAt.getTime() + 72 * 60 * 60 * 1000
-      );
-
-      await prisma.$transaction([
-        prisma.note.create({
-          data: {
-            category: ABANDONED_DEED_CATEGORY_NAME,
-            mapId,
-            text: `Disbanded - ${formatDisbandDate(timestamp)}`,
-            title: deed.name,
-            x: deed.x,
-            y: deed.y
-          }
-        }),
-        prisma.deed.update({
-          data: {
-            deletedAt,
-            deleteExpiresAt
-          },
-          where: { id: deed.id }
-        })
-      ]);
-
-      console.log(`    ${deedName}: disbanded → note created, deed soft-deleted`);
+      console.log(disbanded
+        ? `    ${deedName}: disbanded → note created, deed soft-deleted`
+        : `    ${deedName}: deed already deleted, skipping`);
     } catch (error) {
       console.error(`    ${deedName}: error handling disband -`, error instanceof Error ? error.message : String(error));
     }
@@ -157,6 +221,21 @@ function parseEventFeedXml(xml) {
   return events.sort((a, b) => b.timestamp - a.timestamp);
 }
 
+async function trimEvents(mapId) {
+  await prisma.$transaction(async (transaction) => {
+    const newest = await transaction.event.findMany({
+      orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+      select: { id: true },
+      take: MAX_EVENTS_PER_SERVER,
+      where: { mapId }
+    });
+
+    await transaction.event.deleteMany({
+      where: { id: { notIn: newest.map((event) => event.id) }, mapId }
+    });
+  });
+}
+
 async function syncAllEvents() {
   console.log(`[${new Date().toISOString()}] Starting event sync`);
 
@@ -178,7 +257,10 @@ async function syncAllEvents() {
       }
 
       try {
-        const response = await fetch(url, { cache: "no-store" });
+        const response = await fetch(url, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+        });
 
         if (!response.ok) {
           console.log(`  ${serverName}: fetch failed (${response.status})`);
@@ -209,24 +291,14 @@ async function syncAllEvents() {
               mapId,
               message: event.message,
               timestamp: event.timestamp
-            }))
+            })),
+            skipDuplicates: true
           });
           await handleRenameEvents(mapId, newEvents);
           await handleDisbandEvents(mapId, newEvents);
         }
 
-        const allEvents = await prisma.event.findMany({
-          orderBy: { timestamp: "desc" },
-          select: { id: true },
-          where: { mapId }
-        });
-
-        if (allEvents.length > MAX_EVENTS_PER_SERVER) {
-          const toDelete = allEvents.slice(MAX_EVENTS_PER_SERVER);
-          await prisma.event.deleteMany({
-            where: { id: { in: toDelete.map((e) => e.id) } }
-          });
-        }
+        await trimEvents(mapId);
 
         console.log(`  ${serverName}: ${events.length} events (${newEvents.length} new)`);
         synced++;
@@ -245,9 +317,13 @@ async function syncAllEvents() {
 async function run() {
   console.log("Event sync service starting...");
 
-  await syncAllEvents();
+  // Reschedule only after a run finishes so slow runs never overlap.
+  const loop = async () => {
+    await syncAllEvents();
+    setTimeout(loop, SYNC_INTERVAL_MS);
+  };
 
-  setInterval(syncAllEvents, SYNC_INTERVAL_MS);
+  await loop();
 }
 
 run().catch((error) => {

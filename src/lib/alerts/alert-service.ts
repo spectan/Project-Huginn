@@ -22,6 +22,31 @@ const MAP_DATA_ACCESS_WINDOW_MS = 10 * 60 * 1000;
 const NEW_IP_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 const REGISTRATION_WINDOW_MS = 60 * 60 * 1000;
 const TRIGGER_LOOKBACK_MS = 15 * 60 * 1000;
+const WEBHOOK_TIMEOUT_MS = 5000;
+/**
+ * Upper bound on audit events loaded per detection run. The most recent
+ * events win; older ones in an oversized range are ignored.
+ */
+const MAX_DETECTION_EVENTS = 10_000;
+
+const SEVERITY_RANK: Record<AlertSeverity, number> = {
+  LOW: 0,
+  MEDIUM: 1,
+  HIGH: 2
+};
+
+const ALERT_INCLUDE = {
+  actor: {
+    select: {
+      username: true
+    }
+  },
+  map: {
+    select: {
+      name: true
+    }
+  }
+} as const;
 
 const OFF_HOURS_ADMIN_ACTIONS = new Set([
   "LOGIN",
@@ -67,18 +92,7 @@ export async function listAlerts(
   }
 
   const alerts = await prisma.alert.findMany({
-    include: {
-      actor: {
-        select: {
-          username: true
-        }
-      },
-      map: {
-        select: {
-          name: true
-        }
-      }
-    },
+    include: ALERT_INCLUDE,
     orderBy: {
       createdAt: "desc"
     },
@@ -95,7 +109,7 @@ export async function detectAlerts(
   const until = input.until ?? new Date();
   const since = input.since ?? new Date(until.getTime() - DEFAULT_LOOKBACK_MS);
 
-  const events = await prisma.auditEvent.findMany({
+  const newestEvents = await prisma.auditEvent.findMany({
     include: {
       actor: {
         select: {
@@ -106,8 +120,9 @@ export async function detectAlerts(
       }
     },
     orderBy: {
-      createdAt: "asc"
+      createdAt: "desc"
     },
+    take: MAX_DETECTION_EVENTS,
     where: {
       createdAt: {
         gte: since,
@@ -115,6 +130,9 @@ export async function detectAlerts(
       }
     }
   });
+  const events = [...newestEvents].sort(
+    (left, right) => left.createdAt.getTime() - right.createdAt.getTime()
+  );
 
   const createdAlerts: AlertWithActor[] = [];
 
@@ -137,31 +155,78 @@ export async function detectAlerts(
   });
 }
 
+// In-process coalescing: triggerAlertDetection fires on every mutation and
+// map load. At most one detection run is in flight; triggers arriving during
+// a run collapse into a single follow-up run.
+let detectionRunning = false;
+let detectionRerunRequested = false;
+
 export function triggerAlertDetection(): void {
-  detectAlerts({ since: new Date(Date.now() - TRIGGER_LOOKBACK_MS) }).catch(() => undefined);
-}
-
-export async function deleteAlert(alertId: string): Promise<Result<null>> {
-  const existing = await prisma.alert.findUnique({
-    where: {
-      id: alertId
-    }
-  });
-
-  if (existing === null) {
-    return err("Alert was not found");
+  if (detectionRunning) {
+    detectionRerunRequested = true;
+    return;
   }
 
-  await prisma.alert.delete({
-    where: {
-      id: alertId
+  detectionRunning = true;
+  void runCoalescedDetection();
+}
+
+async function runCoalescedDetection(): Promise<void> {
+  try {
+    do {
+      detectionRerunRequested = false;
+      await detectAlerts({ since: new Date(Date.now() - TRIGGER_LOOKBACK_MS) }).catch(() => undefined);
+    } while (detectionRerunRequested);
+  } finally {
+    detectionRunning = false;
+  }
+}
+
+export async function deleteAlert(alertId: string, actorUserId: string): Promise<Result<null>> {
+  try {
+    await prisma.$transaction(async (transaction) => {
+      const deleted = await transaction.alert.delete({
+        select: {
+          rule: true,
+          severity: true
+        },
+        where: {
+          id: alertId
+        }
+      });
+      await transaction.auditEvent.create({
+        data: {
+          action: "ALERT_DELETED",
+          actorUserId,
+          metadata: {
+            rule: deleted.rule,
+            severity: deleted.severity
+          },
+          targetId: alertId,
+          targetType: "SYSTEM"
+        }
+      });
+    });
+  } catch (error) {
+    if (isRecordNotFoundError(error)) {
+      return err("Alert was not found");
     }
-  });
+
+    throw error;
+  }
 
   return ok(null);
 }
 
-export async function sendWebhook(alert: AlertWithActor): Promise<void> {
+function isRecordNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { code?: unknown }).code === "P2025"
+  );
+}
+
+async function sendWebhook(alert: AlertWithActor): Promise<void> {
   const url = process.env.ALERT_WEBHOOK_URL;
 
   if (url === undefined || url.length === 0) {
@@ -172,7 +237,7 @@ export async function sendWebhook(alert: AlertWithActor): Promise<void> {
     return;
   }
 
-  await fetch(url, {
+  const response = await fetch(url, {
     body: JSON.stringify({
       actorUsername: alert.actorUsername,
       createdAt: alert.createdAt.toISOString(),
@@ -187,8 +252,23 @@ export async function sendWebhook(alert: AlertWithActor): Promise<void> {
     headers: {
       "Content-Type": "application/json"
     },
-    method: "POST"
+    method: "POST",
+    signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS)
   });
+
+  if (!response.ok) {
+    console.warn(`Alert webhook responded with HTTP ${response.status} for alert ${alert.id}`);
+  }
+}
+
+function sendWebhookSafely(alert: AlertWithActor): void {
+  try {
+    sendWebhook(alert).catch((error: unknown) => {
+      console.warn(`Alert webhook delivery failed for alert ${alert.id}:`, error);
+    });
+  } catch {
+    // Webhook delivery is fire-and-forget; failures must not block alert creation.
+  }
 }
 
 async function detectDeleteSpikes(
@@ -454,6 +534,7 @@ async function detectRegistrationSpikes(
       description: `${count} registrations from ${ip} in the last 60 minutes`,
       mapId: null,
       metadata: {
+        clientIp: ip,
         count,
         windowMinutes: 60
       },
@@ -529,7 +610,7 @@ async function detectRepeatedAuthFailures(
   return results;
 }
 
-async function createAlert(input: {
+type AlertInput = {
   actorUserId: string | null;
   description: string;
   mapId: string | null;
@@ -537,55 +618,95 @@ async function createAlert(input: {
   rule: AlertRule;
   severity: AlertSeverity;
   title: string;
-}): Promise<AlertWithActor | null> {
-  const oneHourAgo = new Date(Date.now() - ALERT_DEDUP_WINDOW_MS);
-  const existing = await prisma.alert.findFirst({
-    where: {
-      actorUserId: input.actorUserId,
-      createdAt: {
-        gte: oneHourAgo
+};
+
+/**
+ * Null-actor rules are keyed by source IP (carried in metadata.clientIp), so
+ * an open alert for one IP does not swallow detections for another.
+ */
+function getDedupClientIp(input: AlertInput): string | null {
+  return input.actorUserId === null ? extractClientIp(input.metadata) : null;
+}
+
+function buildDedupKey(input: AlertInput, clientIp: string | null): string {
+  return ["alert", input.rule, input.actorUserId ?? "", input.mapId ?? "", clientIp ?? ""].join(":");
+}
+
+/**
+ * Create an alert unless an equivalent one is already open within the dedup
+ * window. A detection more severe than the open duplicate escalates it in
+ * place (and notifies again). Returns null when nothing changed.
+ *
+ * The check-and-write runs under a transaction-scoped advisory lock on the
+ * dedup key so concurrent detection runs (other processes included) cannot
+ * both create the same alert.
+ */
+async function createAlert(input: AlertInput): Promise<AlertWithActor | null> {
+  const clientIp = getDedupClientIp(input);
+  const dedupKey = buildDedupKey(input, clientIp);
+
+  const alert = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${dedupKey}))`;
+
+    const existing = await tx.alert.findFirst({
+      orderBy: {
+        createdAt: "desc"
       },
-      mapId: input.mapId,
-      rule: input.rule,
-      status: "OPEN"
+      where: {
+        actorUserId: input.actorUserId,
+        createdAt: {
+          gte: new Date(Date.now() - ALERT_DEDUP_WINDOW_MS)
+        },
+        mapId: input.mapId,
+        ...(clientIp === null ? {} : { metadata: { path: ["clientIp"], equals: clientIp } }),
+        rule: input.rule,
+        status: "OPEN"
+      }
+    });
+
+    if (existing === null) {
+      return tx.alert.create({
+        data: {
+          actorUserId: input.actorUserId,
+          description: input.description,
+          mapId: input.mapId,
+          metadata: input.metadata as Prisma.InputJsonValue,
+          rule: input.rule,
+          severity: input.severity,
+          status: "OPEN",
+          title: input.title
+        },
+        include: ALERT_INCLUDE
+      });
     }
+
+    if (SEVERITY_RANK[input.severity] <= SEVERITY_RANK[existing.severity]) {
+      return null;
+    }
+
+    return tx.alert.update({
+      data: {
+        description: input.description,
+        metadata: input.metadata as Prisma.InputJsonValue,
+        severity: input.severity,
+        title: input.title
+      },
+      include: ALERT_INCLUDE,
+      where: {
+        id: existing.id
+      }
+    });
   });
 
-  if (existing !== null) {
+  if (alert === null) {
     return null;
   }
 
-  const alert = await prisma.alert.create({
-    data: {
-      actorUserId: input.actorUserId,
-      description: input.description,
-      mapId: input.mapId,
-      metadata: input.metadata as Prisma.InputJsonValue,
-      rule: input.rule,
-      severity: input.severity,
-      status: "OPEN",
-      title: input.title
-    },
-    include: {
-      actor: {
-        select: {
-          username: true
-        }
-      },
-      map: {
-        select: {
-          name: true
-        }
-      }
-    }
-  });
-
+  // Notify only after the transaction committed; neither channel may block
+  // or fail alert creation.
   const serialized = serializeAlert(alert);
 
-  if (serialized.severity === "HIGH") {
-    await sendWebhook(serialized).catch(() => undefined);
-  }
-
+  sendWebhookSafely(serialized);
   dispatchDiscordSafely({ kind: "alert", alert: serialized });
 
   return serialized;
@@ -632,20 +753,7 @@ function extractClientIp(metadata: unknown): string | null {
 }
 
 function serializeAlert(
-  alert: Prisma.AlertGetPayload<{
-    include: {
-      actor: {
-        select: {
-          username: true;
-        };
-      };
-      map: {
-        select: {
-          name: true;
-        };
-      };
-    };
-  }>
+  alert: Prisma.AlertGetPayload<{ include: typeof ALERT_INCLUDE }>
 ): AlertWithActor {
   return {
     ...alert,

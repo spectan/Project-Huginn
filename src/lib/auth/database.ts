@@ -3,6 +3,14 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getSessionExpiry, createSessionToken, hashSessionToken } from "./session";
 import type { AuthServiceDependencies } from "./auth-service";
+import { createFailureRateLimiter } from "./failure-rate-limiter";
+
+// Serializes user creation so the case-insensitive username check and the
+// watermark number allocation cannot race. Arbitrary fixed key.
+const USER_CREATION_LOCK_KEY = 7_140_231;
+
+// Shared across requests so failures accumulate per process.
+const failureRateLimiter = createFailureRateLimiter();
 
 export function createAuthDependencies(clientIp?: string): AuthServiceDependencies {
   return {
@@ -21,19 +29,39 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
       return { expiresAt, id: session.id, token };
     },
     createUser: async ({ passwordHash, username }) => {
-      const maxRecord = await prisma.user.findFirst({
-        orderBy: { watermarkNumber: "desc" },
-        select: { watermarkNumber: true }
-      });
-      const watermarkNumber = (maxRecord?.watermarkNumber ?? 0) + 1;
-      return prisma.user.create({
-        data: {
-          passwordHash,
-          username,
-          watermarkNumber
+      try {
+        return await prisma.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${USER_CREATION_LOCK_KEY})`;
+
+          const existingUser = await tx.user.findFirst({
+            select: { id: true },
+            where: { username: { equals: username, mode: "insensitive" } }
+          });
+
+          if (existingUser !== null) {
+            return null;
+          }
+
+          // _max ignores NULLs, unlike ordering by watermarkNumber desc.
+          const { _max: max } = await tx.user.aggregate({ _max: { watermarkNumber: true } });
+
+          return tx.user.create({
+            data: {
+              passwordHash,
+              username,
+              watermarkNumber: (max.watermarkNumber ?? 0) + 1
+            }
+          });
+        });
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          return null;
         }
-      });
+
+        throw error;
+      }
     },
+    failureRateLimiter,
     findUserById: async (userId) => {
       return prisma.user.findUnique({
         where: {
@@ -63,29 +91,6 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
           metadata: metadata as Prisma.InputJsonValue,
           targetId: input.targetId,
           targetType: input.targetType
-        }
-      });
-    },
-    updateUserApproval: async ({ accessLevel, approvedByUserId, userId }) => {
-      const existingUser = await prisma.user.findUnique({
-        where: {
-          id: userId
-        }
-      });
-
-      if (existingUser === null) {
-        return null;
-      }
-
-      return prisma.user.update({
-        data: {
-          accessLevel,
-          approvalStatus: "APPROVED",
-          approvedAt: new Date(),
-          approvedByUserId
-        },
-        where: {
-          id: userId
         }
       });
     },
@@ -120,4 +125,11 @@ export function createAuthDependencies(clientIp?: string): AuthServiceDependenci
     },
     verifyPassword: async (hash, password) => argon2.verify(hash, password)
   };
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2002";
 }

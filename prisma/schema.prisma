@@ -37,6 +37,7 @@ enum AuditAction {
   MARKER_CLEANED_UP
   MAP_DATA_ACCESSED
   SHARE_LINK_CREATED
+  ALERT_DELETED
 }
 
 enum AuditTargetType {
@@ -252,6 +253,9 @@ model Deed {
   deletedByUserId String?
   deletedBy       User?     @relation("DeedDeletedBy", fields: [deletedByUserId], references: [id], onDelete: SetNull)
   deleteExpiresAt DateTime?
+  // Set when the deed was disbanded into an "Abandoned Deed" note, so a
+  // restore can retire that note. Null for plain deletes.
+  disbandNoteId   String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -409,7 +413,6 @@ model PathMarker {
 
   @@index([mapId, deletedAt])
   @@index([deleteExpiresAt])
-  @@index([pathType])
   @@map("path_markers")
 }
 
@@ -550,6 +553,7 @@ model Event {
   timestamp Int
   createdAt DateTime @default(now())
 
+  @@unique([mapId, timestamp, message])
   @@index([mapId, timestamp])
   @@map("events")
 }

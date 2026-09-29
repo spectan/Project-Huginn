@@ -30,7 +30,7 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error },
-      { status: result.error === "Admin access is required" ? 403 : 400 }
+      { status: getErrorStatus(result.error) }
     );
   }
 
@@ -53,7 +53,7 @@ export async function DELETE(request: Request, context: RouteContext) {
   if (!result.ok) {
     return NextResponse.json(
       { error: result.error },
-      { status: result.error === "Admin access is required" ? 403 : 400 }
+      { status: getErrorStatus(result.error) }
     );
   }
 
@@ -114,4 +114,12 @@ function isMapPermissionInput(value: unknown): value is {
 
 function isAccessLevel(value: unknown): value is AccessLevel {
   return value === "NONE" || value === "READ" || value === "WRITE";
+}
+
+function getErrorStatus(error: string): number {
+  if (error === "Admin access is required") {
+    return 403;
+  }
+
+  return error === "User was not found" ? 404 : 400;
 }

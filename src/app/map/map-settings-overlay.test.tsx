@@ -153,6 +153,30 @@ describe("MapSettingsOverlay", () => {
     );
   });
 
+  it("flushes pending settings before snapshotting them into a profile", async () => {
+    const fetchMock = stubProfileFetch();
+    let resolveFlush: () => void = () => undefined;
+    const onFlushPendingSettings = vi.fn(() => new Promise<void>((resolve) => {
+      resolveFlush = resolve;
+    }));
+    renderOverlay({ onFlushPendingSettings });
+
+    const row = screen.getByTestId("profile-slot-1");
+
+    fireEvent.click(within(row).getByRole("button", { name: "Save profile to slot 2" }));
+
+    await waitFor(() => expect(onFlushPendingSettings).toHaveBeenCalledTimes(1));
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/maps/map-celebration/settings/profiles/1", expect.anything());
+
+    resolveFlush();
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/maps/map-celebration/settings/profiles/1", expect.objectContaining({
+        method: "PUT"
+      }))
+    );
+  });
+
   it("overwrites a filled slot with its current name", async () => {
     const fetchMock = stubProfileFetch({ profiles: [combatProfile] });
     renderOverlay();

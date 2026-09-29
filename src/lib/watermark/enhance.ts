@@ -11,13 +11,19 @@ function clampByte(value: number): number {
 const CHROMA_ISOLATION_GAIN = 12;
 
 /**
+ * Largest decoded image accepted for chroma isolation (the largest map layer
+ * is 8192x8192). Guards against decompression bombs in admin uploads.
+ */
+const MAX_INPUT_PIXELS = 8192 * 8192;
+
+/**
  * Strip luma and amplify chroma so the red digit overlay pops regardless of
  * the underlying terrain colors: every pixel is flattened to mid-gray luma
  * (BT.601) and its Cb/Cr deviation from neutral is multiplied by
  * CHROMA_ISOLATION_GAIN (clamped).
  */
 export async function isolateChromaImage(imageBuffer: Buffer): Promise<Buffer> {
-  const { data, info } = await sharp(imageBuffer)
+  const { data, info } = await sharp(imageBuffer, { limitInputPixels: MAX_INPUT_PIXELS })
     .ensureAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });

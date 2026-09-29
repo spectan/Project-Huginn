@@ -77,6 +77,8 @@ const FALLBACK_MAP_SIZE_PX = 2048;
 const MAX_ZOOM = 64;
 const CLICK_DRAG_THRESHOLD_PX = 4;
 const LONG_PRESS_DURATION_MS = 600;
+const WILDERNESS_REBUILD_DEBOUNCE_MS = 180;
+const UNIQUE_ALERT_REFRESH_INTERVAL_MS = 60 * 1000;
 const PINCH_MIN_DISTANCE_PX = 8;
 const ZOOM_STEP = 1.2;
 const FLOATING_MENU_MARGIN_PX = 12;
@@ -314,8 +316,13 @@ type NoteCategoryEditorInput = {
   name: string;
 };
 
+type PendingSettingsSave = {
+  mapId: string;
+  settings: UserMapSettings;
+  timeoutId: number;
+};
+
 type MapWorkspaceProps = {
-  initialEventFeed?: WurmMapsEventFeed | null;
   initialMarkers: WorkspaceMarker[];
   initialNoteCategories?: readonly NoteCategory[];
   initialSettings?: UserMapSettings;
@@ -328,7 +335,6 @@ type MapWorkspaceProps = {
 };
 
 export default function MapWorkspace({
-  initialEventFeed,
   initialMarkers,
   initialNoteCategories = DEFAULT_NOTE_CATEGORIES,
   initialSettings = DEFAULT_USER_MAP_SETTINGS,
@@ -430,7 +436,7 @@ export default function MapWorkspace({
     feed: WurmMapsEventFeed | null;
     mapId: string | null;
   }>({
-    feed: initialEventFeed ?? null,
+    feed: null,
     mapId: map?.id ?? null
   });
   const [isEventFeedLoading, setIsEventFeedLoading] = useState(false);
@@ -450,6 +456,8 @@ export default function MapWorkspace({
   const deedResizeDragRef = useRef<DeedResizeDragState | null>(null);
   const quickDeedDragRef = useRef<QuickDeedDragState | null>(null);
   const hasInitializedSettingsSaveRef = useRef(false);
+  const pendingSettingsSaveRef = useRef<PendingSettingsSave | null>(null);
+  const settingsSaveInFlightRef = useRef<Promise<void> | null>(null);
   const pendingManualViewRef = useRef<ViewState | null>(null);
   const viewUpdateFrameRef = useRef<number | null>(null);
   const [committedView, setCommittedView] = useState<ViewState | null>(null);
@@ -458,6 +466,7 @@ export default function MapWorkspace({
   const mapStageRef = useRef<HTMLDivElement | null>(null);
   const tileHighlightRef = useRef<HTMLDivElement | null>(null);
   const wildernessRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLElement | null>(null);
   const view = manualView ?? urlCoordinateView ?? fittedView;
   const viewRef = useRef(view);
 
@@ -575,6 +584,7 @@ export default function MapWorkspace({
   useEffect(() => {
     return () => {
       cancelHoverClose();
+      cancelLongPress(longPressRef);
       flushPendingView();
     };
   }, [cancelHoverClose, flushPendingView]);
@@ -606,6 +616,17 @@ export default function MapWorkspace({
     [dialog, displayedMarkers, pathDraft]
   );
   const visibleMarkers = displayedMarkersWithEditPreview;
+  // Wilderness depends on every deed, not just the ones matching the current search.
+  const wildernessMarkers = useMemo(
+    () => {
+      if (dialog === null || dialog.mode !== "edit" || isPathMarker(dialog.marker)) {
+        return allMarkers;
+      }
+
+      return allMarkers.map((marker) => marker.id === dialog.marker.id ? dialog.marker : marker);
+    },
+    [allMarkers, dialog]
+  );
   const visibleNameMarkers = useMemo(
     () => getVisibleNameMarkers(displayedMarkersWithEditPreview, markerVisibility),
     [displayedMarkersWithEditPreview, markerVisibility]
@@ -615,7 +636,7 @@ export default function MapWorkspace({
   const hiddenTowerLabelId = hoveredMarkers.find((marker) => marker.type === "tower")?.id ?? null;
   const renderedSelectedCoordinate = selectedCoordinate ?? urlCoordinate;
   const eventFeedMapId = map?.id ?? null;
-  const eventFeed = eventFeedState.mapId === eventFeedMapId ? eventFeedState.feed : initialEventFeed ?? null;
+  const eventFeed = eventFeedState.mapId === eventFeedMapId ? eventFeedState.feed : null;
   const canViewMap = map !== null && viewer !== null && canReadMap({
     accessLevel: viewer.permissions,
     approvalStatus: viewer.approvalStatus,
@@ -634,6 +655,25 @@ export default function MapWorkspace({
   const isUniqueAlertDismissed = uniqueAlertSnapshot.dismissedCycle === lastUniqueSlainAt;
   const showUniqueAlert = canViewMap && !isShareMode && uniqueAlertSnapshot.loaded &&
     isUniquePotentiallyAlive && !isUniqueAlertDismissed;
+  useEffect(() => {
+    if (uniqueAlertMapId === null) {
+      return;
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        refreshUniqueAlertSnapshots();
+      }
+    }
+
+    const intervalId = window.setInterval(refreshUniqueAlertSnapshots, UNIQUE_ALERT_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [uniqueAlertMapId]);
   const dismissUniqueAlert = useCallback(() => {
     if (uniqueAlertMapId === null) {
       return;
@@ -716,6 +756,17 @@ export default function MapWorkspace({
     setTileHighlight(parsed.tileHighlight);
     setTileHighlightPanelPosition(parsed.tileHighlightPanelPosition);
   }, []);
+  const flushPendingSettings = useCallback(async (): Promise<void> => {
+    const pendingSave = pendingSettingsSaveRef.current;
+
+    if (pendingSave !== null) {
+      window.clearTimeout(pendingSave.timeoutId);
+      pendingSettingsSaveRef.current = null;
+      settingsSaveInFlightRef.current = saveUserMapSettings(pendingSave.mapId, pendingSave.settings);
+    }
+
+    await settingsSaveInFlightRef.current;
+  }, []);
   useLayoutEffect(() => {
     pathDraftRef.current = pathDraft;
   }, [pathDraft]);
@@ -777,19 +828,24 @@ export default function MapWorkspace({
       return null;
     }
 
-    const response = await fetch(`/api/maps/${map.id}/note-categories`, {
-      body: JSON.stringify(input),
-      headers: { "content-type": "application/json" },
-      method: "POST"
-    });
+    try {
+      const response = await fetch(`/api/maps/${map.id}/note-categories`, {
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+        method: "POST"
+      });
 
-    if (!response.ok) {
+      if (!response.ok) {
+        return null;
+      }
+
+      const body = (await response.json()) as { category: NoteCategory };
+      setNoteCategories((current) => upsertNoteCategory(current, body.category));
+      return body.category;
+    } catch {
+      // The settings overlay reports a null result as a failed save.
       return null;
     }
-
-    const body = (await response.json()) as { category: NoteCategory };
-    setNoteCategories((current) => upsertNoteCategory(current, body.category));
-    return body.category;
   }, [map]);
   const updateNoteCategoryColor = useCallback((categoryId: string, color: string | null) => {
     setNoteCategoryColors((current) => {
@@ -838,17 +894,25 @@ export default function MapWorkspace({
     }
 
     const previousCategory = noteCategories.find((category) => category.id === categoryId) ?? null;
-    const response = await fetch(`/api/maps/${map.id}/note-categories/${categoryId}`, {
-      body: JSON.stringify(input),
-      headers: { "content-type": "application/json" },
-      method: "PATCH"
-    });
+    let body: { category: NoteCategory };
 
-    if (!response.ok) {
+    try {
+      const response = await fetch(`/api/maps/${map.id}/note-categories/${categoryId}`, {
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+        method: "PATCH"
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      body = (await response.json()) as { category: NoteCategory };
+    } catch {
+      // The settings overlay reports a null result as a failed save.
       return null;
     }
 
-    const body = (await response.json()) as { category: NoteCategory };
     setNoteCategories((current) => upsertNoteCategory(current, body.category));
 
     if (previousCategory !== null && previousCategory.name !== body.category.name) {
@@ -867,13 +931,21 @@ export default function MapWorkspace({
     }
 
     const previousCategory = noteCategories.find((category) => category.id === categoryId) ?? null;
-    const response = await fetch(`/api/maps/${map.id}/note-categories/${categoryId}`, { method: "DELETE" });
+    let body: { category: { id: string; reassignedTo: string } };
 
-    if (!response.ok) {
+    try {
+      const response = await fetch(`/api/maps/${map.id}/note-categories/${categoryId}`, { method: "DELETE" });
+
+      if (!response.ok) {
+        return false;
+      }
+
+      body = (await response.json()) as { category: { id: string; reassignedTo: string } };
+    } catch {
+      // The settings overlay reports a false result as a failed delete.
       return false;
     }
 
-    const body = (await response.json()) as { category: { id: string; reassignedTo: string } };
     setNoteCategories((current) => current.filter((category) => category.id !== body.category.id));
     clearNoteCategoryPresentation(body.category.id);
 
@@ -953,18 +1025,23 @@ export default function MapWorkspace({
   }, []);
 
   const selectCoordinate = useCallback((coordinate: MapCoordinate) => {
+    // The URL coordinate only seeds the initial view; pin the displayed view so
+    // writing x/y to the URL does not re-center the map on the clicked tile.
+    setManualView((current) => current ?? viewRef.current);
     setSelectedCoordinate(coordinate);
     updateBrowserCoordinate(coordinate);
   }, []);
 
-  const zoomAt = useCallback((nextZoom: number, clientX: number, clientY: number) => {
+  const zoomAt = useCallback((factor: number, clientX: number, clientY: number) => {
     setManualView((currentManualView) => {
-      const current = currentManualView ?? getFitView(viewport, mapSize);
+      const current = currentManualView ?? viewRef.current;
+      const baseView = viewRef.current;
       const minZoom = getFitZoom(viewport, mapSize);
+      const nextZoom = current.zoom * factor;
 
       if (nextZoom <= minZoom) {
         const nextView = getFitView(viewport, mapSize);
-        applyDirectTransforms(nextView, view);
+        applyDirectTransforms(nextView, baseView);
         return nextView;
       }
 
@@ -976,20 +1053,20 @@ export default function MapWorkspace({
         y: clientY - mapY * zoom,
         zoom
       };
-      applyDirectTransforms(nextView, view);
+      applyDirectTransforms(nextView, baseView);
       return nextView;
     });
-  }, [mapSize, viewport, view, applyDirectTransforms]);
+  }, [mapSize, viewport, applyDirectTransforms]);
 
   const handleWheel = useCallback(
-    (event: React.WheelEvent<HTMLElement>) => {
+    (event: WheelEvent) => {
       event.preventDefault();
       cancelLongPress(longPressRef);
       setContextMenu(null);
       const factor = event.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
-      zoomAt(view.zoom * factor, event.clientX, event.clientY);
+      zoomAt(factor, event.clientX, event.clientY);
     },
-    [view.zoom, zoomAt]
+    [zoomAt]
   );
 
   const getVisibleMarkersAtCoordinate = useCallback(
@@ -1181,7 +1258,8 @@ export default function MapWorkspace({
         return false;
       }
 
-      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+      const currentView = viewRef.current;
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, currentView);
 
       if (!isInsideMap(coordinate, visualMap)) {
         return false;
@@ -1198,7 +1276,7 @@ export default function MapWorkspace({
         start: coordinate,
         startClientX: event.clientX,
         startClientY: event.clientY,
-        view
+        view: currentView
       };
       setQuickDeedDraft({
         end: coordinate,
@@ -1206,56 +1284,7 @@ export default function MapWorkspace({
       });
       return true;
     },
-    [canWriteMapMarkers, dialog, routePlannerEnabled, view, visualMap]
-  );
-
-  const handlePointerDown = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (!isPrimaryPointerButton(event.button)) {
-        return;
-      }
-
-      trackTouchPointer(event);
-
-      if (event.pointerType === "touch") {
-        if (activeTouchPointersRef.current.size >= 2) {
-          event.preventDefault();
-          event.currentTarget.setPointerCapture?.(event.pointerId);
-          startPinchZoomIfReady();
-          return;
-        }
-
-        startLongPress(event, view);
-      }
-
-      if (startQuickDeedDrag(event)) {
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-        return;
-      }
-
-      if (event.shiftKey && canWriteMapMarkers) {
-        return;
-      }
-
-      if (!event.ctrlKey && !routePlannerEnabled && isInteractivePanTarget(event.target)) {
-        return;
-      }
-
-      event.preventDefault();
-      setContextMenu(null);
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-      dragRef.current = {
-        hasMoved: false,
-        pointerId: event.pointerId,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        startX: view.x,
-        startY: view.y,
-        startZoom: view.zoom
-      };
-      setIsDragging(true);
-    },
-    [canWriteMapMarkers, routePlannerEnabled, startLongPress, startPinchZoomIfReady, startQuickDeedDrag, trackTouchPointer, view]
+    [canWriteMapMarkers, dialog, routePlannerEnabled, visualMap]
   );
 
   const handleContextMenu = useCallback(
@@ -1308,7 +1337,8 @@ export default function MapWorkspace({
 
       event.preventDefault();
       event.stopPropagation();
-      const eventCoordinate = getMapCoordinate(event.clientX, event.clientY, view);
+      const currentView = viewRef.current;
+      const eventCoordinate = getMapCoordinate(event.clientX, event.clientY, currentView);
       const mapCoordinate = isOverlayContextTarget(event.currentTarget) &&
         visualMap !== null &&
         isInsideMap(eventCoordinate, visualMap)
@@ -1333,10 +1363,55 @@ export default function MapWorkspace({
         mode: "marker",
         screenX: event.clientX,
         screenY: event.clientY,
-        view
+        view: currentView
       });
     },
-    [canWriteMapMarkers, displayedMarkersWithEditPreview, mapSize, markerVisibility, roadwayEditMode, selectCoordinate, view, visualMap]
+    [canWriteMapMarkers, displayedMarkersWithEditPreview, mapSize, markerVisibility, roadwayEditMode, selectCoordinate, visualMap]
+  );
+
+  const handleMarkerHoverMove = useCallback(
+    (marker: WorkspaceMarker, event: React.MouseEvent<Element>) => {
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, viewRef.current);
+      const markersUnderPointer = visualMap !== null && isInsideMap(coordinate, visualMap)
+        ? getHoverMarkersAtCoordinate(
+            displayedMarkersWithEditPreview,
+            markerVisibility,
+            coordinate,
+            mapSize,
+            { includePathMarkers: true }
+          )
+        : [];
+      const hoverMarkers = getUniqueMarkers(markersUnderPointer.length === 0
+        ? [marker]
+        : [...markersUnderPointer, marker]
+      );
+
+      if (hoverMarkers.length === 0) {
+        setHoveredMarker(null);
+        return;
+      }
+
+      setHoveredMarker((current) => {
+        if (
+          current !== null &&
+          coordinatesAreEqual(current.coordinate, coordinate) &&
+          haveSameMarkerIds(current.markers, hoverMarkers)
+        ) {
+          // Same tile and markers: only move the tooltip, keeping the markers array stable.
+          return current.screenX === event.clientX && current.screenY === event.clientY
+            ? current
+            : { ...current, screenX: event.clientX, screenY: event.clientY };
+        }
+
+        return {
+          coordinate,
+          markers: hoverMarkers,
+          screenX: event.clientX,
+          screenY: event.clientY
+        };
+      });
+    },
+    [displayedMarkersWithEditPreview, mapSize, markerVisibility, visualMap]
   );
 
   const handleMarkerRelocationPointerDown = useCallback(
@@ -1378,7 +1453,8 @@ export default function MapWorkspace({
         return;
       }
 
-      const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
+      const currentView = viewRef.current;
+      const coordinate = getMapCoordinate(event.clientX, event.clientY, currentView);
 
       event.preventDefault();
       event.stopPropagation();
@@ -1388,12 +1464,12 @@ export default function MapWorkspace({
         markerId: marker.id,
         pointerId: event.pointerId,
         verticalSide: coordinate.y <= marker.y ? "north" : "south",
-        view
+        view: currentView
       };
       setContextMenu(null);
       setHoveredMarker(null);
     },
-    [dialog, view]
+    [dialog]
   );
 
   const finishPointerDrag = useCallback((event: { clientX: number; clientY: number; ctrlKey?: boolean; pointerId: number; pointerType?: string }) => {
@@ -1483,7 +1559,9 @@ export default function MapWorkspace({
         return;
       }
 
-      if (!(event.target instanceof Element) || event.target.closest(".map-viewport") === null) {
+      const viewportElement = event.target instanceof Element ? event.target.closest(".map-viewport") : null;
+
+      if (viewportElement === null) {
         return;
       }
 
@@ -1492,14 +1570,16 @@ export default function MapWorkspace({
       if (event.pointerType === "touch") {
         if (activeTouchPointersRef.current.size >= 2) {
           event.preventDefault();
+          viewportElement.setPointerCapture?.(event.pointerId);
           startPinchZoomIfReady();
           return;
         }
 
-        startLongPress(event, view);
+        startLongPress(event, viewRef.current);
       }
 
       if (startQuickDeedDrag(event)) {
+        viewportElement.setPointerCapture?.(event.pointerId);
         return;
       }
 
@@ -1513,6 +1593,7 @@ export default function MapWorkspace({
 
       event.preventDefault();
       setContextMenu(null);
+      viewportElement.setPointerCapture?.(event.pointerId);
       const currentView = viewRef.current;
       setCommittedView(currentView);
       dragRef.current = {
@@ -1532,7 +1613,25 @@ export default function MapWorkspace({
     return () => {
       window.removeEventListener("pointerdown", handleNativePointerDown);
     };
-  }, [canWriteMapMarkers, routePlannerEnabled, startLongPress, startPinchZoomIfReady, startQuickDeedDrag, trackTouchPointer, view]);
+  }, [canWriteMapMarkers, routePlannerEnabled, startLongPress, startPinchZoomIfReady, startQuickDeedDrag, trackTouchPointer]);
+
+  const hasMapViewport = canViewMap && visualMap !== null;
+
+  useEffect(() => {
+    const viewportElement = viewportRef.current;
+
+    if (!hasMapViewport || viewportElement === null) {
+      return;
+    }
+
+    // React registers wheel listeners as passive, so preventDefault would be ignored
+    // and Ctrl+wheel / trackpad pinch would zoom the page instead of the map.
+    viewportElement.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      viewportElement.removeEventListener("wheel", handleWheel);
+    };
+  }, [handleWheel, hasMapViewport]);
 
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
@@ -1849,14 +1948,46 @@ export default function MapWorkspace({
       return;
     }
 
-    const timeoutId = window.setTimeout(() => {
-      void saveUserMapSettings(map.id, userMapSettings);
-    }, 250);
+    const pendingSave: PendingSettingsSave = {
+      mapId: map.id,
+      settings: userMapSettings,
+      timeoutId: window.setTimeout(() => {
+        if (pendingSettingsSaveRef.current === pendingSave) {
+          pendingSettingsSaveRef.current = null;
+        }
+
+        settingsSaveInFlightRef.current = saveUserMapSettings(pendingSave.mapId, pendingSave.settings);
+      }, 250)
+    };
+    pendingSettingsSaveRef.current = pendingSave;
 
     return () => {
-      window.clearTimeout(timeoutId);
+      // Leave the pending save in the ref: the next run replaces it, and on unmount
+      // or pagehide it is still sent (with keepalive) instead of being dropped.
+      window.clearTimeout(pendingSave.timeoutId);
     };
   }, [canViewMap, isShareMode, map, userMapSettings]);
+
+  useEffect(() => {
+    function sendPendingSettingsWithKeepalive() {
+      const pendingSave = pendingSettingsSaveRef.current;
+
+      if (pendingSave === null) {
+        return;
+      }
+
+      window.clearTimeout(pendingSave.timeoutId);
+      pendingSettingsSaveRef.current = null;
+      void saveUserMapSettings(pendingSave.mapId, pendingSave.settings, { keepalive: true });
+    }
+
+    window.addEventListener("pagehide", sendPendingSettingsWithKeepalive);
+
+    return () => {
+      window.removeEventListener("pagehide", sendPendingSettingsWithKeepalive);
+      sendPendingSettingsWithKeepalive();
+    };
+  }, []);
 
   useEffect(() => {
     if (!canViewMap || map === null || isShareMode || typeof window === "undefined") {
@@ -1910,8 +2041,7 @@ export default function MapWorkspace({
           onDragStart={preventNativeDrag}
           onContextMenu={handleContextMenu}
           onDoubleClick={handleDoubleClick}
-          onPointerDown={handlePointerDown}
-          onWheel={handleWheel}
+          ref={viewportRef}
         >
           <Image
             alt="Wurm Online map"
@@ -1936,7 +2066,7 @@ export default function MapWorkspace({
             color={markerColors.wildernessOverlay}
             containerRef={wildernessRef}
             layerName={selectedMapLayer?.name ?? null}
-            markers={visibleMarkers}
+            markers={wildernessMarkers}
             imageStyle={imageStyle}
             map={visualMap}
             mapSize={mapSize}
@@ -1986,34 +2116,7 @@ export default function MapWorkspace({
               onContextMenu={handleMarkerContextMenu}
               onDeedOverlayPointerDown={handleDeedResizePointerDown}
               onHoverEnd={scheduleHoverClose}
-              onHoverMove={(marker, event) => {
-                const coordinate = getMapCoordinate(event.clientX, event.clientY, view);
-                const markersUnderPointer = visualMap !== null && isInsideMap(coordinate, visualMap)
-                  ? getHoverMarkersAtCoordinate(
-                      displayedMarkersWithEditPreview,
-                      markerVisibility,
-                      coordinate,
-                      mapSize,
-                      { includePathMarkers: true }
-                    )
-                  : [];
-                const hoverMarkers = getUniqueMarkers(markersUnderPointer.length === 0
-                  ? [marker]
-                  : [...markersUnderPointer, marker]
-                );
-
-                if (hoverMarkers.length === 0) {
-                  setHoveredMarker(null);
-                  return;
-                }
-
-                setHoveredMarker({
-                  coordinate,
-                  markers: hoverMarkers,
-                  screenX: event.clientX,
-                  screenY: event.clientY
-                });
-              }}
+              onHoverMove={handleMarkerHoverMove}
               onMarkerPointerDown={handleMarkerRelocationPointerDown}
               roadwayEditMode={roadwayEditMode}
               view={markerView}
@@ -2088,7 +2191,7 @@ export default function MapWorkspace({
               }}
               onServerChange={(serverId) => {
                 if (serverId !== map.id) {
-                  navigateToServer(serverId);
+                  void flushPendingSettings().then(() => navigateToServer(serverId));
                 }
               }}
               onFavoriteServerChange={setFavoriteServerId}
@@ -2217,6 +2320,7 @@ export default function MapWorkspace({
             tileHighlight={tileHighlight}
             viewerCanWrite={canWriteMapMarkers}
             viewerIsAdmin={viewer?.isAdmin ?? false}
+            onFlushPendingSettings={flushPendingSettings}
             onLoadSettings={loadUserMapSettings}
             onMarkerColorsChange={setMarkerColors}
             onMarkerOpacitiesChange={setMarkerOpacities}
@@ -2511,7 +2615,17 @@ function getServerUniqueAlertSnapshot(): UniqueAlertSnapshot {
 function dismissUniqueAlertCycle(mapId: string, cycle: string | null): void {
   writeDismissedUniqueAlertCycle(mapId, cycle);
   uniqueAlertSnapshots.delete(mapId);
+  notifyUniqueAlertListeners();
+}
 
+// Drops the cached snapshots so a long-lived tab re-reads the clock (and dismissals) and the
+// alert appears once the respawn window passes.
+function refreshUniqueAlertSnapshots(): void {
+  uniqueAlertSnapshots.clear();
+  notifyUniqueAlertListeners();
+}
+
+function notifyUniqueAlertListeners(): void {
   for (const listener of uniqueAlertListeners) {
     listener();
   }
@@ -3637,6 +3751,7 @@ function WildernessOverlay({
   }, [color, mapSize, deeds, waterMaskUrl]);
 
   const [overlaySrc, setOverlaySrc] = useState<string | null>(null);
+  const hasOverlayRef = useRef(false);
 
   useEffect(() => {
     let isCancelled = false;
@@ -3647,6 +3762,9 @@ function WildernessOverlay({
       };
     }
 
+    // The first render builds immediately; later rebuilds (e.g. every pointermove while a
+    // deed is dragged or resized) are debounced so the full-map canvas is redrawn once idle.
+    const rebuildDelayMs = hasOverlayRef.current ? WILDERNESS_REBUILD_DEBOUNCE_MS : 0;
     const timeoutId = window.setTimeout(() => {
       const canvasWidth = mapSize.widthPx;
       const canvasHeight = mapSize.heightPx;
@@ -3657,6 +3775,7 @@ function WildernessOverlay({
 
       if (ctx === null) {
         if (!isCancelled) {
+          hasOverlayRef.current = false;
           setOverlaySrc(null);
         }
         return;
@@ -3702,6 +3821,7 @@ function WildernessOverlay({
           data[i] = (data[i] ?? 0) > 0 ? 255 : 0;
         }
         ctx.putImageData(imageData, 0, 0);
+        hasOverlayRef.current = true;
         setOverlaySrc(canvas.toDataURL());
       };
 
@@ -3723,7 +3843,7 @@ function WildernessOverlay({
       } else {
         applyMask();
       }
-    }, 0);
+    }, rebuildDelayMs);
 
     return () => {
       isCancelled = true;
@@ -3733,7 +3853,8 @@ function WildernessOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvasKey, visible, waterMaskUrl]);
 
-  if (!visible || overlaySrc === null) {
+  // Without deeds nothing is rebuilt, so never show a canvas left over from earlier deeds.
+  if (!visible || overlaySrc === null || deeds.length === 0) {
     return null;
   }
 
@@ -4559,23 +4680,29 @@ async function submitMarkerForm(
   const url = dialog.mode === "edit"
     ? `/api/markers/${dialog.marker.type}/${dialog.marker.id}`
     : `/api/maps/${mapId}/markers`;
-  const response = await fetch(url, {
-    body: JSON.stringify(payloadResult.payload),
-    headers: { "content-type": "application/json" },
-    method: dialog.mode === "edit" ? "PATCH" : "POST"
-  });
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setFormError(body?.error ?? "Marker could not be saved");
+  try {
+    const response = await fetch(url, {
+      body: JSON.stringify(payloadResult.payload),
+      headers: { "content-type": "application/json" },
+      method: dialog.mode === "edit" ? "PATCH" : "POST"
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      setFormError(body?.error ?? "Marker could not be saved");
+      return false;
+    }
+
+    const body = (await response.json()) as { marker: WorkspaceMarker };
+    setMarkers((current) => upsertMarker(current, body.marker));
+    setDialog(null);
+    setFormError(null);
+    return true;
+  } catch {
+    setFormError("Marker could not be saved");
     return false;
   }
-
-  const body = (await response.json()) as { marker: WorkspaceMarker };
-  setMarkers((current) => upsertMarker(current, body.marker));
-  setDialog(null);
-  setFormError(null);
-  return true;
 }
 
 async function deleteMarkerRequest(
@@ -4592,17 +4719,21 @@ async function deleteMarkerRequest(
     return;
   }
 
-  const response = await fetch(`/api/markers/${marker.type}/${marker.id}`, { method: "DELETE" });
+  try {
+    const response = await fetch(`/api/markers/${marker.type}/${marker.id}`, { method: "DELETE" });
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setFormError(body?.error ?? "Marker could not be deleted");
-    return;
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      setFormError(body?.error ?? "Marker could not be deleted");
+      return;
+    }
+
+    setMarkers((current) => current.filter((candidate) => candidate.id !== marker.id));
+    setDialog(null);
+    setFormError(null);
+  } catch {
+    setFormError("Marker could not be deleted");
   }
-
-  setMarkers((current) => current.filter((candidate) => candidate.id !== marker.id));
-  setDialog(null);
-  setFormError(null);
 }
 
 async function disbandDeedRequest(
@@ -4612,27 +4743,31 @@ async function disbandDeedRequest(
   setDialog: (dialog: DialogState | null) => void,
   setFormError: (error: string | null) => void
 ): Promise<void> {
-  const response = await fetch(`/api/markers/deed/${marker.id}/disband`, { method: "POST" });
+  try {
+    const response = await fetch(`/api/markers/deed/${marker.id}/disband`, { method: "POST" });
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setFormError(body?.error ?? "Deed could not be marked disbanded");
-    return;
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      setFormError(body?.error ?? "Deed could not be marked disbanded");
+      return;
+    }
+
+    const body = (await response.json()) as {
+      category: NoteCategory;
+      deletedMarkerId: string;
+      marker: WorkspaceMarker;
+    };
+
+    setNoteCategories((current) => upsertNoteCategory(current, body.category));
+    setMarkers((current) => upsertMarker(
+      current.filter((candidate) => candidate.id !== body.deletedMarkerId),
+      body.marker
+    ));
+    setDialog(null);
+    setFormError(null);
+  } catch {
+    setFormError("Deed could not be marked disbanded");
   }
-
-  const body = (await response.json()) as {
-    category: NoteCategory;
-    deletedMarkerId: string;
-    marker: WorkspaceMarker;
-  };
-
-  setNoteCategories((current) => upsertNoteCategory(current, body.category));
-  setMarkers((current) => upsertMarker(
-    current.filter((candidate) => candidate.id !== body.deletedMarkerId),
-    body.marker
-  ));
-  setDialog(null);
-  setFormError(null);
 }
 
 async function savePathDraft(
@@ -4657,22 +4792,27 @@ async function savePathDraft(
   const url = draft.mode === "edit" && draft.id !== undefined
     ? `/api/markers/${draft.type}/${draft.id}`
     : `/api/maps/${mapId}/markers`;
-  const response = await fetch(url, {
-    body: JSON.stringify(payload),
-    headers: { "content-type": "application/json" },
-    method: draft.mode === "edit" ? "PATCH" : "POST"
-  });
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setFormError(body?.error ?? "Path could not be saved");
-    return;
+  try {
+    const response = await fetch(url, {
+      body: JSON.stringify(payload),
+      headers: { "content-type": "application/json" },
+      method: draft.mode === "edit" ? "PATCH" : "POST"
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      setFormError(body?.error ?? "Path could not be saved");
+      return;
+    }
+
+    const body = (await response.json()) as { marker: WorkspaceMarker };
+    setMarkers((current) => upsertMarker(current, body.marker));
+    setPathDraft(null);
+    setFormError(null);
+  } catch {
+    setFormError("Path could not be saved");
   }
-
-  const body = (await response.json()) as { marker: WorkspaceMarker };
-  setMarkers((current) => upsertMarker(current, body.marker));
-  setPathDraft(null);
-  setFormError(null);
 }
 
 async function createAutoplannedTower(
@@ -4692,35 +4832,45 @@ async function createAutoplannedTower(
     x: coordinate.x,
     y: coordinate.y
   };
-  const response = await fetch(`/api/maps/${mapId}/markers`, {
-    body: JSON.stringify(payload),
-    headers: { "content-type": "application/json" },
-    method: "POST"
-  });
 
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    setFormError(body?.error ?? "Planned tower could not be created");
-    return;
-  }
+  try {
+    const response = await fetch(`/api/maps/${mapId}/markers`, {
+      body: JSON.stringify(payload),
+      headers: { "content-type": "application/json" },
+      method: "POST"
+    });
 
-  const body = (await response.json()) as { marker: WorkspaceMarker };
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { error?: string } | null;
+      setFormError(body?.error ?? "Planned tower could not be created");
+      return;
+    }
 
-  if (body.marker.type !== "tower") {
+    const body = (await response.json()) as { marker: WorkspaceMarker };
+
+    if (body.marker.type !== "tower") {
+      setFormError("Planned tower could not be created");
+      return;
+    }
+
+    setMarkers((current) => upsertMarker(current, body.marker));
+    setFormError(null);
+  } catch {
     setFormError("Planned tower could not be created");
-    return;
   }
-
-  setMarkers((current) => upsertMarker(current, body.marker));
-  setFormError(null);
 }
 
-async function saveUserMapSettings(mapId: string, settings: UserMapSettings): Promise<void> {
+async function saveUserMapSettings(
+  mapId: string,
+  settings: UserMapSettings,
+  options: { keepalive?: boolean } = {}
+): Promise<void> {
   try {
     await fetch(`/api/maps/${mapId}/settings`, {
       body: JSON.stringify(settings),
       headers: { "content-type": "application/json" },
-      method: "PATCH"
+      method: "PATCH",
+      ...(options.keepalive === true ? { keepalive: true } : {})
     });
   } catch {
     // Preference saves are best-effort; the next successful change will send the full settings payload.
@@ -6128,6 +6278,10 @@ function copyCoordinateLink(coordinate: MapCoordinate, serverId?: string): void 
 
 function preventNativeDrag(event: React.DragEvent<HTMLElement>): void {
   event.preventDefault();
+}
+
+function haveSameMarkerIds(first: readonly WorkspaceMarker[], second: readonly WorkspaceMarker[]): boolean {
+  return first.length === second.length && first.every((marker, index) => marker.id === second[index]?.id);
 }
 
 function cancelLongPress(ref: { current: LongPressState | null }): void {
