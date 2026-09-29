@@ -39,6 +39,8 @@ const navItems = [
   { href: "/admin/security", label: "Security" }
 ] as const;
 
+const ACCOUNTS_HREF = "/admin/accounts";
+
 function getActiveHref(pathname: string): string {
   if (pathname === "/admin") {
     return "/admin";
@@ -48,15 +50,22 @@ function getActiveHref(pathname: string): string {
   return match?.href ?? "/admin";
 }
 
-export function AdminNav() {
+/**
+ * `accountsOnly` hides the global-admin sections from operators, who can only
+ * use the accounts page.
+ */
+export function AdminNav({ accountsOnly = false }: { accountsOnly?: boolean }) {
   const pathname = usePathname();
   const activeHref = getActiveHref(pathname);
+  const visibleItems = accountsOnly
+    ? navItems.filter((item) => item.href === ACCOUNTS_HREF)
+    : navItems;
 
   return (
     <>
-      <Link className="admin-brand" href="/admin">Huginn</Link>
+      <Link className="admin-brand" href={accountsOnly ? ACCOUNTS_HREF : "/admin"}>Huginn</Link>
       <nav aria-label="Admin sections" className="admin-nav">
-        {navItems.map((item) => {
+        {visibleItems.map((item) => {
           const isActive = activeHref === item.href;
           return (
             <Link

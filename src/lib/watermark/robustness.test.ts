@@ -22,7 +22,6 @@ import { meanRedChromaSignal, mulberry32 } from "./test-helpers";
 const BASE_SIZE = 1024;
 
 const context: EmbedContext = {
-  mapId: "test-map",
   layerId: "test-map:default",
   userId: "user-42",
   watermarkNumber: 42,

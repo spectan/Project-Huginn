@@ -4,7 +4,7 @@ const USERNAME_PATTERN = /^[A-Za-z0-9_-]{3,32}$/;
 const MIN_PASSWORD_LENGTH = 12;
 const MAX_PASSWORD_LENGTH = 128;
 
-export type AuthCredentials = {
+type AuthCredentials = {
   password: string;
   username: string;
 };

@@ -133,6 +133,7 @@ describe("deleted marker service", () => {
 
   it("restores a deleted marker before the restore window expires", async () => {
     const auditEvents: unknown[] = [];
+    const restoreInputs: unknown[] = [];
     const dependencies: DeletedMarkerDependencies = {
       ...createDependencies(auditEvents),
       findDeletedTower: async () => ({
@@ -144,11 +145,10 @@ describe("deleted marker service", () => {
       recordAudit: async (event) => {
         auditEvents.push(event);
       },
-      restoreTower: async (id, input) => ({
-        id,
-        mapId: "map-1",
-        restoredByUserId: input.updatedByUserId
-      })
+      restoreTower: async (id, input) => {
+        restoreInputs.push(input);
+        return { id, mapId: "map-1", x: 100, y: 200 };
+      }
     };
 
     const result = await restoreDeletedMarker({
@@ -169,11 +169,139 @@ describe("deleted marker service", () => {
         action: "MARKER_RESTORED",
         actorUserId: "admin-id",
         mapId: "map-1",
-        metadata: { markerType: "tower" },
+        metadata: { markerType: "tower", x: 100, y: 200 },
         targetId: "tower-1",
         targetType: "TOWER"
       }
     ]);
+    expect(restoreInputs).toEqual([{ now, updatedByUserId: "admin-id" }]);
+  });
+
+  it("returns not found when a concurrent restore already won", async () => {
+    const auditEvents: unknown[] = [];
+    const dependencies: DeletedMarkerDependencies = {
+      ...createDependencies(auditEvents),
+      findDeletedTower: async () => ({
+        deletedAt: new Date("2026-05-10T10:00:00.000Z"),
+        deleteExpiresAt: expiresLater,
+        id: "tower-1",
+        mapId: "map-1"
+      }),
+      restoreTower: async () => null
+    };
+
+    const result = await restoreDeletedMarker({
+      actor: adminActor,
+      markerId: "tower-1",
+      markerType: "tower"
+    }, dependencies);
+
+    expect(result).toEqual({ ok: false, error: "Deleted marker was not found" });
+    expect(auditEvents).toEqual([]);
+  });
+
+  it("looks up and restores paths by their requested path type", async () => {
+    const lookups: unknown[] = [];
+    const restores: unknown[] = [];
+    const dependencies: DeletedMarkerDependencies = {
+      ...createDependencies(),
+      findDeletedPath: async (id, pathType) => {
+        lookups.push({ id, pathType });
+        return pathType === "bridge"
+          ? { deletedAt: now, deleteExpiresAt: expiresLater, id, mapId: "map-1" }
+          : null;
+      },
+      restorePath: async (id, input) => {
+        restores.push(input.pathType);
+        return { id, mapId: "map-1", x: 1, y: 2 };
+      }
+    };
+
+    const mismatched = await restoreDeletedMarker({
+      actor: adminActor,
+      markerId: "path-1",
+      markerType: "canal"
+    }, dependencies);
+    const matched = await restoreDeletedMarker({
+      actor: adminActor,
+      markerId: "path-1",
+      markerType: "bridge"
+    }, dependencies);
+
+    expect(mismatched).toEqual({ ok: false, error: "Deleted marker was not found" });
+    expect(matched.ok).toBe(true);
+    expect(lookups).toEqual([
+      { id: "path-1", pathType: "canal" },
+      { id: "path-1", pathType: "bridge" }
+    ]);
+    expect(restores).toEqual(["bridge"]);
+  });
+
+  it("audits the abandoned deed note retired when a disbanded deed is restored", async () => {
+    const auditEvents: unknown[] = [];
+    const dependencies: DeletedMarkerDependencies = {
+      ...createDependencies(auditEvents),
+      findDeletedDeed: async (id) => ({ deletedAt: now, deleteExpiresAt: expiresLater, id, mapId: "map-1" }),
+      restoreDeed: async (id) => ({
+        id,
+        mapId: "map-1",
+        retiredNote: { id: "note-9", x: 50, y: 60 },
+        x: 50,
+        y: 60
+      })
+    };
+
+    const result = await restoreDeletedMarker({
+      actor: adminActor,
+      markerId: "deed-1",
+      markerType: "deed"
+    }, dependencies);
+
+    expect(result.ok).toBe(true);
+    expect(auditEvents).toEqual([
+      expect.objectContaining({ action: "MARKER_RESTORED", targetId: "deed-1", targetType: "DEED" }),
+      {
+        action: "MARKER_DELETED",
+        actorUserId: "admin-id",
+        mapId: "map-1",
+        metadata: { markerType: "note", reason: "deed_restored", x: 50, y: 60 },
+        targetId: "note-9",
+        targetType: "NOTE"
+      }
+    ]);
+  });
+
+  it("merges deleted markers across types newest first and caps the total", async () => {
+    const base = {
+      deletedBy: null,
+      deleteExpiresAt: expiresLater,
+      map: { name: "Wurm" },
+      mapId: "map-1",
+      x: 1,
+      y: 2
+    };
+    const dependencies: DeletedMarkerDependencies = {
+      ...createDependencies(),
+      listRestorableDeletedMarkers: async () => ({
+        camps: [],
+        deeds: [
+          { ...base, deletedAt: new Date("2026-05-10T11:00:00.000Z"), founder: "F", id: "deed-new", name: "Deed" },
+          { ...base, deletedAt: new Date("2026-05-10T08:00:00.000Z"), founder: "F", id: "deed-old", name: "Deed" }
+        ],
+        locateSouls: [],
+        minedoors: [],
+        notes: [],
+        paths: [],
+        rifts: [],
+        towers: [
+          { ...base, deletedAt: new Date("2026-05-10T09:00:00.000Z"), id: "tower-mid", makerName: "", makerNumber: "" }
+        ]
+      })
+    };
+
+    const result = await listRestorableDeletedMarkers({ actor: adminActor, limit: 2 }, dependencies);
+
+    expect(result.ok && result.value.map((marker) => marker.id)).toEqual(["deed-new", "tower-mid"]);
   });
 
   it("does not restore markers after the restore window expires", async () => {
@@ -223,7 +351,7 @@ describe("deleted marker service alert detection triggers", () => {
         id: "tower-1",
         mapId: "map-1"
       }),
-      restoreTower: async (id) => ({ id, mapId: "map-1" })
+      restoreTower: async (id) => ({ id, mapId: "map-1", x: 100, y: 200 })
     };
 
     const result = await restoreDeletedMarker({

@@ -23,7 +23,7 @@ type MapPageProps = {
 };
 
 export default async function MapPage({ searchParams }: MapPageProps) {
-  const viewer = await getCurrentViewer();
+  const viewer = await getCurrentViewer({ includePendingApprovalCount: true });
   const params = await searchParams;
   const workspace = await getWorkspaceData(viewer, params?.server);
 

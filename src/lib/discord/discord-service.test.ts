@@ -177,6 +177,29 @@ describe("discord service", () => {
       expect(discordAppCom.ok).toBe(true);
     });
 
+    it("rejects non-boolean flag values instead of coercing them", async () => {
+      for (const value of ["false", "true", 0, 1, null]) {
+        const deps = createDependencies(null);
+
+        const result = await saveDiscordConfig(
+          { enabled: false, notifyApprovals: value, webhookUrl: WEBHOOK_URL },
+          deps
+        );
+
+        expect(result).toEqual({ ok: false, error: "notifyApprovals must be true or false" });
+        expect(deps.__test.saved).toHaveLength(0);
+      }
+    });
+
+    it("treats a missing flag as false", async () => {
+      const deps = createDependencies(null);
+
+      const result = await saveDiscordConfig({ enabled: true, webhookUrl: WEBHOOK_URL }, deps);
+
+      expect(result.ok).toBe(true);
+      expect(deps.__test.saved[0]).toMatchObject({ enabled: true, notifyApprovals: false });
+    });
+
     it("requires a webhook URL when enabled", async () => {
       const deps = createDependencies(null);
 
@@ -202,21 +225,21 @@ describe("discord service", () => {
       }
     });
 
-    it("coerces booleans and persists the full config", async () => {
+    it("persists the full config from boolean flags", async () => {
       const deps = createDependencies(null);
 
       const result = await saveDiscordConfig({
         webhookUrl: WEBHOOK_URL,
-        enabled: 1,
+        enabled: true,
         alertSeverityHigh: true,
-        alertSeverityMedium: "yes",
-        alertSeverityLow: 0,
+        alertSeverityMedium: true,
+        alertSeverityLow: false,
         notifyRegistrations: true,
         notifyApprovals: undefined,
         notifyMarkerCreated: true,
-        notifyMarkerUpdated: 1,
-        notifyMarkerDeleted: 0,
-        notifyShareLinks: "on"
+        notifyMarkerUpdated: true,
+        notifyMarkerDeleted: false,
+        notifyShareLinks: true
       }, deps);
 
       expect(result).toEqual({

@@ -17,7 +17,9 @@ import {
   resolveShareLink,
   SHARE_LINK_HOURS_INVALID_MESSAGE,
   SHARE_LINK_INVALID_MESSAGE,
+  SHARE_LINK_LAYER_INVALID_MESSAGE,
   type ShareDependencies,
+  type ShareLinkCreatorRecord,
   type ShareLinkAlertInput,
   type ShareLinkAuditInput
 } from "./share-service";
@@ -48,9 +50,17 @@ function createTestContext() {
   const auditEvents: ShareLinkAuditInput[] = [];
   const links: StoredShareLink[] = [];
   const settingsRows = new Map<string, unknown>();
-  const creators = new Map<string, { id: string; watermarkNumber: number | null }>();
+  const creators = new Map<string, ShareLinkCreatorRecord>();
+  const layers = new Set<string>(["map-1/layer-1"]);
 
-  creators.set("user-1", { id: "user-1", watermarkNumber: 1234 });
+  creators.set("user-1", {
+    accessLevel: "READ",
+    approvalStatus: "APPROVED",
+    id: "user-1",
+    isAdmin: false,
+    mapPermissions: [{ accessLevel: "READ", isOperator: false, mapId: "map-1" }],
+    watermarkNumber: 1234
+  });
 
   const dependencies: ShareDependencies = {
     createShareLink: vi.fn(async (input) => {
@@ -82,13 +92,21 @@ function createTestContext() {
       }
 
       return {
-        createdBy: creators.get(link.createdByUserId) ?? { id: link.createdByUserId, watermarkNumber: null },
+        createdBy: creators.get(link.createdByUserId) ?? {
+          accessLevel: "NONE",
+          approvalStatus: "PENDING",
+          id: link.createdByUserId,
+          isAdmin: false,
+          mapPermissions: [],
+          watermarkNumber: null
+        },
         expiresAt: link.expiresAt,
         layerId: link.layerId,
         mapId: link.mapId,
         settings: link.settings
       };
     }),
+    layerBelongsToMap: vi.fn(async ({ layerId, mapId }) => layers.has(`${mapId}/${layerId}`)),
     recordAudit: vi.fn(async (input) => {
       auditEvents.push(input);
     }),
@@ -103,6 +121,18 @@ function createTestContext() {
   };
 
   return { alerts, auditEvents, creators, dependencies, links, settingsRows };
+}
+
+function pushValidLink(links: StoredShareLink[], token: string, overrides: Partial<StoredShareLink> = {}): void {
+  links.push({
+    createdByUserId: "user-1",
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    layerId: null,
+    mapId: "map-1",
+    settings: DEFAULT_USER_MAP_SETTINGS,
+    tokenHash: hashShareToken(token),
+    ...overrides
+  });
 }
 
 describe("createShareLink", () => {
@@ -150,6 +180,37 @@ describe("createShareLink", () => {
     expect(result).toEqual({ ok: false, error: "Read access is required" });
     expect(links).toHaveLength(0);
     expect(dependencies.createShareLink).not.toHaveBeenCalled();
+  });
+
+  it("rejects layer ids that do not belong to the map", async () => {
+    const { dependencies, links } = createTestContext();
+
+    for (const layerId of ["layer-other-map", "x".repeat(200), 42]) {
+      const result = await createShareLink(
+        { actor: APPROVED_ACTOR, expiresInHours: 4, layerId, mapId: "map-1" },
+        dependencies
+      );
+
+      expect(result).toEqual({ ok: false, error: SHARE_LINK_LAYER_INVALID_MESSAGE });
+    }
+
+    expect(links).toHaveLength(0);
+  });
+
+  it("accepts stored layers of the map and the synthetic default layer", async () => {
+    const { dependencies, links } = createTestContext();
+
+    for (const layerId of ["layer-1", "map-1:default", "  "]) {
+      const result = await createShareLink(
+        { actor: APPROVED_ACTOR, expiresInHours: 4, layerId, mapId: "map-1" },
+        dependencies
+      );
+
+      expect(result.ok).toBe(true);
+    }
+
+    expect(links.map((link) => link.layerId)).toEqual(["layer-1", "map-1:default", null]);
+    expect(dependencies.layerBelongsToMap).toHaveBeenCalledWith({ layerId: "layer-1", mapId: "map-1" });
   });
 
   it("stores a sanitized settings snapshot and keeps other settings intact", async () => {
@@ -450,5 +511,33 @@ describe("resolveShareLink", () => {
     expect(result.value.link.createdBy).toEqual({ id: "user-1", watermarkNumber: 1234 });
     expect(result.value.link.settings.markerColors.towers).toBe("#00ff00");
     expect(result.value.link.settings.markerVisibility).toEqual(DEFAULT_USER_MAP_SETTINGS.markerVisibility);
+  });
+
+  it.each([
+    ["suspended", { approvalStatus: "REJECTED" as const }],
+    ["pending", { approvalStatus: "PENDING" as const }],
+    ["without map permission", { mapPermissions: [] }],
+    ["with access only to another map", {
+      mapPermissions: [{ accessLevel: "READ" as const, isOperator: false, mapId: "map-2" }]
+    }]
+  ])("rejects and deletes links whose creator is %s", async (_label, overrides) => {
+    const { creators, dependencies, links } = createTestContext();
+    creators.set("user-1", { ...creators.get("user-1")!, ...overrides });
+    pushValidLink(links, "revoked-token");
+
+    const result = await resolveShareLink("revoked-token", dependencies);
+
+    expect(result).toEqual({ ok: false, error: SHARE_LINK_INVALID_MESSAGE });
+    expect(links).toHaveLength(0);
+  });
+
+  it("keeps links working for approved global admin creators", async () => {
+    const { creators, dependencies, links } = createTestContext();
+    creators.set("user-1", { ...creators.get("user-1")!, isAdmin: true, mapPermissions: [] });
+    pushValidLink(links, "admin-token");
+
+    const result = await resolveShareLink("admin-token", dependencies);
+
+    expect(result.ok).toBe(true);
   });
 });

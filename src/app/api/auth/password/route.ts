@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { changeOwnPassword } from "@/lib/auth/auth-service";
+import { changeOwnPassword, TOO_MANY_ATTEMPTS_MESSAGE } from "@/lib/auth/auth-service";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
 import { createAuthDependencies } from "@/lib/auth/database";
 import { SESSION_COOKIE_NAME, hashSessionToken } from "@/lib/auth/session";
@@ -21,7 +21,10 @@ export async function PATCH(request: Request) {
   }, createAuthDependencies(getClientIp(request)));
 
   if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
+    return NextResponse.json(
+      { error: result.error },
+      { status: result.error === TOO_MANY_ATTEMPTS_MESSAGE ? 429 : 400 }
+    );
   }
 
   return NextResponse.json({ ok: true });

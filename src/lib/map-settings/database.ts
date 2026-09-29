@@ -2,9 +2,12 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { getFavoriteServerIdFromSettingsRows } from "./map-settings";
 import type {
+  SaveUserMapSettingsDependencies,
   SettingsProfilesDependencies,
   UserMapSettingsDependencies
 } from "./map-settings-service";
+
+type SettingsClient = Pick<Prisma.TransactionClient, "userMapSettings">;
 
 const PROFILE_SELECT = {
   name: true,
@@ -13,18 +16,11 @@ const PROFILE_SELECT = {
   updatedAt: true
 } as const;
 
-export function createUserMapSettingsDependencies(): UserMapSettingsDependencies {
+function createSettingsStore(
+  client: SettingsClient
+): Pick<UserMapSettingsDependencies, "findSettings" | "upsertSettings"> {
   return {
-    findMap: async (mapId) => prisma.map.findFirst({
-      select: {
-        id: true
-      },
-      where: {
-        id: mapId,
-        isActive: true
-      }
-    }),
-    findSettings: async (userId, mapId) => prisma.userMapSettings.findUnique({
+    findSettings: async (userId, mapId) => client.userMapSettings.findUnique({
       select: {
         settings: true
       },
@@ -35,7 +31,7 @@ export function createUserMapSettingsDependencies(): UserMapSettingsDependencies
         }
       }
     }),
-    upsertSettings: async ({ mapId, settings, userId }) => prisma.userMapSettings.upsert({
+    upsertSettings: async ({ mapId, settings, userId }) => client.userMapSettings.upsert({
       create: {
         mapId,
         settings: settings as unknown as Prisma.InputJsonValue,
@@ -53,6 +49,27 @@ export function createUserMapSettingsDependencies(): UserMapSettingsDependencies
           userId
         }
       }
+    })
+  };
+}
+
+export function createUserMapSettingsDependencies(): SaveUserMapSettingsDependencies {
+  return {
+    findMap: async (mapId) => prisma.map.findFirst({
+      select: {
+        id: true
+      },
+      where: {
+        id: mapId,
+        isActive: true
+      }
+    }),
+    ...createSettingsStore(prisma),
+    // An advisory lock (rather than SELECT ... FOR UPDATE) also serializes the
+    // first save, when no row exists yet to lock.
+    withSettingsLock: async ({ mapId, userId }, work) => prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`user-map-settings:${userId}:${mapId}`}))`;
+      return work(createSettingsStore(tx));
     })
   };
 }

@@ -21,7 +21,7 @@ type Actor = UserAccess & {
   id: string;
 };
 
-export type AuditHistoryAction =
+type AuditHistoryAction =
   | "REGISTRATION"
   | "LOGIN"
   | "LOGOUT"
@@ -38,13 +38,14 @@ export type AuditHistoryAction =
   | "MARKER_RESTORED"
   | "MARKER_CLEANED_UP"
   | "MAP_DATA_ACCESSED"
-  | "SHARE_LINK_CREATED";
+  | "SHARE_LINK_CREATED"
+  | "ALERT_DELETED";
 
 export type AuditHistoryActionGroup = "add" | "edit" | "delete" | "other";
 
 export type AuditHistoryOrder = "asc" | "desc";
 
-export type AuditHistoryTargetType =
+type AuditHistoryTargetType =
   | "USER"
   | "MAP"
   | "TOWER"

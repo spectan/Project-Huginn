@@ -4,7 +4,7 @@ import { ok } from "@/lib/domain/result";
 const mocks = vi.hoisted(() => ({
   currentViewer: null as null | {
     accessLevel: "WRITE";
-    approvalStatus: "APPROVED";
+    approvalStatus: "APPROVED" | "PENDING";
     id: string;
     isAdmin: boolean;
   },
@@ -81,6 +81,16 @@ describe("POST /api/admin/canaries/identify", () => {
     const nonAdminResponse = await POST(createRequest({ text: "dump" }));
 
     expect(nonAdminResponse.status).toBe(403);
+
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "PENDING",
+      id: "admin-1",
+      isAdmin: true
+    };
+    const unapprovedResponse = await POST(createRequest({ text: "dump" }));
+
+    expect(unapprovedResponse.status).toBe(403);
     expect(mocks.identifyCanaryLeaks).not.toHaveBeenCalled();
   });
 

@@ -54,7 +54,17 @@ export function createShareDependencies(): ShareDependencies {
       select: {
         createdBy: {
           select: {
+            accessLevel: true,
+            approvalStatus: true,
             id: true,
+            isAdmin: true,
+            mapPermissions: {
+              select: {
+                accessLevel: true,
+                isOperator: true,
+                mapId: true
+              }
+            },
             watermarkNumber: true
           }
         },
@@ -67,6 +77,14 @@ export function createShareDependencies(): ShareDependencies {
         tokenHash
       }
     }),
+    layerBelongsToMap: async ({ layerId, mapId }) => {
+      const layer = await prisma.mapLayer.findFirst({
+        select: { id: true },
+        where: { id: layerId, mapId }
+      });
+
+      return layer !== null;
+    },
     recordAudit: async (input) => {
       await prisma.auditEvent.create({
         data: {

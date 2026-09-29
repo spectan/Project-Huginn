@@ -916,29 +916,6 @@ body {
   overflow: visible;
 }
 
-.map-hover-details-list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-}
-
-.map-hover-details-list div {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.map-hover-details-list dt {
-  color: #cbd5e1;
-  font-weight: 700;
-}
-
-.map-hover-details-list dd {
-  margin: 0;
-  color: #ffffff;
-  text-align: right;
-}
-
 .map-hover-pill-stack {
   display: grid;
   gap: 6px;
@@ -946,10 +923,6 @@ body {
 
 .map-hover-marker-pill {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.map-hover-note-text {
-  color: #ffffff;
 }
 
 .map-marker-form {
@@ -987,33 +960,6 @@ body {
   grid-template-columns: minmax(0, 1fr) 36px;
   gap: 8px;
   align-items: end;
-}
-
-.map-note-category-create {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: end;
-}
-
-.map-note-category-create button,
-.map-icon-button {
-  min-height: 36px;
-  border: 1px solid rgba(96, 165, 250, 0.34);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: rgba(37, 99, 235, 0.32);
-  color: #dbeafe;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.map-icon-button {
-  width: 36px;
-  padding: 0;
-  font-size: 18px;
 }
 
 .map-marker-form span {
@@ -2298,7 +2244,8 @@ body {
   font-size: 11px;
 }
 
-.map-profile-error {
+.map-profile-error,
+.map-note-category-error {
   margin: 4px 0 0;
   color: #fca5a5;
   font-size: 11px;
@@ -2426,22 +2373,6 @@ body {
   cursor: pointer;
 }
 
-.map-account-admin-link {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 38px;
-  margin-top: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  border-radius: 8px;
-  padding: 0 12px;
-  background: #0f172a;
-  color: #e5e7eb;
-  font-size: 14px;
-  font-weight: 700;
-  text-decoration: none;
-}
-
 .map-account-administration-button {
   display: flex;
   align-items: center;
@@ -2517,84 +2448,6 @@ body {
   line-height: 1;
   opacity: 0.72;
   text-align: right;
-}
-
-.map-admin-users {
-  display: grid;
-  gap: 8px;
-  margin-top: 12px;
-}
-
-.map-admin-users p {
-  margin: 0;
-  color: #475569;
-  font-size: 14px;
-}
-
-.map-admin-user {
-  display: grid;
-  gap: 6px;
-  border-top: 1px solid rgba(15, 23, 42, 0.1);
-  padding-top: 8px;
-}
-
-.map-admin-user-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.map-admin-user-heading span {
-  font-size: 14px;
-  font-weight: 700;
-}
-
-.map-admin-user-heading small {
-  color: #64748b;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.map-admin-user label {
-  display: grid;
-  gap: 4px;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.map-admin-user select {
-  min-height: 32px;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 8px;
-  padding: 0 8px;
-  background: #ffffff;
-  color: #17202a;
-  font: inherit;
-}
-
-.map-admin-user-check {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.map-admin-user-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.map-admin-user button {
-  min-height: 32px;
-  border: 1px solid rgba(15, 23, 42, 0.16);
-  border-radius: 8px;
-  padding: 0 10px;
-  background: #ffffff;
-  color: #17202a;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
 }
 
 .map-layer-controls {

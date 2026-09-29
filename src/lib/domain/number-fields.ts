@@ -2,7 +2,7 @@ import { err, ok, type Result } from "./result";
 
 const DECIMAL_HUNDREDTHS_PATTERN = /^(?:0|[1-9]\d*)(?:\.(\d{1,2}))?$/;
 
-export type ParseResult<T> = Result<T>;
+type ParseResult<T> = Result<T>;
 
 export function parseQualityLevelHundredths(input: string): ParseResult<number> {
   return parseBoundedHundredths(input, 10000, "QL must be between 0.00 and 100.00");

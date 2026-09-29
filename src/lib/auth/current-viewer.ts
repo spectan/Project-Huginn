@@ -4,7 +4,14 @@ import { canManageAccounts } from "@/lib/domain/permissions";
 import { SESSION_COOKIE_NAME, hashSessionToken } from "./session";
 import { toViewer, type AuthViewer } from "./viewer";
 
-export async function getCurrentViewer(): Promise<AuthViewer | null> {
+/**
+ * Resolves the viewer for the current session cookie. The pending-approval
+ * count is only needed to render the account overlay badge, so it is opt-in to
+ * keep the extra query off API/image requests.
+ */
+export async function getCurrentViewer(
+  options: { includePendingApprovalCount?: boolean } = {}
+): Promise<AuthViewer | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
 
@@ -35,7 +42,7 @@ export async function getCurrentViewer(): Promise<AuthViewer | null> {
     return null;
   }
 
-  const pendingApprovalCount = canManageAccounts(session.user)
+  const pendingApprovalCount = options.includePendingApprovalCount === true && canManageAccounts(session.user)
     ? await prisma.user.count({
         where: {
           approvalStatus: "PENDING"

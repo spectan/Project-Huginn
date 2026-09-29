@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
     deleteShareLink: vi.fn(async () => {}),
     findMapName: vi.fn(async () => null),
     findShareLinkWithCreator: vi.fn(async () => null),
+    layerBelongsToMap: vi.fn(async () => true),
     recordAudit: vi.fn(async () => {}),
     settings: {
       findMap: vi.fn(async (mapId) => (mapId === "map-1" ? { id: mapId } : null)),
@@ -115,6 +116,25 @@ describe("POST /api/maps/[mapId]/share", () => {
         mapId: "map-1"
       })
     );
+  });
+
+  it("returns 400 when the layer does not belong to the map", async () => {
+    mocks.state.currentViewer = {
+      accessLevel: "READ",
+      approvalStatus: "APPROVED",
+      id: "user-1",
+      isAdmin: false,
+      mapPermissions: [{ accessLevel: "READ", isOperator: false, mapId: "map-1" }]
+    };
+    vi.mocked(mocks.dependencies.layerBelongsToMap).mockResolvedValueOnce(false);
+
+    const response = await POST(createShareRequest({ expiresInHours: 6, layerId: "layer-elsewhere" }), {
+      params: Promise.resolve({ mapId: "map-1" })
+    });
+
+    await expect(response.json()).resolves.toEqual({ error: "Layer was not found" });
+    expect(response.status).toBe(400);
+    expect(mocks.dependencies.createShareLink).not.toHaveBeenCalled();
   });
 
   it("returns 400 when the body is not valid JSON", async () => {

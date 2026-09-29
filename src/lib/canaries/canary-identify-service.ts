@@ -6,7 +6,7 @@ import {
 } from "./canary-identify";
 import type { CanaryRecord } from "./canary-service";
 
-export type CanaryIdentifyMatch = {
+type CanaryIdentifyMatch = {
   hits: CanaryHit[];
   mapId: string;
   mapName: string;

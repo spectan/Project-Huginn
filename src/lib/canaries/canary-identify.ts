@@ -1,4 +1,4 @@
-export type MarkerSignals = {
+type MarkerSignals = {
   coordinates: Array<{ x: number; y: number }>;
   ids: string[];
 };
@@ -18,15 +18,14 @@ export type CanaryHit = {
   y: number | null;
 };
 
-export type CanaryMatch = {
+type CanaryMatch = {
   hits: CanaryHit[];
   mapId: string;
   userId: string;
 };
 
-// Canary payloads use 25-char lowercase hex ids (see buildCanaryPayload in
-// canary-service.ts); cuid-shaped ids cover hand-pasted dumps of real markers.
-const CANARY_ID_PATTERN = /\b[0-9a-f]{25}\b/g;
+// Canary ids are cuid-shaped like real marker ids (see randomMarkerId in
+// canary-service.ts), so one pattern covers both.
 const CUID_ID_PATTERN = /\bc[0-9a-z]{20,24}\b/g;
 const KEYED_COORDINATE_PATTERN = /"x"\s*:\s*(-?\d+(?:\.\d+)?)\s*,\s*"y"\s*:\s*(-?\d+(?:\.\d+)?)/g;
 const PLAIN_COORDINATE_PATTERN = /(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/g;
@@ -129,9 +128,6 @@ function collectFromText(
   }
   for (const match of text.matchAll(PLAIN_COORDINATE_PATTERN)) {
     addCoordinate(coordinates, Number(match[1]), Number(match[2]));
-  }
-  for (const match of text.matchAll(CANARY_ID_PATTERN)) {
-    ids.add(match[0]);
   }
   for (const match of text.matchAll(CUID_ID_PATTERN)) {
     ids.add(match[0]);

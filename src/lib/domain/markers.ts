@@ -26,7 +26,7 @@ export const TOWER_TYPES = [
 export type TowerType = typeof TOWER_TYPES[number];
 export const DEFAULT_TOWER_TYPE: TowerType = "Freedom Isles";
 
-export type TowerInput = {
+type TowerInput = {
   x: number;
   y: number;
   ql: string;
@@ -48,9 +48,9 @@ export type TowerMarkerInput = {
   towerType: TowerType;
 };
 
-export type CampType = "Rift" | "Goblin";
+type CampType = "Rift" | "Goblin";
 
-export type DeedInput = {
+type DeedInput = {
   east: number;
   foundingDate: string;
   founder: string;
@@ -76,7 +76,7 @@ export type DeedMarkerInput = {
   y: number;
 };
 
-export type NoteInput = {
+type NoteInput = {
   category: string;
   title: string;
   x: number;
@@ -92,7 +92,7 @@ export type NoteMarkerInput = {
   text: string;
 };
 
-export type RiftInput = {
+type RiftInput = {
   arrivalDate: string;
   estimatedRiftTime: string;
   notes: string;
@@ -108,7 +108,7 @@ export type RiftMarkerInput = {
   y: number;
 };
 
-export type CampInput = {
+type CampInput = {
   campType: string;
   notes: string;
   x: number;
@@ -122,7 +122,7 @@ export type CampMarkerInput = {
   y: number;
 };
 
-export type MinedoorInput = {
+type MinedoorInput = {
   notes: string;
   strength: string;
   x: number;
@@ -136,7 +136,7 @@ export type MinedoorMarkerInput = {
   y: number;
 };
 
-export type LocateSoulInput = {
+type LocateSoulInput = {
   casterFacing: string;
   direction: string;
   distanceBand: string;
@@ -158,12 +158,12 @@ export type LocateSoulMarkerInput = {
 
 export type PathType = "bridge" | "canal" | "highway" | "tunnel";
 
-export type PathPointInput = {
+type PathPointInput = {
   x: number;
   y: number;
 };
 
-export type PathInput = {
+type PathInput = {
   name: string;
   notes: string;
   points: PathPointInput[];
@@ -300,15 +300,6 @@ export function validateDeedInput(
   const founder = normalizeRequiredText(input.founder, "Mayor");
   if (!founder.ok) {
     return founder;
-  }
-
-  if (
-    coordinate.value.x - west.value < 0 ||
-    coordinate.value.y - north.value < 0 ||
-    coordinate.value.x + east.value >= bounds.widthPx ||
-    coordinate.value.y + south.value >= bounds.heightPx
-  ) {
-    return err("Deed dimensions must fit inside map bounds");
   }
 
   if (

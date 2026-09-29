@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   isolateChromaImage: vi.fn(),
   currentViewer: null as null | {
     accessLevel: "WRITE";
-    approvalStatus: "APPROVED";
+    approvalStatus: "APPROVED" | "PENDING";
     id: string;
     isAdmin: boolean;
   }
@@ -43,6 +43,51 @@ describe("POST /api/admin/watermark-reveal", () => {
     const nonAdminResponse = await POST(createRevealRequest(true));
 
     expect(nonAdminResponse.status).toBe(403);
+    expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
+  });
+
+  it("requires the admin to be approved", async () => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "PENDING",
+      id: "admin-1",
+      isAdmin: true
+    };
+
+    const response = await POST(createRevealRequest(true));
+
+    expect(response.status).toBe(403);
+    expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
+  });
+
+  it("rejects an oversized content-length before reading the body", async () => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      id: "admin-1",
+      isAdmin: true
+    };
+    const request = createRevealRequest(true, { contentLength: String(25 * 1024 * 1024) });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(413);
+    expect(request.formData).not.toHaveBeenCalled();
+    expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
+  });
+
+  it("rejects an image file larger than 20 MB", async () => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      id: "admin-1",
+      isAdmin: true
+    };
+
+    const response = await POST(createRevealRequest(true, { imageBytes: 20 * 1024 * 1024 + 1 }));
+
+    await expect(response.json()).resolves.toEqual({ error: "Image must be 20 MB or smaller" });
+    expect(response.status).toBe(413);
     expect(mocks.isolateChromaImage).not.toHaveBeenCalled();
   });
 
@@ -95,16 +140,20 @@ describe("POST /api/admin/watermark-reveal", () => {
   });
 });
 
-function createRevealRequest(withImage: boolean): Request {
+function createRevealRequest(
+  withImage: boolean,
+  { contentLength = null, imageBytes = 3 }: { contentLength?: string | null; imageBytes?: number } = {}
+): Request {
   const formData = new FormData();
   if (withImage) {
-    formData.append("image", new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }), "shot.png");
+    formData.append("image", new Blob([new Uint8Array(imageBytes)], { type: "image/png" }), "shot.png");
   }
 
   // Route handlers only consume request.formData(); passing a real Request
   // would round-trip the Blob through undici's parser, which returns a
   // cross-realm File in the jsdom test environment and breaks instanceof.
   return {
-    formData: async () => formData
+    formData: vi.fn(async () => formData),
+    headers: new Headers(contentLength === null ? {} : { "content-length": contentLength })
   } as unknown as Request;
 }

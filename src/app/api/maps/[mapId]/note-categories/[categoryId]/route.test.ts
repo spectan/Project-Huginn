@@ -118,6 +118,25 @@ describe("PATCH /api/maps/[mapId]/note-categories/[categoryId]", () => {
       where: { category: "Landmarks", mapId: "map-1" }
     });
   });
+
+  it("refuses to rename the General category", async () => {
+    mocks.noteCategoryFindFirst.mockResolvedValueOnce({
+      color: null,
+      id: "category-general",
+      markerShape: "circle",
+      mapId: "map-1",
+      name: "General",
+      pipSize: 3
+    });
+
+    const response = await PATCH(createCategoryRequest({ name: "Misc" }, "PATCH"), {
+      params: Promise.resolve({ categoryId: "category-general", mapId: "map-1" })
+    });
+
+    await expect(response.json()).resolves.toEqual({ error: "General category cannot be renamed" });
+    expect(response.status).toBe(400);
+    expect(mocks.noteCategoryUpdate).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/maps/[mapId]/note-categories/[categoryId]", () => {

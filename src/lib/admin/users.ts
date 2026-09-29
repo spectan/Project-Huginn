@@ -1,7 +1,13 @@
 import { triggerAlertDetection } from "@/lib/alerts/alert-service";
+import { createDiscordDependencies } from "@/lib/discord/database";
+import {
+  dispatchDiscordNotification,
+  type DiscordNotificationMessage
+} from "@/lib/discord/discord-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
 import {
   canAdminister,
+  canReadMap,
   type AccessLevel,
   type ApprovalStatus,
   type MapPermission,
@@ -11,6 +17,7 @@ import { err, ok, type Result } from "@/lib/domain/result";
 
 type AdminActor = UserAccess & {
   id: string;
+  username: string;
 };
 
 type AdminUserRecord = {
@@ -40,7 +47,7 @@ export type AdminUserSummary = {
   username: string;
 };
 
-export type AdminUsersList = {
+type AdminUsersList = {
   maps: AdminMapSummary[];
   users: AdminUserSummary[];
   viewerCanManageGlobalAccounts: boolean;
@@ -55,6 +62,11 @@ type AdminUserAuditInput = {
 };
 
 export type AdminUserDependencies = {
+  deleteShareLinksOutsideMaps(input: {
+    keepMapIds: readonly string[];
+    userId: string;
+  }): Promise<void>;
+  findUser(userId: string): Promise<AdminUserRecord | null>;
   hashPassword(password: string): Promise<string>;
   listMaps(): Promise<AdminMapSummary[]>;
   listUsers(): Promise<AdminUserRecord[]>;
@@ -68,7 +80,8 @@ export type AdminUserDependencies = {
     userId: string;
   }): Promise<AdminUserRecord | null>;
   updateUserPrivileges(input: {
-    approvedByUserId: string;
+    /** Set when the update approves a not-yet-approved account. */
+    approvedByUserId: string | null;
     isAdmin: boolean;
     mapPermissions: readonly MapPermission[];
     userId: string;
@@ -116,11 +129,10 @@ export async function updateAdminUser(
     return err("Admins cannot change their own account");
   }
 
-  const [users, maps] = await Promise.all([
-    dependencies.listUsers(),
+  const [existingUser, maps] = await Promise.all([
+    dependencies.findUser(input.userId),
     dependencies.listMaps()
   ]);
-  const existingUser = users.find((user) => user.id === input.userId) ?? null;
 
   if (existingUser === null) {
     return err("User was not found");
@@ -137,6 +149,10 @@ export async function updateAdminUser(
     return err("Operators cannot grant global admin access");
   }
 
+  if (!globalAdmin && existingUser.approvalStatus === "REJECTED") {
+    return err("Operators cannot approve rejected accounts");
+  }
+
   const normalizedPermissionsResult = normalizeRequestedMapPermissions(input.mapPermissions, maps);
 
   if (!normalizedPermissionsResult.ok) {
@@ -147,11 +163,16 @@ export async function updateAdminUser(
     return err("Operators can only change permissions for their operated servers");
   }
 
-  const nextMapPermissions = globalAdmin
-    ? normalizedPermissionsResult.value
-    : mergeOperatorPermissions(existingUser.mapPermissions, normalizedPermissionsResult.value, operatedMapIds);
+  // Only the maps the actor can see are editable; permissions on other maps
+  // (unoperated servers for operators, inactive maps for admins) are preserved.
+  const editableMapIds = globalAdmin ? new Set(maps.map((map) => map.id)) : operatedMapIds;
+  const nextMapPermissions = mergePreservedPermissions(
+    existingUser.mapPermissions,
+    normalizedPermissionsResult.value,
+    editableMapIds
+  );
   const user = await dependencies.updateUserPrivileges({
-    approvedByUserId: input.actor.id,
+    approvedByUserId: existingUser.approvalStatus === "APPROVED" ? null : input.actor.id,
     isAdmin: globalAdmin ? input.isAdmin : existingUser.isAdmin,
     mapPermissions: nextMapPermissions,
     userId: input.userId
@@ -159,6 +180,16 @@ export async function updateAdminUser(
 
   if (user === null) {
     return err("User was not found");
+  }
+
+  await revokeUnreadableShareLinks(user, dependencies);
+
+  if (existingUser.approvalStatus !== "APPROVED" && user.approvalStatus === "APPROVED") {
+    dispatchDiscordSafely({
+      kind: "approval",
+      username: user.username,
+      actorUsername: input.actor.username
+    });
   }
 
   await recordAudit(dependencies, {
@@ -334,15 +365,32 @@ function normalizeRequestedMapPermissions(
   return ok(sortMapPermissions(Array.from(normalized.values())));
 }
 
-function mergeOperatorPermissions(
+function mergePreservedPermissions(
   existingPermissions: readonly MapPermission[],
   requestedPermissions: readonly MapPermission[],
-  operatedMapIds: Set<string>
+  editableMapIds: ReadonlySet<string>
 ): MapPermission[] {
   return sortMapPermissions([
-    ...existingPermissions.filter((permission) => !operatedMapIds.has(permission.mapId)),
+    ...existingPermissions.filter((permission) => !editableMapIds.has(permission.mapId)),
     ...requestedPermissions
   ]);
+}
+
+// Share links must not outlive the creator's own read access to the map.
+async function revokeUnreadableShareLinks(
+  user: AdminUserRecord,
+  dependencies: AdminUserDependencies
+): Promise<void> {
+  if (canAdminister(user)) {
+    return;
+  }
+
+  await dependencies.deleteShareLinksOutsideMaps({
+    keepMapIds: user.mapPermissions
+      .filter((permission) => canReadMap(user, permission.mapId))
+      .map((permission) => permission.mapId),
+    userId: user.id
+  });
 }
 
 function sortMapPermissions(permissions: readonly MapPermission[]): MapPermission[] {
@@ -375,6 +423,14 @@ async function recordAudit(
 ): Promise<void> {
   assertNoCoordinateMetadata(input.metadata);
   await dependencies.recordAudit(input);
+}
+
+function dispatchDiscordSafely(message: DiscordNotificationMessage): void {
+  try {
+    dispatchDiscordNotification(message, createDiscordDependencies()).catch(() => undefined);
+  } catch {
+    // Discord notifications are fire-and-forget; failures must not block the request.
+  }
 }
 
 function triggerAlertsSafely(): void {

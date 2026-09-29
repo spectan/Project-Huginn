@@ -1,12 +1,24 @@
 import { NextResponse } from "next/server";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
+import { canViewAuditLog } from "@/lib/domain/permissions";
 import { isolateChromaImage } from "@/lib/watermark/enhance";
+
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+// Multipart framing (boundaries, part headers) on top of the file itself.
+const MAX_MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+const UPLOAD_TOO_LARGE_MESSAGE = "Image must be 20 MB or smaller";
 
 export async function POST(request: Request) {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !viewer.isAdmin) {
+  if (viewer === null || !canViewAuditLog(viewer)) {
     return NextResponse.json({ error: "Admin access is required" }, { status: 403 });
+  }
+
+  // Reject oversized uploads before buffering the multipart body.
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_UPLOAD_BYTES + MAX_MULTIPART_OVERHEAD_BYTES) {
+    return NextResponse.json({ error: UPLOAD_TOO_LARGE_MESSAGE }, { status: 413 });
   }
 
   let formData: FormData;
@@ -19,6 +31,10 @@ export async function POST(request: Request) {
   const imageFile = formData.get("image");
   if (!(imageFile instanceof Blob)) {
     return NextResponse.json({ error: "Image is required" }, { status: 400 });
+  }
+
+  if (imageFile.size > MAX_UPLOAD_BYTES) {
+    return NextResponse.json({ error: UPLOAD_TOO_LARGE_MESSAGE }, { status: 413 });
   }
 
   const imageBuffer = Buffer.from(await imageFile.arrayBuffer());

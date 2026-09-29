@@ -32,6 +32,17 @@ describe("AdminNav", () => {
     expect(screen.queryByRole("link", { name: "Watermark" })).toBeNull();
   });
 
+  it("shows only the accounts section to operators", () => {
+    usePathnameMock.mockReturnValue("/admin/accounts");
+
+    render(React.createElement(AdminNav, { accountsOnly: true }));
+
+    const brandLink = screen.getByRole("link", { name: "Huginn" });
+    expect(brandLink.getAttribute("href")).toBe("/admin/accounts");
+    const links = screen.getAllByRole("link").filter((link) => link !== brandLink);
+    expect(links.map((link) => link.textContent)).toEqual(["Accounts"]);
+  });
+
   it("marks the dashboard active on the admin root", () => {
     render(React.createElement(AdminNav));
 

@@ -61,7 +61,7 @@ describe("DELETE /api/admin/alerts/[id]", () => {
     const response = await DELETE(new Request("http://localhost/api/admin/alerts/alert-1", { method: "DELETE" }), context);
 
     expect(response.status).toBe(200);
-    expect(mocks.deleteAlert).toHaveBeenCalledWith("alert-1");
+    expect(mocks.deleteAlert).toHaveBeenCalledWith("alert-1", "admin-1");
     await expect(response.json()).resolves.toEqual({ ok: true });
   });
 

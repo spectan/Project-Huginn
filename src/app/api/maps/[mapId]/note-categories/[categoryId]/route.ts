@@ -51,6 +51,11 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Category was not found" }, { status: 404 });
   }
 
+  // General is the fallback category that DELETE reassigns notes to.
+  if (existing.name === DEFAULT_NOTE_CATEGORY_NAME && input.value.name !== DEFAULT_NOTE_CATEGORY_NAME) {
+    return NextResponse.json({ error: "General category cannot be renamed" }, { status: 400 });
+  }
+
   try {
     const category = await prisma.$transaction(async (transaction) => {
       const updated = await transaction.noteCategory.update({

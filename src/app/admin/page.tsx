@@ -1,4 +1,6 @@
+import { redirect } from "next/navigation";
 import { getCurrentViewer } from "@/lib/auth/current-viewer";
+import { canAdminister, canManageAccounts } from "@/lib/domain/permissions";
 import { prisma } from "@/lib/db/prisma";
 import { AdminAccessDenied } from "./admin-access-denied";
 import { AlertsSection } from "./alerts-section";
@@ -8,7 +10,12 @@ const DAY_IN_MS = 24 * 60 * 60 * 1000;
 export default async function AdminDashboardPage() {
   const viewer = await getCurrentViewer();
 
-  if (viewer === null || !viewer.isAdmin) {
+  if (viewer === null || !canAdminister(viewer)) {
+    // Operators can only manage accounts, so send them straight there.
+    if (viewer !== null && canManageAccounts(viewer)) {
+      redirect("/admin/accounts");
+    }
+
     return <AdminAccessDenied title="Dashboard" />;
   }
 

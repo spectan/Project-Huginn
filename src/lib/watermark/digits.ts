@@ -49,7 +49,7 @@ function fmt(value: number): string {
   return value.toFixed(4).replace(/\.?0+$/, "");
 }
 
-export interface NumberTileOptions {
+interface NumberTileOptions {
   tileWidth: number;
   tileHeight: number;
   digitHeight: number;

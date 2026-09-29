@@ -216,6 +216,16 @@ describe("PUT /api/maps/[mapId]/settings/profiles/[slot]", () => {
     });
     expect(response.status).toBe(201);
   });
+
+  it("returns 200 when overwriting an existing slot", async () => {
+    mocks.state.currentViewer = viewer;
+    mocks.state.profiles.set("user-1:1", { name: "Old", settings: {}, slot: 1, updatedAt: new Date() });
+
+    const response = await PUT(createJsonRequest("PUT", "1", { name: "Hunting" }), createContext("1"));
+
+    await expect(response.json()).resolves.toMatchObject({ profile: { name: "Hunting", slot: 1 } });
+    expect(response.status).toBe(200);
+  });
 });
 
 describe("PATCH /api/maps/[mapId]/settings/profiles/[slot]", () => {

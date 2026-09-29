@@ -45,6 +45,12 @@ import {
   type UserAccess
 } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
+import {
+  MAP_NOT_FOUND,
+  MARKER_NOT_FOUND,
+  READ_ACCESS_REQUIRED,
+  WRITE_ACCESS_REQUIRED
+} from "./marker-errors";
 import type {
   CampWorkspaceMarker,
   DeedWorkspaceMarker,
@@ -198,6 +204,7 @@ export type MarkerServiceDependencies = CanaryDependencies & {
   findPath(id: string): Promise<MarkerWithMap<PathRecord> | null>;
   findRift(id: string): Promise<MarkerWithMap<RiftRecord> | null>;
   findTower(id: string): Promise<MarkerWithMap<TowerRecord> | null>;
+  noteCategoryExists(mapId: string, name: string): Promise<boolean>;
   listActiveMarkers(mapId: string): Promise<{
     camps: CampRecord[];
     deeds: DeedRecord[];
@@ -261,7 +268,7 @@ type PathCreateMarkerInput = { type: PathType } & {
   width: number;
 };
 
-export type CreateMarkerInput =
+type CreateMarkerInput =
   | ({ type: "tower" } & {
       damage: string;
       makerName: string;
@@ -326,14 +333,14 @@ export async function listMarkers(
   dependencies: MarkerServiceDependencies
 ): Promise<Result<{ map: WorkspaceMap; markers: WorkspaceMarker[] }>> {
   if (!canReadMap(input.actor, input.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, input.mapId);
-    return err("Read access is required");
+    await auditAuthorizationFailure(dependencies, input.actor, input.mapId, "MARKER_READ");
+    return err(READ_ACCESS_REQUIRED);
   }
 
   const map = await dependencies.findMap(input.mapId);
 
   if (map === null) {
-    return err("Map was not found");
+    return err(MAP_NOT_FOUND);
   }
 
   const markers = await dependencies.listActiveMarkers(map.id);
@@ -380,14 +387,14 @@ export async function createMarker(
   dependencies: MarkerServiceDependencies
 ): Promise<Result<WorkspaceMarker>> {
   if (!canWriteMarkers(input.actor, input.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, input.mapId);
-    return err("Write access is required");
+    await auditAuthorizationFailure(dependencies, input.actor, input.mapId, "MARKER_WRITE");
+    return err(WRITE_ACCESS_REQUIRED);
   }
 
   const map = await dependencies.findMap(input.mapId);
 
   if (map === null) {
-    return err("Map was not found");
+    return err(MAP_NOT_FOUND);
   }
 
   const bounds = { heightPx: map.heightPx, widthPx: map.widthPx };
@@ -533,6 +540,12 @@ export async function createMarker(
     return note;
   }
 
+  const category = await requireNoteCategory(dependencies, map.id, note.value.category);
+
+  if (!category.ok) {
+    return category;
+  }
+
   const created = await dependencies.createNote({
     ...note.value,
     createdByUserId: input.actor.id,
@@ -567,11 +580,11 @@ export async function updateMarker(
     const existing = await dependencies.findTower(input.markerId);
 
     if (existing === null || markerInput.value.type !== "tower") {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validateTowerInput(markerInput.value, existing.map);
@@ -585,7 +598,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializeTower(updated);
@@ -597,11 +610,11 @@ export async function updateMarker(
     const existing = await dependencies.findDeed(input.markerId);
 
     if (existing === null || markerInput.value.type !== "deed") {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validateDeedInput(markerInput.value, existing.map);
@@ -615,7 +628,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializeDeed(updated);
@@ -627,11 +640,11 @@ export async function updateMarker(
     const existing = await dependencies.findRift(input.markerId);
 
     if (existing === null || markerInput.value.type !== "rift") {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validateRiftInput(markerInput.value, existing.map);
@@ -645,7 +658,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializeRift(updated);
@@ -657,11 +670,11 @@ export async function updateMarker(
     const existing = await dependencies.findCamp(input.markerId);
 
     if (existing === null || markerInput.value.type !== "camp") {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validateCampInput(markerInput.value, existing.map);
@@ -675,7 +688,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializeCamp(updated);
@@ -687,11 +700,11 @@ export async function updateMarker(
     const existing = await dependencies.findMinedoor(input.markerId);
 
     if (existing === null || markerInput.value.type !== "minedoor") {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validateMinedoorInput(markerInput.value, existing.map);
@@ -705,7 +718,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializeMinedoor(updated);
@@ -717,11 +730,11 @@ export async function updateMarker(
     const existing = await dependencies.findLocateSoul(input.markerId);
 
     if (existing === null || markerInput.value.type !== "locateSoul") {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validateLocateSoulInput(markerInput.value, existing.map);
@@ -735,7 +748,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializeLocateSoul(updated);
@@ -747,11 +760,11 @@ export async function updateMarker(
     const existing = await dependencies.findPath(input.markerId);
 
     if (existing === null || !isPathCreateMarkerInput(markerInput.value) || existing.pathType !== input.markerType) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
     if (!canWriteMarkers(input.actor, existing.mapId)) {
-      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-      return err("Write access is required");
+      await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+      return err(WRITE_ACCESS_REQUIRED);
     }
 
     const validated = validatePathInput(markerInput.value, existing.map);
@@ -765,7 +778,7 @@ export async function updateMarker(
     });
 
     if (updated === null) {
-      return err("Marker was not found");
+      return err(MARKER_NOT_FOUND);
     }
 
     const marker = serializePath(updated);
@@ -776,16 +789,21 @@ export async function updateMarker(
   const existing = await dependencies.findNote(input.markerId);
 
   if (existing === null || markerInput.value.type !== "note") {
-    return err("Marker was not found");
+    return err(MARKER_NOT_FOUND);
   }
   if (!canWriteMarkers(input.actor, existing.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-    return err("Write access is required");
+    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+    return err(WRITE_ACCESS_REQUIRED);
   }
 
   const validated = validateNoteInput(markerInput.value, existing.map);
   if (!validated.ok) {
     return validated;
+  }
+
+  const category = await requireNoteCategory(dependencies, existing.mapId, validated.value.category);
+  if (!category.ok) {
+    return category;
   }
 
   const updated = await dependencies.updateNote(input.markerId, {
@@ -794,7 +812,7 @@ export async function updateMarker(
   });
 
   if (updated === null) {
-    return err("Marker was not found");
+    return err(MARKER_NOT_FOUND);
   }
 
   const marker = serializeNote(updated);
@@ -816,11 +834,11 @@ export async function disbandDeedMarker(
   const existing = await dependencies.findDeed(input.markerId);
 
   if (existing === null) {
-    return err("Marker was not found");
+    return err(MARKER_NOT_FOUND);
   }
   if (!canWriteMarkers(input.actor, existing.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-    return err("Write access is required");
+    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+    return err(WRITE_ACCESS_REQUIRED);
   }
 
   const note = validateNoteInput({
@@ -851,7 +869,7 @@ export async function disbandDeedMarker(
   });
 
   if (conversion === null) {
-    return err("Marker was not found");
+    return err(MARKER_NOT_FOUND);
   }
 
   const marker = serializeNote(conversion.note);
@@ -1024,12 +1042,12 @@ export async function deleteMarker(
   const existing = await findExistingMarkerForDelete(input, dependencies);
 
   if (existing === null) {
-    return err("Marker was not found");
+    return err(MARKER_NOT_FOUND);
   }
 
   if (!canWriteMarkers(input.actor, existing.mapId)) {
-    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId);
-    return err("Write access is required");
+    await auditAuthorizationFailure(dependencies, input.actor, existing.mapId, "MARKER_WRITE");
+    return err(WRITE_ACCESS_REQUIRED);
   }
 
   const deletedAt = dependencies.now();
@@ -1042,7 +1060,7 @@ export async function deleteMarker(
   const deleted = await softDeleteMarker(input, softDeleteInput, dependencies);
 
   if (deleted === null) {
-    return err("Marker was not found");
+    return err(MARKER_NOT_FOUND);
   }
 
   await recordAudit(dependencies, {
@@ -1376,7 +1394,10 @@ async function findExistingMarkerForDelete(
   }
 
   if (isPathMarkerType(input.markerType)) {
-    return dependencies.findPath(input.markerId);
+    const path = await dependencies.findPath(input.markerId);
+
+    // A path id addressed under a different path type is treated as not found.
+    return path === null || path.pathType !== input.markerType ? null : path;
   }
 
   return dependencies.findNote(input.markerId);
@@ -1385,17 +1406,30 @@ async function findExistingMarkerForDelete(
 async function auditAuthorizationFailure(
   dependencies: MarkerServiceDependencies,
   actor: Actor,
-  mapId: string | null
+  mapId: string | null,
+  attemptedAction: "MARKER_READ" | "MARKER_WRITE"
 ): Promise<void> {
   await recordAudit(dependencies, {
     action: "FAILED_AUTHORIZATION",
     actorUserId: actor.id,
     mapId,
-    metadata: { attemptedAction: "MARKER_WRITE" },
+    metadata: { attemptedAction },
     targetId: mapId,
     targetType: "MAP"
   });
   triggerAlertsSafely();
+}
+
+async function requireNoteCategory(
+  dependencies: MarkerServiceDependencies,
+  mapId: string,
+  category: string
+): Promise<Result<true>> {
+  if (!await dependencies.noteCategoryExists(mapId, category)) {
+    return err("Note category does not exist on this map");
+  }
+
+  return ok(true);
 }
 
 async function auditMarkerWrite(

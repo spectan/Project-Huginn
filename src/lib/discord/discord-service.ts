@@ -82,6 +82,21 @@ const ACCOUNT_EVENT_COLOR = 0x22c55e;
 const SHARE_LINK_COLOR = 0x8b5cf6;
 const TEST_MESSAGE_COLOR = 0x9ca3af;
 
+const DISCORD_BOOLEAN_KEYS = [
+  "enabled",
+  "alertSeverityHigh",
+  "alertSeverityMedium",
+  "alertSeverityLow",
+  "notifyRegistrations",
+  "notifyApprovals",
+  "notifyMarkerCreated",
+  "notifyMarkerUpdated",
+  "notifyMarkerDeleted",
+  "notifyShareLinks"
+] as const satisfies ReadonlyArray<keyof DiscordConfigData>;
+
+type DiscordBooleanKey = (typeof DISCORD_BOOLEAN_KEYS)[number];
+
 export async function getDiscordConfig(
   dependencies: DiscordServiceDependencies
 ): Promise<Result<DiscordConfigData>> {
@@ -102,24 +117,25 @@ export async function saveDiscordConfig(
     return err("Webhook URL must be a Discord webhook URL");
   }
 
-  const enabled = getBoolean(input, "enabled");
+  const flags = {} as Record<DiscordBooleanKey, boolean>;
 
-  if (enabled && webhookUrl.length === 0) {
+  for (const key of DISCORD_BOOLEAN_KEYS) {
+    const value = getBoolean(input, key);
+
+    if (value === null) {
+      return err(`${key} must be true or false`);
+    }
+
+    flags[key] = value;
+  }
+
+  if (flags.enabled && webhookUrl.length === 0) {
     return err("A webhook URL is required when Discord notifications are enabled");
   }
 
   const saved = await dependencies.saveConfig({
     webhookUrl,
-    enabled,
-    alertSeverityHigh: getBoolean(input, "alertSeverityHigh"),
-    alertSeverityMedium: getBoolean(input, "alertSeverityMedium"),
-    alertSeverityLow: getBoolean(input, "alertSeverityLow"),
-    notifyRegistrations: getBoolean(input, "notifyRegistrations"),
-    notifyApprovals: getBoolean(input, "notifyApprovals"),
-    notifyMarkerCreated: getBoolean(input, "notifyMarkerCreated"),
-    notifyMarkerUpdated: getBoolean(input, "notifyMarkerUpdated"),
-    notifyMarkerDeleted: getBoolean(input, "notifyMarkerDeleted"),
-    notifyShareLinks: getBoolean(input, "notifyShareLinks")
+    ...flags
   });
 
   return ok(saved);
@@ -349,10 +365,13 @@ function getString(input: object, key: string): string {
   return typeof value === "string" ? value : "";
 }
 
-function getBoolean(input: object, key: string): boolean {
-  if (!(key in input)) {
+/** Absent (or undefined) means false; any non-boolean value returns null. */
+function getBoolean(input: object, key: string): boolean | null {
+  const value = key in input ? input[key as keyof typeof input] : undefined;
+
+  if (value === undefined) {
     return false;
   }
 
-  return Boolean(input[key as keyof typeof input]);
+  return typeof value === "boolean" ? value : null;
 }

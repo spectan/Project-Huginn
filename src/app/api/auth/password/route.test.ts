@@ -22,7 +22,8 @@ vi.mock("@/lib/auth/database", () => ({
 }));
 
 vi.mock("@/lib/auth/auth-service", () => ({
-  changeOwnPassword: mocks.changeOwnPassword
+  changeOwnPassword: mocks.changeOwnPassword,
+  TOO_MANY_ATTEMPTS_MESSAGE: "Too many failed attempts. Try again later."
 }));
 
 vi.mock("next/headers", () => ({
@@ -77,6 +78,23 @@ describe("PATCH /api/auth/password", () => {
       currentSessionTokenHash: hashSessionToken("current-session-token"),
       input: body
     }, mocks.dependencies);
+  });
+
+  it.each([
+    ["Current password is incorrect", 400],
+    ["Too many failed attempts. Try again later.", 429]
+  ])("maps %s to HTTP %i", async (error, status) => {
+    mocks.currentViewer = {
+      accessLevel: "WRITE",
+      approvalStatus: "APPROVED",
+      id: "user-1",
+      isAdmin: false
+    };
+    mocks.changeOwnPassword.mockResolvedValue({ ok: false, error });
+
+    const response = await PATCH(createPasswordRequest({}));
+
+    expect(response.status).toBe(status);
   });
 });
 

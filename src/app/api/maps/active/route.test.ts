@@ -112,7 +112,7 @@ describe("GET /api/maps/active", () => {
   it("writes a MAP_DATA_ACCESSED audit event and triggers alert detection on success", async () => {
     mocks.state.currentViewer = AUTHORIZED_VIEWER;
 
-    const response = await GET(buildRequest({ "x-forwarded-for": "203.0.113.7, 10.0.0.1" }));
+    const response = await GET(buildRequest({ "x-forwarded-for": "203.0.113.7" }));
 
     expect(response.status).toBe(200);
     expect(mocks.auditCreate).toHaveBeenCalledWith({

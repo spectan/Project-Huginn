@@ -58,16 +58,34 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Map was not found" }, { status: 404 });
   }
 
-  const category = await prisma.noteCategory.upsert({
-    create: {
-      mapId: map.id,
-      name: input.value.name
-    },
-    update: {},
-    where: {
-      mapId_name: { mapId: map.id, name: input.value.name }
+  const where = { mapId_name: { mapId: map.id, name: input.value.name } };
+  const existing = await prisma.noteCategory.findUnique({ where });
+
+  if (existing !== null) {
+    return NextResponse.json({ category: serializeCategory(existing) });
+  }
+
+  let category: CategoryRecord;
+
+  try {
+    category = await prisma.noteCategory.create({
+      data: {
+        mapId: map.id,
+        name: input.value.name
+      }
+    });
+  } catch (error) {
+    // Another request created the same category concurrently.
+    const concurrent = isUniqueConstraintError(error)
+      ? await prisma.noteCategory.findUnique({ where })
+      : null;
+
+    if (concurrent === null) {
+      throw error;
     }
-  });
+
+    return NextResponse.json({ category: serializeCategory(concurrent) });
+  }
 
   await recordCategoryCreatedAudit({
     actorUserId: viewer.id,
@@ -76,15 +94,32 @@ export async function POST(request: Request, context: RouteContext) {
     mapId: map.id
   });
 
-  return NextResponse.json({
-    category: {
-      color: category.color,
-      id: category.id,
-      markerShape: category.markerShape,
-      name: category.name,
-      pipSize: category.pipSize
-    }
-  }, { status: 201 });
+  return NextResponse.json({ category: serializeCategory(category) }, { status: 201 });
+}
+
+type CategoryRecord = {
+  color: string | null;
+  id: string;
+  markerShape: string;
+  name: string;
+  pipSize: number;
+};
+
+function serializeCategory(category: CategoryRecord): CategoryRecord {
+  return {
+    color: category.color,
+    id: category.id,
+    markerShape: category.markerShape,
+    name: category.name,
+    pipSize: category.pipSize
+  };
+}
+
+function isUniqueConstraintError(error: unknown): boolean {
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2002";
 }
 
 async function findActiveMap(mapId: string): Promise<{ id: string } | null> {

@@ -19,22 +19,20 @@ const OFFICIAL_EVENT_FEED_URLS: Record<string, string> = {
 
 const DEFAULT_EVENT_FEED_TIMEOUT_MS = 5000;
 const MAX_EVENT_FEED_TIMEOUT_MS = 30000;
-const MAX_EVENTS_PER_SERVER = 100;
-const EVENT_FEED_DISPLAY_LIMIT = 30;
 
-export type OfficialEvent = {
+type OfficialEvent = {
   id: string;
   message: string;
   timestamp: number;
 };
 
-export type OfficialEventFeed = {
+type OfficialEventFeed = {
   events: OfficialEvent[];
   fetchedAt: string;
   sourceUrl: string;
 };
 
-export type FetchOptions = {
+type FetchOptions = {
   fetchImpl?: typeof fetch;
   now?: () => Date;
 };
@@ -69,7 +67,7 @@ export async function fetchOfficialEventFeed(
     const events = parseEventFeedXml(xml);
 
     return {
-      events: events.slice(0, EVENT_FEED_DISPLAY_LIMIT),
+      events,
       fetchedAt: now().toISOString(),
       sourceUrl
     };
@@ -105,7 +103,7 @@ export function getOfficialFeedUrl(serverName: string): string | null {
   return OFFICIAL_EVENT_FEED_URLS[serverName] ?? null;
 }
 
-export function getEventFeedTimeoutMs(): number {
+function getEventFeedTimeoutMs(): number {
   const configured = Number.parseInt(process.env.WURMMAPS_EVENT_FEED_TIMEOUT_MS ?? "", 10);
 
   if (!Number.isFinite(configured) || configured <= 0) {
@@ -114,8 +112,6 @@ export function getEventFeedTimeoutMs(): number {
 
   return Math.min(configured, MAX_EVENT_FEED_TIMEOUT_MS);
 }
-
-export { MAX_EVENTS_PER_SERVER, EVENT_FEED_DISPLAY_LIMIT };
 
 function decodeXmlEntities(value: string): string {
   return value

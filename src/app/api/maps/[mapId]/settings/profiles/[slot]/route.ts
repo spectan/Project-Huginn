@@ -43,21 +43,26 @@ export async function PUT(request: Request, context: RouteContext) {
 
   const body = await readJson(request);
   const { mapId, slot } = await context.params;
+  const parsedSlot = parseSlot(slot);
+  const dependencies = createSettingsProfilesDependencies();
+  // Determines 201 (new slot) vs 200 (overwrite); the service validates the slot.
+  const slotExisted = Number.isInteger(parsedSlot) &&
+    (await dependencies.findProfile(viewer.id, parsedSlot)) !== null;
   const result = await saveSettingsProfile(
     {
       actor: viewer,
       mapId,
       name: isRecord(body) ? body.name : undefined,
-      slot: parseSlot(slot)
+      slot: parsedSlot
     },
-    createSettingsProfilesDependencies()
+    dependencies
   );
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: getErrorStatus(result.error) });
   }
 
-  return NextResponse.json({ profile: result.value }, { status: 201 });
+  return NextResponse.json({ profile: result.value }, { status: slotExisted ? 200 : 201 });
 }
 
 export async function PATCH(request: Request, context: RouteContext) {

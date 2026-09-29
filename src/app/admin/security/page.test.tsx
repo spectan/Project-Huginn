@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
     { id: "user-2", username: "Stargrace", watermarkNumber: 123 },
     { id: "user-3", username: null, watermarkNumber: null }
   ]),
-  viewer: null as null | { isAdmin: boolean }
+  viewer: null as null | { approvalStatus: "APPROVED" | "PENDING"; isAdmin: boolean }
 }));
 
 vi.mock("@/lib/auth/current-viewer", () => ({
@@ -25,7 +25,7 @@ import AdminSecurityPage from "./page";
 describe("AdminSecurityPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.viewer = { isAdmin: true };
+    mocks.viewer = { approvalStatus: "APPROVED", isAdmin: true };
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -51,7 +51,8 @@ describe("AdminSecurityPage", () => {
 
     expect(mocks.userFindMany).toHaveBeenCalledWith({
       orderBy: { watermarkNumber: "asc" },
-      select: { id: true, username: true, watermarkNumber: true }
+      select: { id: true, username: true, watermarkNumber: true },
+      where: { watermarkNumber: { not: null } }
     });
 
     const digitsInput = screen.getByLabelText("UserID");
@@ -72,8 +73,17 @@ describe("AdminSecurityPage", () => {
     expect(screen.queryByRole("heading", { name: "Watermark" })).toBeNull();
   });
 
+  it("renders access denied for unapproved admins", async () => {
+    mocks.viewer = { approvalStatus: "PENDING", isAdmin: true };
+
+    render(await AdminSecurityPage());
+
+    expect(screen.getByText("Admin access is required")).toBeTruthy();
+    expect(mocks.userFindMany).not.toHaveBeenCalled();
+  });
+
   it("renders access denied for non-admin viewers", async () => {
-    mocks.viewer = { isAdmin: false };
+    mocks.viewer = { approvalStatus: "APPROVED", isAdmin: false };
 
     render(await AdminSecurityPage());
 

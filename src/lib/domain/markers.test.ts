@@ -247,7 +247,7 @@ describe("validateDeedInput", () => {
     });
   });
 
-  it("rejects deeds that do not fit on the map", () => {
+  it("rejects deeds whose footprint does not fit on the map", () => {
     expect(
       validateDeedInput(
         {
@@ -266,7 +266,7 @@ describe("validateDeedInput", () => {
       )
     ).toEqual({
       ok: false,
-      error: "Deed dimensions must fit inside map bounds"
+      error: "Deed perimeter must fit inside map bounds"
     });
   });
 

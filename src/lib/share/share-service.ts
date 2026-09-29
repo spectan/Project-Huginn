@@ -4,7 +4,7 @@ import {
   type DiscordNotificationMessage
 } from "@/lib/discord/discord-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
-import { canReadMap, type UserAccess } from "@/lib/domain/permissions";
+import { canReadMap, type MapPermission, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
 import { parseUserMapSettings, type UserMapSettings } from "@/lib/map-settings/map-settings";
 import {
@@ -13,8 +13,10 @@ import {
 } from "@/lib/map-settings/map-settings-service";
 import { generateShareToken, hashShareToken } from "./share-tokens";
 
-export const MIN_SHARE_LINK_HOURS = 1;
-export const MAX_SHARE_LINK_HOURS = 24;
+const MIN_SHARE_LINK_HOURS = 1;
+const MAX_SHARE_LINK_HOURS = 24;
+const MAX_LAYER_ID_LENGTH = 128;
+export const SHARE_LINK_LAYER_INVALID_MESSAGE = "Layer was not found";
 export const SHARE_LINK_INVALID_MESSAGE = "Share link is invalid or has expired";
 export const SHARE_LINK_HOURS_INVALID_MESSAGE =
   "expiresInHours must be a whole number of hours between 1 and 24";
@@ -24,9 +26,13 @@ type Actor = UserAccess & {
   username: string;
 };
 
-export type ShareLinkCreatorRecord = {
+type ShareLinkCreator = {
   id: string;
   watermarkNumber: number | null;
+};
+
+export type ShareLinkCreatorRecord = ShareLinkCreator & UserAccess & {
+  mapPermissions: readonly MapPermission[];
 };
 
 export type ShareLinkRecord = {
@@ -37,8 +43,8 @@ export type ShareLinkRecord = {
   settings: unknown;
 };
 
-export type ResolvedShareLink = {
-  createdBy: ShareLinkCreatorRecord;
+type ResolvedShareLink = {
+  createdBy: ShareLinkCreator;
   expiresAt: Date;
   layerId: string | null;
   mapId: string;
@@ -77,6 +83,7 @@ export type ShareDependencies = {
   deleteShareLink(tokenHash: string): Promise<void>;
   findMapName(mapId: string): Promise<string | null>;
   findShareLinkWithCreator(tokenHash: string): Promise<ShareLinkRecord | null>;
+  layerBelongsToMap(input: { layerId: string; mapId: string }): Promise<boolean>;
   recordAudit(input: ShareLinkAuditInput): Promise<void>;
   settings: UserMapSettingsDependencies;
 };
@@ -100,6 +107,13 @@ export async function createShareLink(
     return err(SHARE_LINK_HOURS_INVALID_MESSAGE);
   }
 
+  const layerIdResult = await parseLayerId(input.layerId, input.mapId, dependencies);
+
+  if (!layerIdResult.ok) {
+    return layerIdResult;
+  }
+
+  const layerId = layerIdResult.value;
   const settingsResult = await getUserMapSettings(
     { actor: input.actor, mapId: input.mapId },
     dependencies.settings
@@ -111,7 +125,6 @@ export async function createShareLink(
 
   const token = generateShareToken();
   const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000);
-  const layerId = parseLayerId(input.layerId);
 
   await dependencies.createShareLink({
     createdByUserId: input.actor.id,
@@ -156,14 +169,19 @@ export async function resolveShareLink(
     return err(SHARE_LINK_INVALID_MESSAGE);
   }
 
-  if (record.expiresAt <= new Date()) {
+  // A link must stop working once its creator could no longer read the map
+  // themselves (suspended, demoted, or permission removed).
+  if (record.expiresAt <= new Date() || !canReadMap(record.createdBy, record.mapId)) {
     await dependencies.deleteShareLink(tokenHash);
     return err(SHARE_LINK_INVALID_MESSAGE);
   }
 
   return ok({
     link: {
-      createdBy: record.createdBy,
+      createdBy: {
+        id: record.createdBy.id,
+        watermarkNumber: record.createdBy.watermarkNumber
+      },
       expiresAt: record.expiresAt,
       layerId: record.layerId,
       mapId: record.mapId,
@@ -260,12 +278,35 @@ function parseExpiresInHours(input: unknown): number | null {
   return input;
 }
 
-function parseLayerId(input: unknown): string | null {
+async function parseLayerId(
+  input: unknown,
+  mapId: string,
+  dependencies: ShareDependencies
+): Promise<Result<string | null>> {
+  if (input === undefined || input === null) {
+    return ok(null);
+  }
+
   if (typeof input !== "string") {
-    return null;
+    return err(SHARE_LINK_LAYER_INVALID_MESSAGE);
   }
 
   const layerId = input.trim();
 
-  return layerId.length > 0 ? layerId : null;
+  if (layerId.length === 0) {
+    return ok(null);
+  }
+
+  if (layerId.length > MAX_LAYER_ID_LENGTH) {
+    return err(SHARE_LINK_LAYER_INVALID_MESSAGE);
+  }
+
+  // Maps without stored layers expose a synthetic default layer id.
+  if (layerId === `${mapId}:default`) {
+    return ok(layerId);
+  }
+
+  return (await dependencies.layerBelongsToMap({ layerId, mapId }))
+    ? ok(layerId)
+    : err(SHARE_LINK_LAYER_INVALID_MESSAGE);
 }

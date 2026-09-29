@@ -477,4 +477,58 @@ describe("user map settings", () => {
       tileHighlightPanelPosition: null
     });
   });
+
+  it("caps stored annotations at 500", () => {
+    const annotations = Array.from({ length: 600 }, (_, index) => ({
+      id: `a-${index}`,
+      text: "",
+      title: `Note ${index}`,
+      x: index,
+      y: index
+    }));
+
+    const settings = parseUserMapSettings({ annotations });
+
+    expect(settings.annotations).toHaveLength(500);
+    expect(settings.annotations[499]?.id).toBe("a-499");
+  });
+
+  it("drops note category keys that are too long or exceed the per-map cap", () => {
+    const colors: Record<string, string> = { ["k".repeat(81)]: "#123456" };
+    const shapes: Record<string, string> = {};
+    const pipSizes: Record<string, number> = {};
+
+    for (let index = 0; index < 250; index += 1) {
+      colors[`cat-${index}`] = "#abcdef";
+      shapes[`cat-${index}`] = "circle";
+      pipSizes[`cat-${index}`] = 8;
+    }
+
+    const settings = parseUserMapSettings({
+      noteCategoryColors: colors,
+      noteCategoryMarkerShapes: shapes,
+      noteCategoryPipSizes: pipSizes
+    });
+
+    expect(Object.keys(settings.noteCategoryColors)).toHaveLength(200);
+    expect(settings.noteCategoryColors["k".repeat(81)]).toBeUndefined();
+    expect(Object.keys(settings.noteCategoryMarkerShapes)).toHaveLength(200);
+    expect(Object.keys(settings.noteCategoryPipSizes)).toHaveLength(200);
+  });
+
+  it("still updates existing note category keys when the map is at the cap", () => {
+    const full: Record<string, string> = {};
+
+    for (let index = 0; index < 200; index += 1) {
+      full[`cat-${index}`] = "#000000";
+    }
+
+    const current = parseUserMapSettings({ noteCategoryColors: full });
+    const merged = mergeUserMapSettingsInput(current, {
+      noteCategoryColors: { "cat-5": "#ffffff", "cat-new": "#ffffff" }
+    });
+
+    expect(merged.noteCategoryColors["cat-5"]).toBe("#ffffff");
+    expect(merged.noteCategoryColors["cat-new"]).toBeUndefined();
+  });
 });

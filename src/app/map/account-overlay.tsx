@@ -89,7 +89,7 @@ export function AccountOverlay({ isOpen, onOpenChange, servers = [], viewer }: A
                   : "Administration"
               }
               className="map-account-administration-button"
-              href="/admin"
+              href={viewer.isAdmin ? "/admin" : "/admin/accounts"}
             >
               <span>Administration</span>
               {viewer.pendingApprovalCount > 0 ? (

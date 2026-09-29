@@ -5,9 +5,9 @@ import {
   type DiscordNotificationMessage
 } from "@/lib/discord/discord-service";
 import { assertNoCoordinateMetadata } from "@/lib/domain/audit";
-import { canAdminister, type AccessLevel, type UserAccess } from "@/lib/domain/permissions";
 import { err, ok, type Result } from "@/lib/domain/result";
-import { parseAuthCredentials, type AuthCredentials } from "./credentials";
+import { parseAuthCredentials } from "./credentials";
+import type { FailureRateLimiter } from "./failure-rate-limiter";
 import { toViewer, type AuthViewer, type ViewerUserRecord } from "./viewer";
 
 type UserWithPassword = ViewerUserRecord & {
@@ -25,8 +25,6 @@ type AuditRecordInput = {
     | "REGISTRATION"
     | "LOGIN"
     | "FAILED_LOGIN"
-    | "FAILED_AUTHORIZATION"
-    | "USER_APPROVED"
     | "USER_PASSWORD_CHANGED";
   actorUserId: string | null;
   metadata: Record<string, unknown>;
@@ -34,9 +32,19 @@ type AuditRecordInput = {
   targetType: "USER" | "SESSION";
 };
 
+const USERNAME_TAKEN_MESSAGE = "Username is already registered";
+export const TOO_MANY_ATTEMPTS_MESSAGE = "Too many failed attempts. Try again later.";
+
+// A real argon2id hash of a random throwaway password, verified when the
+// username does not exist so that response timing does not reveal usernames.
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=65536,t=3,p=4$fmjJ5LvBxuywXqI2BOd1KQ$nzPyzzuICTlMIgRS3yNizKg0OPj7kEljA7KUvKGSmRk";
+
 export type AuthServiceDependencies = {
   createSession(userId: string): Promise<SessionCreation>;
-  createUser(data: { passwordHash: string; username: string }): Promise<UserWithPassword>;
+  /** Returns null when the username (case-insensitively) is already taken. */
+  createUser(data: { passwordHash: string; username: string }): Promise<UserWithPassword | null>;
+  failureRateLimiter: FailureRateLimiter;
   findUserById(userId: string): Promise<UserWithPassword | null>;
   findUserByUsername(username: string): Promise<UserWithPassword | null>;
   hashPassword(password: string): Promise<string>;
@@ -44,11 +52,6 @@ export type AuthServiceDependencies = {
   updateUserPassword(input: {
     currentSessionTokenHash: string | null;
     passwordHash: string;
-    userId: string;
-  }): Promise<UserWithPassword | null>;
-  updateUserApproval(input: {
-    accessLevel: "READ" | "WRITE";
-    approvedByUserId: string;
     userId: string;
   }): Promise<UserWithPassword | null>;
   verifyPassword(hash: string, password: string): Promise<boolean>;
@@ -79,7 +82,7 @@ export async function registerUser(
   const existingUser = await dependencies.findUserByUsername(credentials.value.username);
 
   if (existingUser !== null) {
-    return err("Username is already registered");
+    return err(USERNAME_TAKEN_MESSAGE);
   }
 
   const passwordHash = await dependencies.hashPassword(credentials.value.password);
@@ -87,6 +90,10 @@ export async function registerUser(
     passwordHash,
     username: credentials.value.username
   });
+
+  if (user === null) {
+    return err(USERNAME_TAKEN_MESSAGE);
+  }
   const session = await dependencies.createSession(user.id);
 
   await recordAudit(dependencies, {
@@ -108,7 +115,8 @@ export async function registerUser(
 
 export async function loginUser(
   input: unknown,
-  dependencies: AuthServiceDependencies
+  dependencies: AuthServiceDependencies,
+  context: { clientIp?: string } = {}
 ): Promise<Result<AuthResult>> {
   const credentials = parseAuthCredentials(input);
 
@@ -116,9 +124,23 @@ export async function loginUser(
     return err(credentials.error);
   }
 
-  const user = await dependencies.findUserByUsername(credentials.value.username);
+  // Without a trusted client IP, fall back to throttling per username.
+  const rateLimitKey = context.clientIp !== undefined && context.clientIp.length > 0
+    ? `login-ip:${context.clientIp}`
+    : `login-username:${credentials.value.username.toLowerCase()}`;
 
-  if (user === null || !(await passwordMatches(credentials.value, user, dependencies))) {
+  if (dependencies.failureRateLimiter.isLimited(rateLimitKey)) {
+    return err(TOO_MANY_ATTEMPTS_MESSAGE);
+  }
+
+  const user = await dependencies.findUserByUsername(credentials.value.username);
+  const passwordValid = await dependencies.verifyPassword(
+    user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+    credentials.value.password
+  );
+
+  if (user === null || !passwordValid) {
+    dependencies.failureRateLimiter.recordFailure(rateLimitKey);
     await recordAudit(dependencies, {
       action: "FAILED_LOGIN",
       actorUserId: null,
@@ -148,60 +170,6 @@ export async function loginUser(
   });
 }
 
-export async function approveUser(
-  input: {
-    accessLevel: AccessLevel;
-    actor: UserAccess & { id: string; username: string };
-    userId: string;
-  },
-  dependencies: AuthServiceDependencies
-): Promise<Result<AuthViewer>> {
-  if (!canAdminister(input.actor)) {
-    await recordAudit(dependencies, {
-      action: "FAILED_AUTHORIZATION",
-      actorUserId: input.actor.id,
-      metadata: { attemptedAction: "USER_APPROVED" },
-      targetId: input.userId,
-      targetType: "USER"
-    });
-    triggerAlertsSafely();
-    return err("Admin access is required");
-  }
-
-  if (input.accessLevel !== "READ" && input.accessLevel !== "WRITE") {
-    return err("Approved users must receive read or write access");
-  }
-
-  const user = await dependencies.updateUserApproval({
-    accessLevel: input.accessLevel,
-    approvedByUserId: input.actor.id,
-    userId: input.userId
-  });
-
-  if (user === null) {
-    return err("User was not found");
-  }
-
-  await recordAudit(dependencies, {
-    action: "USER_APPROVED",
-    actorUserId: input.actor.id,
-    metadata: {
-      accessLevel: input.accessLevel,
-      username: user.username
-    },
-    targetId: user.id,
-    targetType: "USER"
-  });
-  triggerAlertsSafely();
-  dispatchDiscordSafely({
-    kind: "approval",
-    username: user.username,
-    actorUsername: input.actor.username
-  });
-
-  return ok(toViewer(user));
-}
-
 export async function changeOwnPassword(
   input: {
     actor: { id: string };
@@ -216,6 +184,12 @@ export async function changeOwnPassword(
     return passwordInput;
   }
 
+  const rateLimitKey = `password-change-user:${input.actor.id}`;
+
+  if (dependencies.failureRateLimiter.isLimited(rateLimitKey)) {
+    return err(TOO_MANY_ATTEMPTS_MESSAGE);
+  }
+
   const user = await dependencies.findUserById(input.actor.id);
 
   if (user === null) {
@@ -223,6 +197,18 @@ export async function changeOwnPassword(
   }
 
   if (!(await dependencies.verifyPassword(user.passwordHash, passwordInput.value.currentPassword))) {
+    dependencies.failureRateLimiter.recordFailure(rateLimitKey);
+    await recordAudit(dependencies, {
+      action: "FAILED_LOGIN",
+      actorUserId: user.id,
+      metadata: {
+        attemptedAction: "USER_PASSWORD_CHANGED",
+        username: user.username
+      },
+      targetId: user.id,
+      targetType: "USER"
+    });
+    triggerAlertsSafely();
     return err("Current password is incorrect");
   }
 
@@ -290,14 +276,6 @@ function getString(input: object, key: string): string {
 
 function isValidPassword(password: string): boolean {
   return password.length >= 12 && password.length <= 128;
-}
-
-async function passwordMatches(
-  credentials: AuthCredentials,
-  user: UserWithPassword,
-  dependencies: AuthServiceDependencies
-): Promise<boolean> {
-  return dependencies.verifyPassword(user.passwordHash, credentials.password);
 }
 
 async function recordAudit(
