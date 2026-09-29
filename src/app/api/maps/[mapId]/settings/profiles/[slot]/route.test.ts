@@ -24,25 +24,25 @@ const mocks = vi.hoisted(() => {
       state.settings.set(`${userId}:${mapId}`, settings);
       return { settings };
     }),
-    findProfile: vi.fn(async (userId, mapId, slot) =>
-      state.profiles.get(`${userId}:${mapId}:${slot}`) ?? null),
-    listProfiles: vi.fn(async (userId, mapId) => [...state.profiles.entries()]
-      .filter(([key]) => key.startsWith(`${userId}:${mapId}:`))
+    findProfile: vi.fn(async (userId, slot) =>
+      state.profiles.get(`${userId}:${slot}`) ?? null),
+    listProfiles: vi.fn(async (userId) => [...state.profiles.entries()]
+      .filter(([key]) => key.startsWith(`${userId}:`))
       .map(([, profile]) => profile)),
-    renameProfile: vi.fn(async ({ mapId, name, slot, userId }) => {
-      const existing = state.profiles.get(`${userId}:${mapId}:${slot}`);
+    renameProfile: vi.fn(async ({ name, slot, userId }) => {
+      const existing = state.profiles.get(`${userId}:${slot}`);
 
       if (existing === undefined) {
         return null;
       }
 
       const renamed = { ...existing, name, updatedAt: new Date() };
-      state.profiles.set(`${userId}:${mapId}:${slot}`, renamed);
+      state.profiles.set(`${userId}:${slot}`, renamed);
       return renamed;
     }),
-    upsertProfile: vi.fn(async ({ mapId, name, settings, slot, userId }) => {
+    upsertProfile: vi.fn(async ({ name, settings, slot, userId }) => {
       const saved = { name, settings, slot, updatedAt: new Date() };
-      state.profiles.set(`${userId}:${mapId}:${slot}`, saved);
+      state.profiles.set(`${userId}:${slot}`, saved);
       return saved;
     })
   };
@@ -124,7 +124,7 @@ describe("GET /api/maps/[mapId]/settings/profiles/[slot]", () => {
 
   it("returns the profile when it exists", async () => {
     mocks.state.currentViewer = viewer;
-    mocks.state.profiles.set("user-1:map-1:0", {
+    mocks.state.profiles.set("user-1:0", {
       name: "Main",
       settings: { searchLinesEnabled: true },
       slot: 0,
@@ -196,7 +196,7 @@ describe("PUT /api/maps/[mapId]/settings/profiles/[slot]", () => {
       }
     });
     expect(response.status).toBe(201);
-    expect(mocks.state.profiles.get("user-1:map-1:2")?.settings).toMatchObject({
+    expect(mocks.state.profiles.get("user-1:2")?.settings).toMatchObject({
       markerColors: {
         towers: "#00ff00"
       }
@@ -244,7 +244,7 @@ describe("PATCH /api/maps/[mapId]/settings/profiles/[slot]", () => {
 
   it("returns 400 when the name is blank", async () => {
     mocks.state.currentViewer = viewer;
-    mocks.state.profiles.set("user-1:map-1:0", {
+    mocks.state.profiles.set("user-1:0", {
       name: "Old",
       settings: {},
       slot: 0,
@@ -259,7 +259,7 @@ describe("PATCH /api/maps/[mapId]/settings/profiles/[slot]", () => {
 
   it("renames the profile", async () => {
     mocks.state.currentViewer = viewer;
-    mocks.state.profiles.set("user-1:map-1:0", {
+    mocks.state.profiles.set("user-1:0", {
       name: "Old",
       settings: { searchLinesEnabled: true },
       slot: 0,
@@ -275,7 +275,7 @@ describe("PATCH /api/maps/[mapId]/settings/profiles/[slot]", () => {
       }
     });
     expect(response.status).toBe(200);
-    expect(mocks.state.profiles.get("user-1:map-1:0")).toMatchObject({
+    expect(mocks.state.profiles.get("user-1:0")).toMatchObject({
       name: "New",
       settings: { searchLinesEnabled: true }
     });

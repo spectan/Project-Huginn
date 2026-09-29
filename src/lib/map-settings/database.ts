@@ -60,34 +60,31 @@ export function createUserMapSettingsDependencies(): UserMapSettingsDependencies
 export function createSettingsProfilesDependencies(): SettingsProfilesDependencies {
   return {
     ...createUserMapSettingsDependencies(),
-    findProfile: async (userId, mapId, slot) => prisma.mapSettingsProfile.findUnique({
+    findProfile: async (userId, slot) => prisma.mapSettingsProfile.findUnique({
       select: PROFILE_SELECT,
       where: {
-        userId_mapId_slot: {
-          mapId,
+        userId_slot: {
           slot,
           userId
         }
       }
     }),
-    listProfiles: async (userId, mapId) => prisma.mapSettingsProfile.findMany({
+    listProfiles: async (userId) => prisma.mapSettingsProfile.findMany({
       orderBy: {
         slot: "asc"
       },
       select: PROFILE_SELECT,
       where: {
-        mapId,
         userId
       }
     }),
-    renameProfile: async ({ mapId, name, slot, userId }) => {
+    renameProfile: async ({ name, slot, userId }) => {
       const existing = await prisma.mapSettingsProfile.findUnique({
         select: {
           id: true
         },
         where: {
-          userId_mapId_slot: {
-            mapId,
+          userId_slot: {
             slot,
             userId
           }
@@ -108,9 +105,8 @@ export function createSettingsProfilesDependencies(): SettingsProfilesDependenci
         }
       });
     },
-    upsertProfile: async ({ mapId, name, settings, slot, userId }) => prisma.mapSettingsProfile.upsert({
+    upsertProfile: async ({ name, settings, slot, userId }) => prisma.mapSettingsProfile.upsert({
       create: {
-        mapId,
         name,
         settings: settings as unknown as Prisma.InputJsonValue,
         slot,
@@ -122,8 +118,7 @@ export function createSettingsProfilesDependencies(): SettingsProfilesDependenci
         settings: settings as unknown as Prisma.InputJsonValue
       },
       where: {
-        userId_mapId_slot: {
-          mapId,
+        userId_slot: {
           slot,
           userId
         }

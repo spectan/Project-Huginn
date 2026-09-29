@@ -47,17 +47,16 @@ export type UserMapSettingsDependencies = {
   }): Promise<UserMapSettingsRecord>;
 };
 
+// Profiles belong to the user, not a map, so the same slots follow them across servers.
 export type SettingsProfilesDependencies = UserMapSettingsDependencies & {
-  findProfile(userId: string, mapId: string, slot: number): Promise<SettingsProfileRecord | null>;
-  listProfiles(userId: string, mapId: string): Promise<SettingsProfileRecord[]>;
+  findProfile(userId: string, slot: number): Promise<SettingsProfileRecord | null>;
+  listProfiles(userId: string): Promise<SettingsProfileRecord[]>;
   renameProfile(input: {
-    mapId: string;
     name: string;
     slot: number;
     userId: string;
   }): Promise<SettingsProfileRecord | null>;
   upsertProfile(input: {
-    mapId: string;
     name: string;
     settings: UserMapSettings;
     slot: number;
@@ -129,7 +128,7 @@ export async function listSettingsProfiles(
     return err("Map was not found");
   }
 
-  const profiles = await dependencies.listProfiles(input.actor.id, map.id);
+  const profiles = await dependencies.listProfiles(input.actor.id);
   return ok(profiles
     .map((profile) => ({
       name: profile.name,
@@ -171,10 +170,10 @@ export async function saveSettingsProfile(
     return err(settings.error);
   }
 
+  // Annotations carry map coordinates, so they stay with the map rather than the profile.
   const saved = await dependencies.upsertProfile({
-    mapId: map.id,
     name: nameResult.value,
-    settings: settings.value,
+    settings: { ...settings.value, annotations: [] },
     slot: slotResult.value,
     userId: input.actor.id
   });
@@ -206,7 +205,7 @@ export async function loadSettingsProfile(
     return slotResult;
   }
 
-  const profile = await dependencies.findProfile(input.actor.id, map.id, slotResult.value);
+  const profile = await dependencies.findProfile(input.actor.id, slotResult.value);
 
   if (profile === null) {
     return err("Profile was not found");
@@ -246,7 +245,6 @@ export async function renameSettingsProfile(
   }
 
   const renamed = await dependencies.renameProfile({
-    mapId: map.id,
     name: nameResult.value,
     slot: slotResult.value,
     userId: input.actor.id

@@ -17,15 +17,15 @@ const mocks = vi.hoisted(() => {
     findMap: vi.fn(async (mapId) => mapId === "map-1" ? { id: mapId } : null),
     findSettings: vi.fn(async () => null),
     upsertSettings: vi.fn(async ({ settings }) => ({ settings })),
-    findProfile: vi.fn(async (userId, mapId, slot) =>
-      state.profiles.get(`${userId}:${mapId}:${slot}`) ?? null),
-    listProfiles: vi.fn(async (userId, mapId) => [...state.profiles.entries()]
-      .filter(([key]) => key.startsWith(`${userId}:${mapId}:`))
+    findProfile: vi.fn(async (userId, slot) =>
+      state.profiles.get(`${userId}:${slot}`) ?? null),
+    listProfiles: vi.fn(async (userId) => [...state.profiles.entries()]
+      .filter(([key]) => key.startsWith(`${userId}:`))
       .map(([, profile]) => profile)),
     renameProfile: vi.fn(async () => null),
-    upsertProfile: vi.fn(async ({ mapId, name, settings, slot, userId }) => {
+    upsertProfile: vi.fn(async ({ name, settings, slot, userId }) => {
       const saved = { name, settings, slot, updatedAt: new Date() };
-      state.profiles.set(`${userId}:${mapId}:${slot}`, saved);
+      state.profiles.set(`${userId}:${slot}`, saved);
       return saved;
     })
   };
@@ -90,7 +90,7 @@ describe("GET /api/maps/[mapId]/settings/profiles", () => {
 
   it("returns the user's profiles", async () => {
     mocks.state.currentViewer = viewer;
-    mocks.state.profiles.set("user-1:map-1:0", {
+    mocks.state.profiles.set("user-1:0", {
       name: "Profile 1",
       settings: { searchLinesEnabled: true },
       slot: 0,

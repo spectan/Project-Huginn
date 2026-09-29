@@ -1,4 +1,8 @@
 import { PrismaClient } from "@prisma/client";
+import {
+  extractDeedNameFromDisbandMessage,
+  extractDeedRenameFromMessage
+} from "./event-feed-messages.mjs";
 
 const prisma = new PrismaClient();
 
@@ -25,12 +29,6 @@ const OFFICIAL_EVENT_FEED_URLS = {
 
 const MAX_EVENTS_PER_SERVER = 100;
 const ABANDONED_DEED_CATEGORY_NAME = "Abandoned Deed";
-const DISBAND_PATTERN = /^The settlement of (.+?) has just been disbanded/i;
-
-function extractDeedNameFromDisbandMessage(message) {
-  const match = message.match(DISBAND_PATTERN);
-  return match?.[1]?.trim() ?? null;
-}
 
 function formatDisbandDate(timestamp) {
   const date = new Date(timestamp * 1000);
@@ -39,6 +37,41 @@ function formatDisbandDate(timestamp) {
     month: "long",
     day: "numeric"
   });
+}
+
+async function handleRenameEvents(mapId, events) {
+  // Oldest first, so chained renames (A -> B -> C) in one batch resolve in order.
+  const renameEvents = events
+    .map((event) => ({
+      rename: extractDeedRenameFromMessage(event.message),
+      timestamp: event.timestamp
+    }))
+    .filter((event) => event.rename !== null)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  for (const { rename } of renameEvents) {
+    const { newName, oldName } = rename;
+
+    try {
+      const deed = await prisma.deed.findFirst({
+        where: { deletedAt: null, mapId, name: oldName }
+      });
+
+      if (deed === null) {
+        console.log(`    ${oldName}: deed not found, skipping rename`);
+        continue;
+      }
+
+      await prisma.deed.update({
+        data: { name: newName },
+        where: { id: deed.id }
+      });
+
+      console.log(`    ${oldName}: renamed → ${newName}`);
+    } catch (error) {
+      console.error(`    ${oldName}: error handling rename -`, error instanceof Error ? error.message : String(error));
+    }
+  }
 }
 
 async function handleDisbandEvents(mapId, events) {
@@ -178,6 +211,7 @@ async function syncAllEvents() {
               timestamp: event.timestamp
             }))
           });
+          await handleRenameEvents(mapId, newEvents);
           await handleDisbandEvents(mapId, newEvents);
         }
 

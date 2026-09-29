@@ -404,6 +404,7 @@ export default function MapWorkspace({
   const [routePlannerPoints, setRoutePlannerPoints] = useState<MapCoordinate[] | null>(null);
   const [routePlannerSpeedKmh, setRoutePlannerSpeedKmh] = useState(initialSettings.routePlannerSpeedKmh);
   const [isLegendOpen, setIsLegendOpen] = useState(false);
+  const [isCountersOpen, setIsCountersOpen] = useState(false);
   const [isEventFeedOpen, setIsEventFeedOpen] = useState(false);
 
   const cancelHoverClose = useCallback(() => {
@@ -698,9 +699,9 @@ export default function MapWorkspace({
     setTileHighlight(DEFAULT_USER_MAP_SETTINGS.tileHighlight);
     setTileHighlightPanelPosition(DEFAULT_USER_MAP_SETTINGS.tileHighlightPanelPosition);
   }, []);
+  // Profiles are shared across servers, so loading one keeps this map's annotations.
   const loadUserMapSettings = useCallback((settings: UserMapSettings) => {
     const parsed = parseUserMapSettings(settings);
-    setAnnotations(parsed.annotations);
     setEventFeedPanelSize(parsed.eventFeedPanelSize);
     setFavoriteServerId(parsed.favoriteServerId);
     setMarkerColors(parsed.markerColors);
@@ -2266,6 +2267,13 @@ export default function MapWorkspace({
               mapId={map.id}
             />
           ) : null}
+          {!isShareMode ? (
+            <MapCountersControl
+              isOpen={isCountersOpen}
+              markers={markers}
+              onOpenChange={setIsCountersOpen}
+            />
+          ) : null}
         </div>
       ) : null}
       <div className="map-footer-text">
@@ -2831,6 +2839,75 @@ function MapLegendControl({
       ) : null}
     </div>
   );
+}
+
+function MapCountersControl({
+  isOpen,
+  markers,
+  onOpenChange
+}: {
+  isOpen: boolean;
+  markers: WorkspaceMarker[];
+  onOpenChange(isOpen: boolean): void;
+}) {
+  const counters = useMemo(() => getMarkerCounters(markers), [markers]);
+
+  return (
+    <div className="map-counters-control">
+      <button
+        aria-expanded={isOpen}
+        aria-haspopup="dialog"
+        aria-label="Map counters"
+        className={isOpen ? "map-counters-button is-active" : "map-counters-button"}
+        onClick={() => onOpenChange(!isOpen)}
+        title="Map counters"
+        type="button"
+      >
+        <span aria-hidden="true" className="map-counters-button-icon" />
+      </button>
+      {isOpen ? (
+        <section aria-label="Map counters" className="map-counters-panel" role="dialog">
+          <strong>Counters</strong>
+          <dl>
+            {counters.map((counter) => (
+              <div key={counter.id}>
+                <dt>{counter.label}</dt>
+                <dd data-testid={`counter-${counter.id}`}>{counter.count.toLocaleString("en-US")}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function getMarkerCounters(markers: WorkspaceMarker[]): { count: number; id: string; label: string }[] {
+  let deeds = 0;
+  let notes = 0;
+  let plannedTowers = 0;
+  let towers = 0;
+
+  for (const marker of markers) {
+    if (marker.type === "deed") {
+      deeds += 1;
+    } else if (marker.type === "note") {
+      notes += 1;
+    } else if (marker.type === "tower") {
+      if (marker.planned === true) {
+        plannedTowers += 1;
+      } else {
+        towers += 1;
+      }
+    }
+  }
+
+  return [
+    { count: deeds, id: "deeds", label: "Deeds" },
+    { count: notes, id: "notes", label: "Notes" },
+    { count: towers, id: "towers", label: "Towers" },
+    { count: plannedTowers, id: "planned-towers", label: "Planned towers" }
+  ];
 }
 
 type ShareControlLink = {
@@ -3585,18 +3662,17 @@ function WildernessOverlay({
         return;
       }
 
-      const MAP_EDGE_INSET_TILES = 510;
       const DEED_EXCLUSION_DISTANCE_TILES = 30;
 
       ctx.fillStyle = color;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
       ctx.globalCompositeOperation = "destination-out";
 
-      // Uniques cannot spawn within 510 tiles of the map edge.
-      const innerLeft = MAP_EDGE_INSET_TILES;
-      const innerTop = MAP_EDGE_INSET_TILES;
-      const innerRight = canvasWidth - MAP_EDGE_INSET_TILES;
-      const innerBottom = canvasHeight - MAP_EDGE_INSET_TILES;
+      // Uniques only spawn inside the center square of the 3x3 mission grid.
+      const innerLeft = Math.round(canvasWidth / 3);
+      const innerTop = Math.round(canvasHeight / 3);
+      const innerRight = Math.round((canvasWidth * 2) / 3);
+      const innerBottom = Math.round((canvasHeight * 2) / 3);
 
       ctx.fillRect(0, 0, canvasWidth, innerTop);
       ctx.fillRect(0, innerBottom, canvasWidth, canvasHeight - innerBottom);

@@ -176,7 +176,6 @@ model Map {
   events          Event[]
   userSettings    UserMapSettings[]
   userPermissions UserMapPermission[]
-  settingsProfiles MapSettingsProfile[]
   canaryMarkers   CanaryMarker[]
   alerts          Alert[]
   shareLinks      ShareLink[]
@@ -514,16 +513,13 @@ model MapSettingsProfile {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mapId     String
-  map       Map      @relation(fields: [mapId], references: [id], onDelete: Cascade)
   slot      Int
   name      String
   settings  Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([userId, mapId, slot])
-  @@index([userId, mapId])
+  @@unique([userId, slot])
   @@map("map_settings_profiles")
 }
 

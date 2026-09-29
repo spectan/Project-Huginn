@@ -224,7 +224,7 @@ describe("MapPage", () => {
     expect(within(permissionsGroup).queryByText("Celebration")).toBeNull();
     expect(within(permissionsGroup).queryByText("Read")).toBeNull();
     expect(within(permissionsGroup).queryByText("Denied")).toBeNull();
-    expect(within(accountDialog).getByText("Project Huginn - v1.3.8")).toBeTruthy();
+    expect(within(accountDialog).getByText("Project Huginn - v1.3.9")).toBeTruthy();
   });
 
   it("shows only read access for read-only users", () => {
@@ -279,7 +279,8 @@ describe("MapPage", () => {
       "map-legend-control",
       "map-route-planner-control",
       "map-event-feed-control",
-      "map-share-control"
+      "map-share-control",
+      "map-counters-control"
     ]);
 
     expect(screen.queryByRole("dialog", { name: "Celebration event feed" })).toBeNull();
@@ -5342,6 +5343,66 @@ describe("MapPage", () => {
     expect(screen.getByTestId("legend-symbol-highway").style.getPropertyValue("--map-legend-color")).toBe("#fde047");
   });
 
+  it("shows deed, note and tower counts in the counters panel", () => {
+    const tower = {
+      damage: "0",
+      makerName: "Mako",
+      makerNumber: "945",
+      ql: "80",
+      type: "tower",
+      x: 250,
+      y: 300
+    } as const;
+    const note = {
+      category: "General",
+      text: "",
+      title: "Scout note",
+      type: "note",
+      x: 700,
+      y: 800
+    } as const;
+
+    render(React.createElement(MapWorkspace, {
+      initialMarkers: [
+        { ...tower, id: "tower-1" },
+        { ...tower, id: "tower-2" },
+        { ...tower, id: "tower-3", planned: true },
+        {
+          east: 5,
+          foundingDate: null,
+          founder: "Founder",
+          id: "deed-1",
+          name: "Oak Harbour",
+          north: 5,
+          perimeter: 5,
+          south: 5,
+          type: "deed",
+          west: 5,
+          x: 500,
+          y: 600
+        },
+        { ...note, id: "note-1" },
+        { ...note, id: "note-2" },
+        { ...note, id: "note-3" }
+      ],
+      map: activeMap,
+      viewer: approvedViewer
+    }));
+
+    const countersButton = screen.getByRole("button", { name: "Map counters" });
+    expect(countersButton.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("dialog", { name: "Map counters" })).toBeNull();
+
+    fireEvent.click(countersButton);
+
+    expect(countersButton.getAttribute("aria-expanded")).toBe("true");
+    const panel = screen.getByRole("dialog", { name: "Map counters" });
+    expect(within(panel).getByTestId("counter-deeds").textContent).toBe("1");
+    expect(within(panel).getByTestId("counter-notes").textContent).toBe("3");
+    expect(within(panel).getByTestId("counter-towers").textContent).toBe("2");
+    expect(within(panel).getByTestId("counter-planned-towers").textContent).toBe("1");
+  });
+
   it("renders only bottom-left map tools on the map surface", () => {
     render(React.createElement(MapWorkspace, {
       initialMarkers: [],
@@ -5358,7 +5419,8 @@ describe("MapPage", () => {
       "map-legend-control",
       "map-route-planner-control",
       "map-event-feed-control",
-      "map-share-control"
+      "map-share-control",
+      "map-counters-control"
     ]);
   });
 

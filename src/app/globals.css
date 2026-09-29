@@ -1408,7 +1408,8 @@ body {
 .map-route-planner-control,
 .map-legend-control,
 .map-event-feed-control,
-.map-share-control {
+.map-share-control,
+.map-counters-control {
   position: relative;
   display: flex;
   align-items: center;
@@ -1439,7 +1440,8 @@ body {
 
 .map-legend-button,
 .map-event-feed-button,
-.map-share-button {
+.map-share-button,
+.map-counters-button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1465,6 +1467,44 @@ body {
   border-color: rgba(250, 204, 21, 0.88);
   background: rgba(202, 138, 4, 0.3);
   color: #ffffff;
+}
+
+.map-counters-button.is-active {
+  border-color: rgba(52, 211, 153, 0.88);
+  background: rgba(5, 150, 105, 0.3);
+  color: #ffffff;
+}
+
+/* Tally icon: four upright strokes crossed by a diagonal fifth. */
+.map-counters-button-icon {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 16px;
+}
+
+.map-counters-button-icon::before {
+  position: absolute;
+  top: 0;
+  left: 2px;
+  width: 2px;
+  height: 16px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 5px 0 0 currentColor, 10px 0 0 currentColor, 15px 0 0 currentColor;
+  content: "";
+}
+
+.map-counters-button-icon::after {
+  position: absolute;
+  top: 7px;
+  left: -1px;
+  width: 22px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+  transform: rotate(-28deg);
 }
 
 .map-share-button.is-active {
@@ -1694,6 +1734,45 @@ body {
   box-shadow: 0 16px 36px rgba(2, 6, 23, 0.42);
   backdrop-filter: blur(8px);
   font-size: 12px;
+}
+
+.map-counters-panel {
+  position: absolute;
+  left: calc(100% + 8px);
+  bottom: 0;
+  display: grid;
+  gap: 8px;
+  width: 170px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #e5e7eb;
+  box-shadow: 0 16px 36px rgba(2, 6, 23, 0.42);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+}
+
+.map-counters-panel strong {
+  font-size: 13px;
+}
+
+.map-counters-panel dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.map-counters-panel dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-counters-panel dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .map-legend-panel strong {
@@ -2022,6 +2101,7 @@ body {
 .map-route-planner-button:focus-visible,
 .map-legend-button:focus-visible,
 .map-event-feed-button:focus-visible,
+.map-counters-button:focus-visible,
 .map-settings-tool-row input:focus-visible,
 .map-settings-tool-select:focus-visible,
 .map-account-close:focus-visible,
@@ -3639,6 +3719,13 @@ body {
     width: min(190px, calc(100vw - 74px));
     max-height: min(60vh, calc(100vh - 96px));
     overflow-y: auto;
+  }
+
+  .map-counters-panel {
+    position: fixed;
+    left: 62px;
+    bottom: max(22px, env(safe-area-inset-bottom));
+    width: min(170px, calc(100vw - 74px));
   }
 
   .map-share-panel {

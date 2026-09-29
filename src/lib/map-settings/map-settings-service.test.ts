@@ -21,6 +21,14 @@ const readableActor = {
   ]
 } as const;
 
+const multiMapActor = {
+  ...readableActor,
+  mapPermissions: [
+    { accessLevel: "READ", isOperator: false, mapId: "map-1" },
+    { accessLevel: "READ", isOperator: false, mapId: "map-2" }
+  ]
+} as const;
+
 const blockedActor = {
   ...readableActor,
   accessLevel: "NONE",
@@ -158,10 +166,10 @@ type StoredProfile = {
 function createProfileDependencies(): SettingsProfilesDependencies & {
   profiles: Map<string, StoredProfile>;
 } {
-  const maps = new Set(["map-1"]);
+  const maps = new Set(["map-1", "map-2"]);
   const settings = new Map<string, unknown>();
   const profiles = new Map<string, StoredProfile>();
-  const profileKey = (userId: string, mapId: string, slot: number) => `${userId}:${mapId}:${slot}`;
+  const profileKey = (userId: string, slot: number) => `${userId}:${slot}`;
 
   return {
     findMap: async (mapId) => maps.has(mapId) ? { id: mapId } : null,
@@ -175,12 +183,12 @@ function createProfileDependencies(): SettingsProfilesDependencies & {
         settings: nextSettings
       };
     },
-    findProfile: async (userId, mapId, slot) => profiles.get(profileKey(userId, mapId, slot)) ?? null,
-    listProfiles: async (userId, mapId) => [...profiles.entries()]
-      .filter(([key]) => key.startsWith(`${userId}:${mapId}:`))
+    findProfile: async (userId, slot) => profiles.get(profileKey(userId, slot)) ?? null,
+    listProfiles: async (userId) => [...profiles.entries()]
+      .filter(([key]) => key.startsWith(`${userId}:`))
       .map(([, profile]) => profile),
-    renameProfile: async ({ mapId, name, slot, userId }) => {
-      const existing = profiles.get(profileKey(userId, mapId, slot));
+    renameProfile: async ({ name, slot, userId }) => {
+      const existing = profiles.get(profileKey(userId, slot));
 
       if (existing === undefined) {
         return null;
@@ -191,17 +199,17 @@ function createProfileDependencies(): SettingsProfilesDependencies & {
         name,
         updatedAt: new Date()
       };
-      profiles.set(profileKey(userId, mapId, slot), renamed);
+      profiles.set(profileKey(userId, slot), renamed);
       return renamed;
     },
-    upsertProfile: async ({ mapId, name, settings: profileSettings, slot, userId }) => {
+    upsertProfile: async ({ name, settings: profileSettings, slot, userId }) => {
       const saved: StoredProfile = {
         name,
         settings: profileSettings,
         slot,
         updatedAt: new Date()
       };
-      profiles.set(profileKey(userId, mapId, slot), saved);
+      profiles.set(profileKey(userId, slot), saved);
       return saved;
     },
     profiles
@@ -368,7 +376,7 @@ describe("settings profiles service", () => {
   });
 
   it("normalizes stored profile settings on load", async () => {
-    dependencies.profiles.set("user-1:map-1:2", {
+    dependencies.profiles.set("user-1:2", {
       name: "Messy",
       settings: {
         markerOpacities: {
@@ -482,5 +490,78 @@ describe("settings profiles service", () => {
       ok: false,
       error: "Read access is required"
     });
+  });
+  it("shares profiles across every map the actor can read", async () => {
+    await saveUserMapSettings({
+      actor: multiMapActor,
+      input: {
+        markerColors: {
+          towers: "#123456"
+        }
+      },
+      mapId: "map-1"
+    }, dependencies);
+    await saveSettingsProfile({
+      actor: multiMapActor,
+      mapId: "map-1",
+      name: "Everywhere",
+      slot: 0
+    }, dependencies);
+
+    await expect(listSettingsProfiles({
+      actor: multiMapActor,
+      mapId: "map-2"
+    }, dependencies)).resolves.toMatchObject({
+      ok: true,
+      value: [{ name: "Everywhere", slot: 0 }]
+    });
+    await expect(loadSettingsProfile({
+      actor: multiMapActor,
+      mapId: "map-2",
+      slot: 0
+    }, dependencies)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        settings: {
+          markerColors: {
+            towers: "#123456"
+          }
+        }
+      }
+    });
+  });
+
+  it("does not capture map-specific annotations in profiles", async () => {
+    await saveUserMapSettings({
+      actor: readableActor,
+      input: {
+        annotations: [{
+          id: "annotation-1",
+          text: "Here",
+          title: "Spot",
+          type: "annotation",
+          x: 10,
+          y: 20
+        }]
+      },
+      mapId: "map-1"
+    }, dependencies);
+    await saveSettingsProfile({
+      actor: readableActor,
+      mapId: "map-1",
+      slot: 0
+    }, dependencies);
+
+    const loaded = await loadSettingsProfile({
+      actor: readableActor,
+      mapId: "map-1",
+      slot: 0
+    }, dependencies);
+
+    expect(loaded.ok).toBe(true);
+
+    if (loaded.ok) {
+      expect(loaded.value.settings.annotations).toEqual([]);
+    }
   });
 });
