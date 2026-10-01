@@ -3598,16 +3598,17 @@ function WildernessOverlay({
       }
 
       const DEED_EXCLUSION_DISTANCE_TILES = 30;
+      const MAP_EDGE_INSET_TILES = 510;
 
       ctx.fillStyle = color;
       ctx.fillRect(0, 0, canvasWidth, canvasHeight);
       ctx.globalCompositeOperation = "destination-out";
 
-      // Uniques only spawn inside the center square of the 3x3 mission grid.
-      const innerLeft = Math.round(canvasWidth / 3);
-      const innerTop = Math.round(canvasHeight / 3);
-      const innerRight = Math.round((canvasWidth * 2) / 3);
-      const innerBottom = Math.round((canvasHeight * 2) / 3);
+      // Uniques cannot spawn within 510 tiles of the map edge.
+      const innerLeft = MAP_EDGE_INSET_TILES;
+      const innerTop = MAP_EDGE_INSET_TILES;
+      const innerRight = canvasWidth - MAP_EDGE_INSET_TILES;
+      const innerBottom = canvasHeight - MAP_EDGE_INSET_TILES;
 
       ctx.fillRect(0, 0, canvasWidth, innerTop);
       ctx.fillRect(0, innerBottom, canvasWidth, canvasHeight - innerBottom);
