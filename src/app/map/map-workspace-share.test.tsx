@@ -82,15 +82,15 @@ describe("MapWorkspace share mode", () => {
     expect(tooltip.textContent).toContain("will not be able to change any settings");
   });
 
-  it("clamps the expiry input to whole hours between 1 and 24", () => {
+  it("clamps the expiry input to whole hours between 1 and 168", () => {
     renderWorkspace()
 
     fireEvent.click(screen.getByRole("button", { name: "Share map" }));
 
     const input = screen.getByLabelText("Expires in hours");
 
-    fireEvent.change(input, { target: { value: "48" } });
-    expect(input).toHaveProperty("value", "24");
+    fireEvent.change(input, { target: { value: "200" } });
+    expect(input).toHaveProperty("value", "168");
 
     fireEvent.change(input, { target: { value: "0" } });
     expect(input).toHaveProperty("value", "1");
@@ -98,9 +98,9 @@ describe("MapWorkspace share mode", () => {
     fireEvent.change(input, { target: { value: "2.7" } });
     expect(input).toHaveProperty("value", "3");
 
-    fireEvent.change(input, { target: { value: "48" } });
+    fireEvent.change(input, { target: { value: "200" } });
     fireEvent.blur(input);
-    expect(input).toHaveProperty("value", "24");
+    expect(input).toHaveProperty("value", "168");
 
     fireEvent.change(input, { target: { value: "0" } });
     fireEvent.blur(input);

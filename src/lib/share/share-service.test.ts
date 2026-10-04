@@ -145,7 +145,8 @@ describe("createShareLink", () => {
     { expiresInHours: 0, valid: false },
     { expiresInHours: 1, valid: true },
     { expiresInHours: 24, valid: true },
-    { expiresInHours: 25, valid: false },
+    { expiresInHours: 168, valid: true },
+    { expiresInHours: 169, valid: false },
     { expiresInHours: 1.5, valid: false },
     { expiresInHours: Number.NaN, valid: false }
   ])("validates expiresInHours=$expiresInHours", async ({ expiresInHours, valid }) => {

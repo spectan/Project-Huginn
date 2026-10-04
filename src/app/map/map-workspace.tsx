@@ -120,7 +120,7 @@ const SECTOR_GRID_TOP_OFFSET_PX = 18;
 const EVENT_FEED_DISPLAY_LIMIT = 30;
 const MAP_TIP_INTERVAL_MS = 15000;
 const SHARE_LINK_MIN_HOURS = 1;
-const SHARE_LINK_MAX_HOURS = 24;
+const SHARE_LINK_MAX_HOURS = 168;
 const SHARE_LINK_DEFAULT_HOURS = 24;
 const UNIQUE_RESPAWN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const UNIQUE_ALERT_DISMISSED_STORAGE_KEY = "huginn:unique-alert-dismissed";
@@ -3007,7 +3007,7 @@ function ShareControl({
               />
               hours
             </span>
-            <small className="map-share-expiry-hint">max 24</small>
+            <small className="map-share-expiry-hint">max 168</small>
           </label>
           <button
             className="map-share-generate"

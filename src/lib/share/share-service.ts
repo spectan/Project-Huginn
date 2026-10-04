@@ -10,12 +10,12 @@ import {
 import { generateShareToken, hashShareToken } from "./share-tokens";
 
 const MIN_SHARE_LINK_HOURS = 1;
-const MAX_SHARE_LINK_HOURS = 24;
+const MAX_SHARE_LINK_HOURS = 168;
 const MAX_LAYER_ID_LENGTH = 128;
 export const SHARE_LINK_LAYER_INVALID_MESSAGE = "Layer was not found";
 export const SHARE_LINK_INVALID_MESSAGE = "Share link is invalid or has expired";
 export const SHARE_LINK_HOURS_INVALID_MESSAGE =
-  "expiresInHours must be a whole number of hours between 1 and 24";
+  "expiresInHours must be a whole number of hours between 1 and 168";
 
 type Actor = UserAccess & {
   id: string;
