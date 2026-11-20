@@ -85,7 +85,7 @@ describe("POST /api/maps/[mapId]/share", () => {
       mapPermissions: [{ accessLevel: "READ", isOperator: false, mapId: "map-1" }]
     };
 
-    const response = await POST(createShareRequest({ expiresInHours: 48 }), {
+    const response = await POST(createShareRequest({ expiresInHours: 200 }), {
       params: Promise.resolve({ mapId: "map-1" })
     });
 
