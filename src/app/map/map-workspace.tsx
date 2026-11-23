@@ -146,7 +146,7 @@ const MAP_FOOTER_TIPS = [
   "Did you know that accidentally deleted items can be recovered for up to 72 hours? Contact an administrator!",
   "Did you know you can shift-click and drag while in the edit menu of a deed to quick resize it?",
   "Note settings are all user specific. The only thing that is shared are category names.",
-  "You can use the Quick Input field on new towers to paste a log directly from Wurm and have the information auto-fill."
+  "You can use the Quick Input field when creating or editing a tower to paste a log directly from Wurm and have the information auto-fill."
 ] as const;
 const SERVER_CLUSTER_ORDER = [
   "Epic",
@@ -4077,7 +4077,7 @@ function MarkerFields({
   if (markerType === "tower") {
     const tower = marker?.type === "tower" ? marker : null;
 
-    return <TowerMarkerFields isCreate={dialog.mode === "create"} tower={tower} />;
+    return <TowerMarkerFields tower={tower} />;
   }
 
   if (markerType === "annotation") {
@@ -4249,10 +4249,8 @@ const TOWER_TEXT_FIELDS = [
 ] as const;
 
 function TowerMarkerFields({
-  isCreate,
   tower
 }: {
-  isCreate: boolean;
   tower: Extract<WorkspaceMarker, { type: "tower" }> | null;
 }) {
   const [quickInput, setQuickInput] = useState("");
@@ -4276,16 +4274,14 @@ function TowerMarkerFields({
 
   return (
     <>
-      {isCreate ? (
-        <label>
-          <span>Quick Input</span>
-          <textarea
-            name="towerQuickInput"
-            value={quickInput}
-            onChange={(event) => handleQuickInputChange(event.currentTarget.value)}
-          />
-        </label>
-      ) : null}
+      <label>
+        <span>Quick Input</span>
+        <textarea
+          name="towerQuickInput"
+          value={quickInput}
+          onChange={(event) => handleQuickInputChange(event.currentTarget.value)}
+        />
+      </label>
       {TOWER_TEXT_FIELDS.map(({ label, name }) => (
         <label key={name}>
           <span>{label}</span>

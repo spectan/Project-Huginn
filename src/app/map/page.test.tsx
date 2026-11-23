@@ -181,7 +181,7 @@ describe("MapPage", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /Tip:/ }));
 
-      expect(screen.getByText("Tip: You can use the Quick Input field on new towers to paste a log directly from Wurm and have the information auto-fill.")).toBeTruthy();
+      expect(screen.getByText("Tip: You can use the Quick Input field when creating or editing a tower to paste a log directly from Wurm and have the information auto-fill.")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -2249,7 +2249,7 @@ describe("MapPage", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit Tower Mako 945" }));
 
     const plannedCheckbox = screen.getByRole("checkbox", { name: "Planned" });
-    expect(screen.queryByLabelText("Quick Input")).toBeNull();
+    expect(screen.getByLabelText("Quick Input")).toHaveProperty("value", "");
     expect(plannedCheckbox).toHaveProperty("checked", false);
     expect(screen.getByLabelText("Tower type")).toHaveProperty("value", "Mol-Rehan");
     fireEvent.click(plannedCheckbox);
